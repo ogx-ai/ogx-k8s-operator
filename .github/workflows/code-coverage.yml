@@ -18,7 +18,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Set up limgo
-        uses: GoTestTools/limgo-action@d4a725a46ab3bdbbf23186bbbe54b4ff4a35d5a7 # v1.0.2
+        uses: GoTestTools/limgo-action@36fa41fcb568acfcb1552604fad3f13495ea2fc1 # v1.1.0
         with:
           version: "v1.0.0"
           install-only: true
