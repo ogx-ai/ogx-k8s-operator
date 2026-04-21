@@ -3206,6 +3206,8 @@ spec:
         command:
         - /manager
         env:
+        - name: GOMEMLIMIT
+          value: 800MiB
         - name: OPERATOR_VERSION
           value: latest
         image: quay.io/llamastack/llama-stack-k8s-operator:latest

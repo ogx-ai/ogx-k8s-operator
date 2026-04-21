@@ -18,7 +18,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Set up limgo
-        uses: GoTestTools/limgo-action@d4a725a46ab3bdbbf23186bbbe54b4ff4a35d5a7 # v1.0.2
+        uses: GoTestTools/limgo-action@36fa41fcb568acfcb1552604fad3f13495ea2fc1 # v1.1.0
         with:
           version: "v1.0.0"
           install-only: true
@@ -33,7 +33,7 @@ jobs:
           cat /tmp/covcheck.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test coverage results
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ always() }}
         with:
           name: test-coverage-results

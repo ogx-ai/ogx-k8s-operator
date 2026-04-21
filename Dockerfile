@@ -13,6 +13,7 @@ ARG TARGETPLATFORM
 # For native builds: CGO_ENABLED=1 with full FIPS OpenSSL support
 # For cross-builds: CGO_ENABLED=0 with pure Go FIPS (strictfipsruntime)
 ENV GOEXPERIMENT=strictfipsruntime
+ENV GOTOOLCHAIN=auto
 
 WORKDIR /workspace
 # Copy the Go Modules manifests

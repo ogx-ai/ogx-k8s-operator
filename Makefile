@@ -141,7 +141,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests. Use TEST_PKGS and TEST_FLAGS to customize.
-	GOTOOLCHAIN=go1.25.5+auto KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(TEST_PKGS) $(TEST_FLAGS)
+	GOTOOLCHAIN=go1.25.8+auto KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(TEST_PKGS) $(TEST_FLAGS)
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e tests

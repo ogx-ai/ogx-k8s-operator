@@ -94,6 +94,10 @@ spec:
 ```
 3. Verify the server pod is running in the user defined namespace.
 
+### Local Vector Storage (inline::milvus)
+
+To enable the `inline::milvus` local vector storage provider, set `ENABLE_INLINE_MILVUS` in `spec.server.containerSpec.env`. This is only supported in single-worker, single-replica deployments. Milvus-Lite uses SQLite internally and does not support concurrent access from multiple processes.
+
 ### Using a ConfigMap for config.yaml configuration
 
 A ConfigMap can be used to store config.yaml configuration for each LlamaStackDistribution.

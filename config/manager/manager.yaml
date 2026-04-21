@@ -52,6 +52,8 @@ spec:
         args:
         - --leader-elect
         env:
+        - name: GOMEMLIMIT
+          value: "800MiB"
         - name: OPERATOR_VERSION
           value: "latest"
         image: controller:latest

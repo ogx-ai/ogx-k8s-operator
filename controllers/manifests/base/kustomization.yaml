@@ -16,3 +16,4 @@ labels:
   pairs:
     app.kubernetes.io/managed-by: llama-stack-operator
     app.kubernetes.io/part-of: llama-stack
+    llamastack.io/watch: "true"

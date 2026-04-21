@@ -23,7 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // testenvNamespaceCounter is used to generate unique namespace names for test isolation.
@@ -653,6 +655,8 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		require.Equal(t, "llama-stack-operator", managedConfigMap.Labels["app.kubernetes.io/managed-by"])
 		require.Equal(t, instance.Name, managedConfigMap.Labels["app.kubernetes.io/instance"])
 		require.Equal(t, "ca-bundle", managedConfigMap.Labels["app.kubernetes.io/component"])
+		require.Equal(t, controllers.WatchLabelValue, managedConfigMap.Labels[controllers.WatchLabelKey],
+			"managed CA bundle ConfigMap should have the watch label")
 	})
 
 	t.Run("updates managed ConfigMap when source changes", func(t *testing.T) {
@@ -889,6 +893,7 @@ func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
 		k8sClient,
 		scheme.Scheme,
 		clusterInfo,
+		k8sClient,
 	)
 
 	// Assertions
@@ -940,6 +945,7 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		k8sClient,
 		scheme.Scheme,
 		clusterInfo,
+		k8sClient,
 	)
 	require.NoError(t, err)
 
@@ -956,21 +962,21 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	require.Equal(t, "default-starter-image", initialImage,
 		"Initial deployment should use distribution image")
 
+	// Re-fetch the ConfigMap to get the latest resource version (initializeOperatorConfigMap
+	// may have updated it to add the watch label).
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+		Name:      configMap.Name,
+		Namespace: configMap.Namespace,
+	}, configMap))
+
 	// Update ConfigMap with new overrides
 	configMap.Data["image-overrides"] = "starter: quay.io/custom/llama-stack:starter"
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
-	// Simulate ConfigMap update by recreating reconciler (in real scenario this would be triggered by watch)
-	updatedReconciler, err := controllers.NewLlamaStackDistributionReconciler(
-		t.Context(),
-		k8sClient,
-		scheme.Scheme,
-		clusterInfo,
-	)
-	require.NoError(t, err)
-
-	// Reconcile with updated overrides
-	_, err = updatedReconciler.Reconcile(t.Context(), ctrl.Request{
+	// Reconcile with the same reconciler instance. refreshOperatorConfig (called
+	// at the start of Reconcile) reads the updated ConfigMap via the direct API
+	// client, so the new image override is picked up without recreating the reconciler.
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
 	require.NoError(t, err)
@@ -981,4 +987,266 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		deployment, func() bool {
 			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/llama-stack:starter"
 		}, "Deployment should be updated with new image")
+}
+
+func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-refresh-config")
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	instance := NewDistributionBuilder().
+		WithName("test-refresh-config").
+		WithNamespace(namespace.Name).
+		WithDistribution("starter").
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": "default-starter-image"},
+	}
+
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+		k8sClient,
+	)
+	require.NoError(t, err)
+
+	// Initial reconcile creates resources.
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// Verify network policy is NOT created (feature disabled).
+	networkPolicy := &networkingv1.NetworkPolicy{}
+	npName := instance.Name + "-network-policy"
+	err = k8sClient.Get(t.Context(), types.NamespacedName{Name: npName, Namespace: instance.Namespace}, networkPolicy)
+	require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist when feature is disabled")
+
+	// Re-fetch the ConfigMap to get the latest resource version (initializeOperatorConfigMap
+	// may have updated it to add the watch label).
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+		Name:      configMap.Name,
+		Namespace: configMap.Namespace,
+	}, configMap))
+
+	// Enable network policy via operator config update.
+	configMap.Data["featureFlags"] = `enableNetworkPolicy:
+    enabled: true`
+	require.NoError(t, k8sClient.Update(t.Context(), configMap))
+
+	// Reconcile again -- refreshOperatorConfig picks up the new flag.
+	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// Verify network policy IS created now.
+	waitForResource(t, k8sClient, instance.Namespace, npName, networkPolicy)
+}
+
+func TestReconcileRequeuesAfterSuccess(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-requeue")
+	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "llama-stack-operator-config",
+			Namespace: operatorNamespace.Name,
+		},
+		Data: map[string]string{
+			"featureFlags": `enableNetworkPolicy:
+    enabled: false`,
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), configMap))
+
+	instance := NewDistributionBuilder().
+		WithName("test-requeue").
+		WithNamespace(namespace.Name).
+		WithDistribution("starter").
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	clusterInfo := &cluster.ClusterInfo{
+		OperatorNamespace:  operatorNamespace.Name,
+		DistributionImages: map[string]string{"starter": "default-starter-image"},
+	}
+
+	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+		t.Context(),
+		k8sClient,
+		scheme.Scheme,
+		clusterInfo,
+		k8sClient,
+	)
+	require.NoError(t, err)
+
+	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
+	})
+	require.NoError(t, err)
+
+	// In test envs, deployment never becomes ready (no kubelet), so the instance
+	// stays in Initializing phase which requeues after 10s. Verify that a
+	// successful reconciliation always schedules a requeue (not zero).
+	// In test env the deployment stays in Initializing phase (10s requeue).
+	// The Ready path returns 5m. Either way, requeue must be scheduled.
+	require.Positive(t, result.RequeueAfter,
+		"Successful reconciliation should always schedule a requeue")
+	require.Equal(t, 10*time.Second, result.RequeueAfter,
+		"Initializing phase should requeue after 10 seconds")
+}
+
+func TestMapConfigMapToReconcileRequests(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-cm-mapping")
+
+	// Create a user ConfigMap with the watch label.
+	userConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "user-config",
+			Namespace: namespace.Name,
+			Labels: map[string]string{
+				controllers.WatchLabelKey: controllers.WatchLabelValue,
+			},
+		},
+		Data: map[string]string{
+			"config.yaml": "version: '2'\nimage_name: ollama",
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), userConfigMap))
+
+	// Create an instance that references this ConfigMap.
+	instance := NewDistributionBuilder().
+		WithName("test-cm-mapping").
+		WithNamespace(namespace.Name).
+		WithUserConfig(userConfigMap.Name).
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+	reconciler := createTestReconciler()
+
+	// Act: call the handler with the user ConfigMap.
+	requests := reconciler.MapConfigMapToReconcileRequests(t.Context(), userConfigMap)
+
+	// Assert: should return a request for the referencing instance.
+	require.Len(t, requests, 1, "should map to exactly one CR")
+	require.Equal(t, reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+	}, requests[0])
+}
+
+func TestMapConfigMapToReconcileRequests_SkipsManagedConfigMaps(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	namespace := createTestNamespace(t, "test-cm-skip-managed")
+
+	// Create an operator-managed ConfigMap.
+	managedConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "managed-cm",
+			Namespace: namespace.Name,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				controllers.WatchLabelKey:      controllers.WatchLabelValue,
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(t.Context(), managedConfigMap))
+
+	reconciler := createTestReconciler()
+
+	// Act: call the handler with the managed ConfigMap.
+	requests := reconciler.MapConfigMapToReconcileRequests(t.Context(), managedConfigMap)
+
+	// Assert: should return no requests (managed CMs are handled by Owns).
+	require.Empty(t, requests, "managed ConfigMaps should be skipped")
+}
+
+func TestUserConfigMapPredicate(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	reconciler := createTestReconciler()
+	pred := reconciler.UserConfigMapPredicate()
+
+	tests := []struct {
+		name     string
+		labels   map[string]string
+		expected bool
+	}{
+		{
+			name: "watch-labeled user ConfigMap is accepted",
+			labels: map[string]string{
+				controllers.WatchLabelKey: controllers.WatchLabelValue,
+			},
+			expected: true,
+		},
+		{
+			name: "operator-managed ConfigMap is rejected even with watch label",
+			labels: map[string]string{
+				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				controllers.WatchLabelKey:      controllers.WatchLabelValue,
+			},
+			expected: false,
+		},
+		{
+			name:     "unlabeled ConfigMap is rejected",
+			labels:   nil,
+			expected: false,
+		},
+		{
+			name: "ConfigMap without watch label is rejected",
+			labels: map[string]string{
+				"some-other-label": "value",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "test-cm",
+					Labels: tt.labels,
+				},
+			}
+
+			result := pred.Create(event.CreateEvent{Object: cm})
+			require.Equal(t, tt.expected, result, "Create predicate")
+
+			result = pred.Update(event.UpdateEvent{ObjectNew: cm, ObjectOld: cm})
+			require.Equal(t, tt.expected, result, "Update predicate")
+
+			result = pred.Delete(event.DeleteEvent{Object: cm})
+			require.Equal(t, tt.expected, result, "Delete predicate")
+		})
+	}
 }
