@@ -1541,17 +1541,7 @@ func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorN
 
 	err := c.Get(ctx, configMapName, configMap)
 	if err == nil {
-		// Ensure the watch label exists (upgrade path)
-		if configMap.Labels == nil || configMap.Labels[WatchLabelKey] != WatchLabelValue {
-			if configMap.Labels == nil {
-				configMap.Labels = make(map[string]string)
-			}
-			configMap.Labels[WatchLabelKey] = WatchLabelValue
-			if updateErr := c.Update(ctx, configMap); updateErr != nil {
-				return nil, fmt.Errorf("failed to add watch label to operator config ConfigMap: %w", updateErr)
-			}
-		}
-		return configMap, nil
+		return upgradeOperatorConfigMap(ctx, c, configMap, configMapName)
 	}
 
 	if !k8serrors.IsNotFound(err) {
@@ -1569,6 +1559,110 @@ func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorN
 	}
 
 	return configMap, nil
+}
+
+// upgradeOperatorConfigMap ensures an existing operator ConfigMap has the watch
+// label and all known feature flags. When ResetOnUpgrade is true (midstream)
+// all flags are reset to defaults on version change; otherwise only missing
+// flags are filled in.
+func upgradeOperatorConfigMap(ctx context.Context, c client.Client, configMap *corev1.ConfigMap, configMapName types.NamespacedName) (*corev1.ConfigMap, error) {
+	needsUpdate := false
+	patch := client.MergeFrom(configMap.DeepCopy())
+
+	// Ensure the watch label exists (upgrade path)
+	if configMap.Labels == nil {
+		configMap.Labels = make(map[string]string)
+	}
+	if configMap.Labels[WatchLabelKey] != WatchLabelValue {
+		configMap.Labels[WatchLabelKey] = WatchLabelValue
+		needsUpdate = true
+	}
+
+	if configMap.Data == nil {
+		configMap.Data = make(map[string]string)
+	}
+
+	// Reset all flags to defaults on version change for midstream.
+	if featureflags.ResetOnUpgrade && needsConfigMapUpdate(ctx, c) {
+		newConfigMap, genErr := createDefaultConfigMap(configMapName)
+		if genErr != nil {
+			return nil, fmt.Errorf("failed to generate default configMap: %w", genErr)
+		}
+		configMap.Data[featureflags.FeatureFlagsKey] = newConfigMap.Data[featureflags.FeatureFlagsKey]
+		needsUpdate = true
+	}
+
+	// Always ensure missing flags have defaults (e.g., new flags in upgrades).
+	if updatedFlags, changed := ensureDefaultFeatureFlags(configMap.Data); changed {
+		configMap.Data[featureflags.FeatureFlagsKey] = updatedFlags
+		needsUpdate = true
+	}
+
+	if needsUpdate {
+		if patchErr := c.Patch(ctx, configMap, patch); patchErr != nil {
+			return nil, fmt.Errorf("failed to patch ConfigMap: %w", patchErr)
+		}
+	}
+
+	return configMap, nil
+}
+
+// needsConfigMapUpdate checks if the ConfigMap needs to be updated with new defaults.
+func needsConfigMapUpdate(ctx context.Context, c client.Client) bool {
+	list := &llamav1alpha1.LlamaStackDistributionList{}
+	if err := c.List(ctx, list); err != nil {
+		return false
+	}
+
+	currentVersion := os.Getenv("OPERATOR_VERSION")
+	hasCRWithVersion := false
+
+	for _, cr := range list.Items {
+		if cr.Status.Version.OperatorVersion != "" {
+			hasCRWithVersion = true
+			if cr.Status.Version.OperatorVersion != currentVersion {
+				return true
+			}
+		}
+	}
+
+	return !hasCRWithVersion
+}
+
+// ensureDefaultFeatureFlags parses existing feature flags and adds any missing
+// flags with their default values while preserving user-set values. Returns the
+// updated YAML string and whether any changes were made.
+func ensureDefaultFeatureFlags(configMapData map[string]string) (string, bool) {
+	existing := make(map[string]interface{})
+	if yamlStr, ok := configMapData[featureflags.FeatureFlagsKey]; ok && yamlStr != "" {
+		if err := yaml.Unmarshal([]byte(yamlStr), &existing); err != nil {
+			// Corrupt YAML — replace with defaults
+			defaults := featureflags.FeatureFlags{
+				EnableNetworkPolicy: featureflags.FeatureFlag{Enabled: featureflags.NetworkPolicyDefaultValue},
+			}
+			out, _ := yaml.Marshal(defaults)
+			return string(out), true
+		}
+	}
+
+	changed := false
+
+	if _, ok := existing[featureflags.EnableNetworkPolicyKey]; !ok {
+		existing[featureflags.EnableNetworkPolicyKey] = map[string]interface{}{
+			"enabled": featureflags.NetworkPolicyDefaultValue,
+		}
+		changed = true
+	}
+
+	if !changed {
+		return configMapData[featureflags.FeatureFlagsKey], false
+	}
+
+	out, err := yaml.Marshal(existing)
+	if err != nil {
+		return configMapData[featureflags.FeatureFlagsKey], false
+	}
+	return string(out), true
 }
 
 func ParseImageMappingOverrides(ctx context.Context, configMapData map[string]string) map[string]string {

@@ -12,6 +12,7 @@ import (
 	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
 	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
 	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	"github.com/llamastack/llama-stack-k8s-operator/pkg/featureflags"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -902,7 +903,10 @@ func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
 	require.Len(t, reconciler.ImageMappingOverrides, 1, "Should have one image override")
 	require.Equal(t, "quay.io/custom/llama-stack:starter",
 		reconciler.ImageMappingOverrides["starter"], "Override should match expected value")
-	require.False(t, reconciler.EnableNetworkPolicy, "Network policy should be disabled")
+	// initializeOperatorConfigMap preserves existing feature flag values and
+	// only fills in missing flags with defaults.
+	require.Equal(t, featureflags.NetworkPolicyDefaultValue, reconciler.EnableNetworkPolicy,
+		"Network policy should match the existing value in the ConfigMap")
 }
 
 func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
@@ -996,14 +1000,20 @@ func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
 	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
 
+	// Derive initial and toggled values from the compiled default so the test
+	// works regardless of the default (true in ODH/RHOAI, false upstream).
+	defaultEnabled := featureflags.NetworkPolicyDefaultValue
+	toggledEnabled := !defaultEnabled
+
+	// initializeOperatorConfigMap preserves existing feature flag values,
+	// so seed the ConfigMap with the default value for a clean baseline.
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "llama-stack-operator-config",
 			Namespace: operatorNamespace.Name,
 		},
 		Data: map[string]string{
-			"featureFlags": `enableNetworkPolicy:
-    enabled: false`,
+			"featureFlags": fmt.Sprintf("enableNetworkPolicy:\n    enabled: %t", defaultEnabled),
 		},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
@@ -1029,17 +1039,21 @@ func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Initial reconcile creates resources.
+	// Initial reconcile creates resources with default feature flags.
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
 	require.NoError(t, err)
 
-	// Verify network policy is NOT created (feature disabled).
+	// Verify initial NetworkPolicy state matches the default.
 	networkPolicy := &networkingv1.NetworkPolicy{}
 	npName := instance.Name + "-network-policy"
-	err = k8sClient.Get(t.Context(), types.NamespacedName{Name: npName, Namespace: instance.Namespace}, networkPolicy)
-	require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist when feature is disabled")
+	if defaultEnabled {
+		waitForResource(t, k8sClient, instance.Namespace, npName, networkPolicy)
+	} else {
+		err = k8sClient.Get(t.Context(), types.NamespacedName{Name: npName, Namespace: instance.Namespace}, networkPolicy)
+		require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist when feature is disabled by default")
+	}
 
 	// Re-fetch the ConfigMap to get the latest resource version (initializeOperatorConfigMap
 	// may have updated it to add the watch label).
@@ -1048,9 +1062,8 @@ func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
 		Namespace: configMap.Namespace,
 	}, configMap))
 
-	// Enable network policy via operator config update.
-	configMap.Data["featureFlags"] = `enableNetworkPolicy:
-    enabled: true`
+	// Toggle the network policy flag to the opposite value.
+	configMap.Data["featureFlags"] = fmt.Sprintf("enableNetworkPolicy:\n    enabled: %t", toggledEnabled)
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
 	// Reconcile again -- refreshOperatorConfig picks up the new flag.
@@ -1059,8 +1072,13 @@ func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify network policy IS created now.
-	waitForResource(t, k8sClient, instance.Namespace, npName, networkPolicy)
+	// Verify NetworkPolicy state reflects the toggled value.
+	if toggledEnabled {
+		waitForResource(t, k8sClient, instance.Namespace, npName, networkPolicy)
+	} else {
+		err = k8sClient.Get(t.Context(), types.NamespacedName{Name: npName, Namespace: instance.Namespace}, networkPolicy)
+		require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist when feature is disabled")
+	}
 }
 
 func TestReconcileRequeuesAfterSuccess(t *testing.T) {

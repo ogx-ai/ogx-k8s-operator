@@ -18,4 +18,7 @@ const (
 	EnableNetworkPolicyKey = "enableNetworkPolicy"
 	// NetworkPolicyDefaultValue is the default value for the network policy feature flag.
 	NetworkPolicyDefaultValue = false
+	// ResetOnUpgrade controls whether feature flags are reset to defaults on
+	// operator version change.
+	ResetOnUpgrade = false
 )
