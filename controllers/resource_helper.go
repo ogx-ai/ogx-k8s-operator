@@ -302,6 +302,7 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 
 	// Finally, add the user provided env vars
 	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
+	container.EnvFrom = append(container.EnvFrom, instance.Spec.Server.ContainerSpec.EnvFrom...)
 }
 
 // configureContainerMounts sets up volume mounts for the container.

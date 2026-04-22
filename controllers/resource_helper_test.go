@@ -93,6 +93,13 @@ func TestBuildContainerSpec(t *testing.T) {
 							Env: []corev1.EnvVar{
 								{Name: "TEST_ENV", Value: "test-value"},
 							},
+							EnvFrom: []corev1.EnvFromSource{
+								{SecretRef: &corev1.SecretEnvSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "TEST-SECRET",
+									},
+								}},
+							},
 						},
 						Storage: &llamav1alpha1.StorageSpec{
 							MountPath: "/custom/path",
@@ -122,6 +129,13 @@ func TestBuildContainerSpec(t *testing.T) {
 					{Name: "LLS_PORT", Value: "9000"},
 					{Name: "LLAMA_STACK_CONFIG", Value: "/etc/llama-stack/config.yaml"},
 					{Name: "TEST_ENV", Value: "test-value"},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{SecretRef: &corev1.SecretEnvSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: "TEST-SECRET",
+						},
+					}},
 				},
 				VolumeMounts: []corev1.VolumeMount{{
 					Name:      "lls-storage",

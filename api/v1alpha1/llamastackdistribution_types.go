@@ -187,6 +187,7 @@ type ContainerSpec struct {
 	Port      int32                       `json:"port,omitempty"` // Defaults to 8321 if unset
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 	Env       []corev1.EnvVar             `json:"env,omitempty"` // Runtime env vars (e.g., INFERENCE_MODEL)
+	EnvFrom   []corev1.EnvFromSource      `json:"envFrom,omitempty"` // Mounted runtime env vars
 	Command   []string                    `json:"command,omitempty"`
 	Args      []string                    `json:"args,omitempty"`
 }
