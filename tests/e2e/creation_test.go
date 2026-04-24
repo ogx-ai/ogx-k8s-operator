@@ -34,6 +34,9 @@ func runCreationTestsForDistribution(t *testing.T, distType string) *v1alpha1.Ll
 		llsdistributionCR = testCreateDistributionForType(t, distType)
 	})
 
+	// Abort dependent tests if creation failed or returned nil.
+	require.NotNil(t, llsdistributionCR, "creation failed; skipping dependent creation tests")
+
 	t.Run("should create PVC if storage is configured", func(t *testing.T) {
 		testPVCConfiguration(t, llsdistributionCR)
 	})
@@ -95,11 +98,11 @@ func testCreateDistributionForType(t *testing.T, distType string) *v1alpha1.Llam
 		Version: "v1",
 		Kind:    "Deployment",
 	}, llsdistributionCR.Name, ns.Name, ResourceReadyTimeout, isDeploymentReady)
-	require.NoError(t, err)
+	requireNoErrorWithDebugging(t, TestEnv, err, "Deployment should be ready", llsdistributionCR.Namespace, llsdistributionCR.Name)
 
 	// Wait for pods to be running and ready
 	err = WaitForPodsReady(t, TestEnv, ns.Name, llsdistributionCR.Name, ResourceReadyTimeout)
-	require.NoError(t, err, "Pods should be running and ready")
+	requireNoErrorWithDebugging(t, TestEnv, err, "Pods should be running and ready", llsdistributionCR.Namespace, llsdistributionCR.Name)
 
 	// Verify service is created
 	err = EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{

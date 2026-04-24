@@ -17,12 +17,23 @@ spec:
   network:
     exposeRoute: false
     allowedFrom:
-      namespaces:
-        - nsA
-        - nsB
-      labels:
-        - myproject/lls-allowed
-        - team/authorized
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: nsA
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: nsB
+        podSelector:
+          matchLabels:
+            app: frontend
+    allowedTo:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ollama-dist
+        ports:
+          - protocol: TCP
+            port: 11434
 ---
 # Example with exposeRoute enabled and all namespaces allowed
 apiVersion: llamastack.io/v1alpha1
@@ -46,5 +57,4 @@ spec:
     exposeRoute: true
     allowedFrom:
       # Allow access from all namespaces
-      namespaces:
-        - "*"
+      - namespaceSelector: {}

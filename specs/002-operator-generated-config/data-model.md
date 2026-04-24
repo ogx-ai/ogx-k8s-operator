@@ -27,7 +27,7 @@ LlamaStackDistribution (CR)
 │   │   ├── Port                  # int32
 │   │   ├── TLS                   # TLSSpec
 │   │   ├── Expose                # ExposeConfig (enabled + hostname)
-│   │   └── AllowedFrom           # AllowedFromSpec
+│   │   └── AllowedFrom           # []NetworkPolicyPeer
 │   ├── WorkloadSpec              # Deployment settings
 │   │   ├── Replicas              # *int32
 │   │   ├── Workers               # *int32
@@ -196,7 +196,7 @@ LlamaStackDistribution (CR)
 | `port` | int32 | No | 8321 | - | Server listen port |
 | `tls` | *TLSSpec | No | - | - | TLS configuration |
 | `expose` | *ExposeConfig | No | - | Polymorphic (bool or object) | External access configuration |
-| `allowedFrom` | *AllowedFromSpec | No | - | - | Namespace-based access control |
+| `allowedFrom` | *[]NetworkPolicyPeer | No | - | - | Ingress peer access control |
 
 ---
 

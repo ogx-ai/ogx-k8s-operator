@@ -264,12 +264,23 @@ func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *llamav1
 		operatorNS = "llama-stack-k8s-operator-system"
 	}
 
-	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
+	config := plugins.NetworkPolicyTransformerConfig{
 		InstanceName:      ownerInstance.GetName(),
 		ServicePort:       GetServicePort(ownerInstance),
 		OperatorNamespace: operatorNS,
 		NetworkSpec:       ownerInstance.Spec.Network,
-	})
+	}
+
+	if ownerInstance.Spec.Network != nil && ownerInstance.Spec.Network.AllowedTo != nil {
+		kubeAPIServerHost, kubeAPIServerPort, err := GetAPIServerEndpoint()
+		if err != nil {
+			return fmt.Errorf("failed to get API server endpoint: %w", err)
+		}
+		config.APIServerHost = kubeAPIServerHost
+		config.APIServerPort = kubeAPIServerPort
+	}
+
+	npTransformer := plugins.CreateNetworkPolicyTransformer(config)
 
 	return npTransformer.Transform(*resMap)
 }

@@ -391,7 +391,7 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 		"NetworkPolicy is missing a rule to allow traffic from the operator in namespace '%s' on port %d", operatorNamespace, containerPort)
 }
 
-// AssertNetworkPolicyIsIngressOnly verifies that network policy is configured for ingress-only traffic.
+// AssertNetworkPolicyIsIngressOnly verifies that network policy is configured for ingress traffic only.
 func AssertNetworkPolicyIsIngressOnly(t *testing.T, networkPolicy *networkingv1.NetworkPolicy) {
 	t.Helper()
 	expectedPolicyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
