@@ -11,18 +11,6 @@ Package v1alpha1 contains API Schema definitions for the  v1alpha1 API group
 - [LlamaStackDistribution](#llamastackdistribution)
 - [LlamaStackDistributionList](#llamastackdistributionlist)
 
-#### AllowedFromSpec
-
-AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
-
-_Appears in:_
-- [NetworkSpec](#networkspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `namespaces` _string array_ | Namespaces is an explicit list of namespace names allowed to access the service.<br />Use "*" to allow all namespaces. |  |  |
-| `labels` _string array_ | Labels is a list of namespace label keys that are allowed to access the service.<br />A namespace matching any of these labels will be granted access (OR semantics).<br />Example: ["myproject/lls-allowed", "team/authorized"] |  |  |
-
 #### AutoscalingSpec
 
 AutoscalingSpec configures HorizontalPodAutoscaler targets.
@@ -179,7 +167,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `exposeRoute` _boolean_ | ExposeRoute when true, creates an Ingress for external access.<br />Default is false (internal access only). | false |  |
-| `allowedFrom` _[AllowedFromSpec](#allowedfromspec)_ | AllowedFrom defines which namespaces are allowed to access the LlamaStack service.<br />By default, only the LLSD namespace and the operator namespace are allowed. |  |  |
+| `allowedFrom` _[NetworkPolicyPeer](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicypeer-v1-networking)_ | AllowedFrom defines additional ingress peers allowed to access the LlamaStack<br />service, using the native Kubernetes NetworkPolicyPeer type.<br />Default peers (same namespace and operator pod) are always included.<br />When not set (nil) or empty, only default peers are allowed. |  |  |
+| `allowedTo` _[NetworkPolicyEgressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyegressrule-v1-networking)_ | AllowedTo defines egress rules for the LlamaStack pods, using the native<br />Kubernetes NetworkPolicyEgressRule type.<br />When set, egress is restricted to these rules plus DNS and the Kubernetes API server.<br />When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.<br />When not set (nil), egress is unrestricted. |  |  |
 
 #### PodDisruptionBudgetSpec
 

@@ -22,6 +22,7 @@ package v1alpha1
 //nolint:gci
 import (
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,24 +89,20 @@ type NetworkSpec struct {
 	// +kubebuilder:default:=false
 	ExposeRoute bool `json:"exposeRoute,omitempty"`
 
-	// AllowedFrom defines which namespaces are allowed to access the LlamaStack service.
-	// By default, only the LLSD namespace and the operator namespace are allowed.
+	// AllowedFrom defines additional ingress peers allowed to access the LlamaStack
+	// service, using the native Kubernetes NetworkPolicyPeer type.
+	// Default peers (same namespace and operator pod) are always included.
+	// When not set (nil) or empty, only default peers are allowed.
 	// +optional
-	AllowedFrom *AllowedFromSpec `json:"allowedFrom,omitempty"`
-}
+	AllowedFrom *[]networkingv1.NetworkPolicyPeer `json:"allowedFrom,omitempty"`
 
-// AllowedFromSpec defines namespace-based access controls for NetworkPolicies.
-type AllowedFromSpec struct {
-	// Namespaces is an explicit list of namespace names allowed to access the service.
-	// Use "*" to allow all namespaces.
+	// AllowedTo defines egress rules for the LlamaStack pods, using the native
+	// Kubernetes NetworkPolicyEgressRule type.
+	// When set, egress is restricted to these rules plus DNS and the Kubernetes API server.
+	// When explicitly empty (allowedTo: []), egress is restricted to DNS and API server only.
+	// When not set (nil), egress is unrestricted.
 	// +optional
-	Namespaces []string `json:"namespaces,omitempty"`
-
-	// Labels is a list of namespace label keys that are allowed to access the service.
-	// A namespace matching any of these labels will be granted access (OR semantics).
-	// Example: ["myproject/lls-allowed", "team/authorized"]
-	// +optional
-	Labels []string `json:"labels,omitempty"`
+	AllowedTo *[]networkingv1.NetworkPolicyEgressRule `json:"allowedTo,omitempty"`
 }
 
 // ServerSpec defines the desired state of llama server.
