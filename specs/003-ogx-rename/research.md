@@ -95,7 +95,7 @@ These are contracts with the upstream server container image. They are currently
 | Version check | `version('llama_stack')` | `controllers/resource_helper.go` |
 | Config env var | `LLAMA_STACK_CONFIG` | `controllers/resource_helper.go` |
 | Config mount path | `/etc/llama-stack/config.yaml` | `controllers/resource_helper.go` |
-| Default storage mount | `/.llama` | `api/v1alpha1/ogxserver_types.go` |
+| Default storage mount | `/.llama` | `api/v1beta1/ogxserver_types.go` |
 | HuggingFace home | `HF_HOME` → `/.llama` | `controllers/resource_helper.go` |
 
 ## Migration Approach
@@ -147,20 +147,26 @@ These are contracts with the upstream server container image. They are currently
 - **Different-name case**: When the OGXServer CR name differs from the old LLSD name, the adopted resources (`{old-name}-service`, `{old-name}-ingress`) have different names from what the kustomize pipeline creates (`{new-name}-service`, `{new-name}-ingress`). Both sets of resources coexist: adopted resources preserve existing client endpoints, and the kustomize-created resources provide canonical endpoints for the new CR. Removing the `ogx.io/adopt-networking` annotation causes the operator to delete the adopted legacy resources once they are no longer needed.
 - **Origin**: This refinement was requested by @eoinfennessy in PR review feedback.
 
+### D-026: `spec.network` (not `spec.networking`)
+
+- **Decision**: The OGXServer CRD uses the JSON field **`network`** (`spec.network`) for port, TLS, expose, and allowed-from policy. The Go type is named **`NetworkSpec`** (kubebuilder/json: `network`).
+- **Rationale**: Shorter, conventional name; avoids conflating the spec block with the English word “networking” everywhere and with the transitional annotation `ogx.io/adopt-networking` (which remains unchanged).
+- **Note**: Spec 002 and v1alpha2 drafts used `spec.networking`; when folding types into `OGXServer`, rename the field and update any CEL rules that referenced `self.networking` to **`self.network`**.
+
 ## Codebase Rename Inventory
 
 ### Files to Rename
 
 | Old Path | New Path |
 |----------|----------|
-| `api/v1alpha1/llamastackdistribution_types.go` | `api/v1alpha1/ogxserver_types.go` (new file with expanded API from spec 002) |
-| `api/v1alpha2/` (entire directory) | DELETE (folded into `ogx.io/v1alpha1`) |
+| `api/v1alpha1/llamastackdistribution_types.go` | `api/v1beta1/ogxserver_types.go` (new file with expanded API from spec 002); remove `api/v1alpha1/` after cutover |
+| `api/v1alpha2/` (entire directory) | DELETE (folded into `ogx.io/v1beta1`) |
 | `controllers/llamastackdistribution_controller.go` | `controllers/ogxserver_controller.go` |
 | `controllers/llamastackdistribution_controller_test.go` | `controllers/ogxserver_controller_test.go` |
 | `controllers/llamastackdistribution_controller_ca_whitespace_test.go` | `controllers/ogxserver_controller_ca_whitespace_test.go` |
 | `config/crd/bases/llamastack.io_llamastackdistributions.yaml` | `config/crd/bases/ogx.io_ogxservers.yaml` (generated) |
 | `config/crd/patches/cainjection_in_llamastackdistributions.yaml` | `config/crd/patches/cainjection_in_ogxservers.yaml` |
-| `config/samples/_v1alpha1_llamastackdistribution.yaml` | `config/samples/_v1alpha1_ogxserver.yaml` |
+| `config/samples/_v1alpha1_llamastackdistribution.yaml` | `config/samples/_v1beta1_ogxserver.yaml` |
 
 ### Go Identifier Renames (representative, not exhaustive)
 
@@ -181,7 +187,7 @@ These are contracts with the upstream server container image. They are currently
 | `DefaultContainerName` ("llama-stack") | `DefaultContainerName` ("ogx") |
 | `LlamaStackServerVersion` (field) | `ServerVersion` (field) |
 | `llamaStackUpdatePredicate` | `ogxServerUpdatePredicate` |
-| `llamaxk8siov1alpha1` (import alias) | `ogxiov1alpha1` |
+| `llamaxk8siov1alpha1` (import alias) | `ogxiov1beta1` |
 
 ### Constant Value Renames
 

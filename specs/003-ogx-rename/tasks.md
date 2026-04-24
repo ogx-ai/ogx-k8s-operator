@@ -7,7 +7,7 @@
 
 ## Overview
 
-This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1alpha1`) that incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, networking, workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation.
+This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1beta1`) that incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`**, workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation. **`v1beta1`** is required for downstream consumers that only integrate non-alpha API versions.
 
 **NOTE**: Upstream runtime contracts (`llama_stack.core.server.server`, `LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, `/.llama`, etc.) are currently being updated upstream and may change. Preserving or renaming these is out of scope for the initial PRs — handle in a follow-up once upstream stabilizes.
 
@@ -23,16 +23,16 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 1: API Changes (PR 1)
 
-**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1alpha1` with the full expanded spec (distribution, providers, resources, state storage, networking, workload, overrideConfig). Generate CRD YAML and deepcopy. No controller changes yet.
+**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1beta1` with the full expanded spec (distribution, providers, resources, state storage, **`network`**, workload, overrideConfig). Generate CRD YAML and deepcopy. No controller changes yet.
 
 ### Go module and API group
 
 - [ ] T001 Update `go.mod` module path from `github.com/llamastack/llama-stack-k8s-operator` to `github.com/ogx-ai/ogx-k8s-operator`
-- [ ] T002 Create `api/v1alpha1/groupversion_info.go` for the new API group: `+groupName=ogx.io`, `Group: "ogx.io"`, `Version: "v1alpha1"`
+- [ ] T002 Create `api/v1beta1/groupversion_info.go` for the new API group: `+groupName=ogx.io`, `Group: "ogx.io"`, `Version: "v1beta1"`
 
 ### OGXServer types
 
-- [ ] T003 Create `api/v1alpha1/ogxserver_types.go` with the new CRD types incorporating the expanded API surface:
+- [ ] T003 Create `api/v1beta1/ogxserver_types.go` with the new CRD types incorporating the expanded API surface:
   - Constants: `DefaultContainerName = "ogx"`, `DefaultLabelValue = "ogx"`, `DefaultServerPort = 8321`, `DefaultMountPath = "/.llama"`, `OGXServerKind = "OGXServer"`
   - `DistributionSpec` — exactly one of `name` or `image` (CEL: mutual exclusivity)
   - `ProviderConfig` — `id`, `provider`, `endpoint`, `apiKey` (`*SecretKeyRef`), `settings` (`*apiextensionsv1.JSON`)
@@ -45,34 +45,36 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
   - `CABundleConfig` — `configMapName`
   - `TLSSpec` — `enabled`, `secretName`, `caBundle`
   - `AllowedFromSpec` — `namespaces`, `labels`
-  - `NetworkingSpec` — `port`, `tls`, `expose` (`*apiextensionsv1.JSON`), `allowedFrom`
+  - `NetworkSpec` (JSON field **`network`**) — `port`, `tls`, `expose` (`*apiextensionsv1.JSON`), `allowedFrom`
   - `PVCStorageSpec` — `size`, `mountPath`
   - `PodDisruptionBudgetSpec` — `minAvailable`, `maxUnavailable`
   - `AutoscalingSpec` — `minReplicas`, `maxReplicas`, `targetCPUUtilizationPercentage`, `targetMemoryUtilizationPercentage`
   - `WorkloadOverrides` — `serviceAccountName`, `env`, `command`, `args`, `volumes`, `volumeMounts`
   - `WorkloadSpec` — `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
   - `OverrideConfigSpec` — `configMapName`
-  - `OGXServerSpec` — `distribution`, `providers`, `resources`, `storage`, `disabled`, `networking`, `workload`, `externalProviders`, `overrideConfig` (CEL: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`)
+  - `OGXServerSpec` — `distribution`, `providers`, `resources`, `storage`, `disabled`, **`network`**, `workload`, `externalProviders`, `overrideConfig` (CEL: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`)
   - `OGXServerPhase` — `Pending`, `Initializing`, `Ready`, `Failed`, `Terminating`
   - Status types: `ProviderHealthStatus`, `ProviderInfo`, `DistributionConfig`, `VersionInfo` (with `ServerVersion` not `LlamaStackServerVersion`), `ResolvedDistributionStatus`, `ConfigGenerationStatus`, `OGXServerStatus`
   - Root: `OGXServer`, `OGXServerList` with kubebuilder markers (`shortName=ogxs`, printer columns, subresource:status)
   - `init()` registering types with SchemeBuilder
-- [ ] T004 Add adoption annotation constants and helpers to `api/v1alpha1/ogxserver_types.go`:
+- [ ] T004 Add adoption annotation constants and helpers to `api/v1beta1/ogxserver_types.go`:
   - `AdoptStorageAnnotation = "ogx.io/adopt-storage"`
   - `AdoptNetworkingAnnotation = "ogx.io/adopt-networking"`
+  - `AdoptedFromAnnotation = "ogx.io/adopted-from"`
+  - `AdoptedAtAnnotation = "ogx.io/adopted-at"`
   - `func (r *OGXServer) GetAdoptStorageSource() string`
   - `func (r *OGXServer) GetAdoptNetworkingSource() string`
   - `func (r *OGXServer) GetEffectivePVCName() string`
   - `func ValidateAdoptionAnnotation(value string) error` — validate non-empty and RFC 1123 DNS label (per FR-007)
-- [ ] T005 Write unit tests for adoption helpers in `api/v1alpha1/ogxserver_types_test.go`: `GetEffectivePVCName` returns adopted PVC name when annotation present, default name otherwise. Test `ValidateAdoptionAnnotation` with valid names, empty string, invalid characters, and names exceeding 63 characters.
+- [ ] T005 Write unit tests for adoption helpers in `api/v1beta1/ogxserver_types_test.go`: `GetEffectivePVCName` returns adopted PVC name when annotation present, default name otherwise. Test `ValidateAdoptionAnnotation` with valid names, empty string, invalid characters, and names exceeding 63 characters.
 
 ### Generated artifacts
 
 - [ ] T006 Run `make generate` to produce `zz_generated.deepcopy.go` for new types
 - [ ] T007 Run `make manifests` to generate CRD YAML (`config/crd/bases/ogx.io_ogxservers.yaml`) and RBAC (`config/rbac/role.yaml`)
 - [ ] T008 Delete old generated CRD: `config/crd/bases/llamastack.io_llamastackdistributions.yaml`
-- [ ] T009 Delete old v1alpha1 types: `api/v1alpha1/llamastackdistribution_types.go` (replaced by `ogxserver_types.go`)
-- [ ] T010 Delete `api/v1alpha2/` directory (v1alpha2 types are now folded into the new `ogx.io/v1alpha1`)
+- [ ] T009 Remove legacy `llamastack.io` Go types and the `api/v1alpha1/` package; new OGX types live under `api/v1beta1/` (e.g. `ogxserver_types.go`)
+- [ ] T010 Delete `api/v1alpha2/` directory (v1alpha2 types are now folded into `ogx.io/v1beta1`)
 
 ### Config scaffolding
 
@@ -84,13 +86,13 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 - [ ] T016 Update `config/default/manager_labels_patch.yaml`: label values
 - [ ] T017 Update `config/manager/manager.yaml`, `config/manager/pdb.yaml`: label values
 - [ ] T018 Update `config/manager/controller_manager_config.yaml`: `resourceName` to `54e06e98.ogx.io`
-- [ ] T019 Update `PROJECT` file: domain to `ogx.io`, repo to `github.com/ogx-ai/ogx-k8s-operator`, kind to `OGXServer`
+- [ ] T019 Update `PROJECT` file: domain to `ogx.io`, repo to `github.com/ogx-ai/ogx-k8s-operator`, kind to `OGXServer`, API version `v1beta1`
 
 ### Samples
 
 - [ ] T020 Delete old sample: `config/samples/_v1alpha1_llamastackdistribution.yaml`
-- [ ] T021 Create `config/samples/_v1alpha1_ogxserver.yaml` — minimal OGXServer sample with distribution name
-- [ ] T022 Update all `config/samples/example-*.yaml`: `apiVersion: ogx.io/v1alpha1`, `kind: OGXServer`, restructure spec fields to new schema
+- [ ] T021 Create `config/samples/_v1beta1_ogxserver.yaml` — minimal OGXServer sample with distribution name
+- [ ] T022 Update all `config/samples/example-*.yaml`: `apiVersion: ogx.io/v1beta1`, `kind: OGXServer`, restructure spec fields to new schema
 - [ ] T023 Update `config/samples/kustomization.yaml`: resource references
 
 ### Build and CI
@@ -112,7 +114,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 2: Controller Foundation (PR 2)
 
-**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, networking (Service, Ingress, NetworkPolicy), and workload (Deployment, HPA, PDB).
+**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, **`spec.network`** (Service, Ingress, NetworkPolicy), and workload (Deployment, HPA, PDB).
 
 ### Controller rename
 
@@ -124,10 +126,10 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ### Controller adaptation to new spec
 
-- [ ] T038 Update reconciler to work with new `OGXServerSpec` structure: map `spec.distribution` to container image, `spec.workload.replicas` to deployment replicas, `spec.networking.port` to container/service port, etc.
-- [ ] T039 Update `controllers/resource_helper.go`: adapt to new spec shape (distribution, workload.storage, workload.resources, workload.overrides, networking.tls). Preserve all upstream runtime contract strings per FR-002.
+- [ ] T038 Update reconciler to work with new `OGXServerSpec` structure: map `spec.distribution` to container image, `spec.workload.replicas` to deployment replicas, **`spec.network.port`** to container/service port, etc.
+- [ ] T039 Update `controllers/resource_helper.go`: adapt to new spec shape (distribution, workload.storage, workload.resources, workload.overrides, **`spec.network.tls`**). Preserve all upstream runtime contract strings per FR-002.
 - [ ] T040 Update `controllers/status.go`: rename all `LlamaStackDistribution*` type references to `OGXServer*`, add new status fields (`ResolvedDistribution`, `ConfigGeneration`)
-- [ ] T041 Update `controllers/network_resources.go`: adapt to `spec.networking` shape (expose, allowedFrom, tls), rename type references, update managed-by label to `"ogx-operator"`
+- [ ] T041 Update `controllers/network_resources.go`: adapt to **`spec.network`** shape (expose, allowedFrom, tls), rename type references, update managed-by label to `"ogx-operator"`
 - [ ] T042 Update `controllers/kubebuilder_rbac.go`: change RBAC markers from `llamastack.io` to `ogx.io`, `llamastackdistributions` to `ogxservers`
 - [ ] T043 Update `controllers/suite_test.go`: rename scheme registration
 - [ ] T044 Update `controllers/testing_support_test.go`: rename builder and reconciler references, adapt to new spec structure
@@ -153,7 +155,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ### Main entrypoint
 
-- [ ] T055 Update `main.go`: rename import alias to `ogxiov1alpha1`, update `LeaderElectionID` to `"54e06e98.ogx.io"`, update cache selector managed-by label, update reconciler call
+- [ ] T055 Update `main.go`: rename import alias to `ogxiov1beta1`, update `LeaderElectionID` to `"54e06e98.ogx.io"`, update cache selector managed-by label, update reconciler call
 - [ ] T056 Update all import statements across the codebase to the new module path `github.com/ogx-ai/ogx-k8s-operator`
 
 ### Verification (PR 2 — build)
@@ -170,9 +172,9 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 **Goal**: Implement annotation-driven adoption so users can preserve PVCs and networking resources from old LlamaStackDistribution workloads.
 
-- [ ] T062 Create `controllers/legacy_adoption.go` with `adoptLegacyResources(ctx, instance)` entry point. Validate adoption annotation values using `ValidateAdoptionAnnotation()` (FR-007); if invalid, set `AdoptionConfigInvalid` condition and return early without proceeding to adoption.
-- [ ] T063 Implement `adoptStorage(ctx, instance, legacyName)`: find legacy PVC (`{legacyName}-pvc`), scale old Deployment to zero if still running, wait for pod termination (requeue), transfer PVC ownerRef, emit event
-- [ ] T064 Implement `adoptNetworking(ctx, instance, legacyName)`: adopt legacy Service (`{legacyName}-service`) by updating selectors to new pod labels + transferring ownerRef; adopt legacy Ingress (`{legacyName}-ingress`) by transferring ownerRef. When the OGXServer CR name differs from `legacyName`, allow the kustomize pipeline to create new resources under the CR name in addition to the adopted legacy resources (FR-015 name-mismatch case).
+- [ ] T062 Create `controllers/legacy_adoption.go` with `adoptLegacyResources(ctx, instance)` entry point. Validate adoption annotation values using `ValidateAdoptionAnnotation()` (FR-007); if invalid, set `AdoptionConfigInvalid` condition and skip adoption. Normal reconciliation MUST proceed (a typo in an annotation must not block the workload).
+- [ ] T063 Implement `adoptStorage(ctx, instance, legacyName)`: find legacy PVC (`{legacyName}-pvc`), scale old Deployment to zero if still running, wait for pod termination (requeue), replace PVC ownerRef (remove existing controller ownerRef, then `ctrl.SetControllerReference` to new CR), annotate PVC with `ogx.io/adopted-from` and `ogx.io/adopted-at` (FR-017a), emit event
+- [ ] T064 Implement `adoptNetworking(ctx, instance, legacyName)`: adopt legacy Service (`{legacyName}-service`) by updating selectors to new pod labels + replacing ownerRef (remove old controller ref, `SetControllerReference` to new CR); adopt legacy Ingress (`{legacyName}-ingress`) by replacing ownerRef (same pattern). Annotate both with `ogx.io/adopted-from` and `ogx.io/adopted-at` (FR-017a). When the OGXServer CR name differs from `legacyName`, allow the kustomize pipeline to create new resources under the CR name in addition to the adopted legacy resources (FR-015 name-mismatch case).
 - [ ] T065 Implement idempotency: check `metav1.IsControlledBy` before adoption, skip if already adopted
 - [ ] T066 Update `configurePersistentStorage()` in `controllers/resource_helper.go` to use `instance.GetEffectivePVCName()` when `adopt-storage` annotation is present
 - [ ] T067 Update `determineKindsToExclude()` in reconciler: exclude PVC from kustomize ResMap when `ogx.io/adopt-storage` annotation is present. For `ogx.io/adopt-networking` when the CR name matches the legacy name, exclude Service and Ingress from kustomize ResMap (same-name case); when names differ, allow kustomize to create new resources alongside adopted ones.
@@ -191,7 +193,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 ### Controller tests
 
 - [ ] T072 Update `controllers/resource_helper_test.go`: adapt to new spec structure
-- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new networking spec
+- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new **`spec.network`** schema
 - [ ] T074 Update all test files in `pkg/deploy/`: `kustomizer_test.go`, `deploy_test.go`, `suite_test.go`, `plugins/networkpolicy_transformer_test.go`, `plugins/field_mutator_test.go`
 
 ### Adoption tests
@@ -203,7 +205,8 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 - [ ] T079 Write table-driven test: old Deployment already gone → proceed to PVC ownership transfer
 - [ ] T080 Write table-driven tests: `adoptNetworking` — old Service selector updated, old Ingress ownerRef transferred, `NetworkingAdopted` condition set
 - [ ] T080a Write table-driven test: `adoptNetworking` with name mismatch — adopted legacy resources coexist alongside kustomize-created new resources, both owned by the new CR
-- [ ] T080b Write table-driven test: annotation validation — invalid annotation values (empty, uppercase, special chars, >63 chars) → `AdoptionConfigInvalid` condition set, adoption skipped
+- [ ] T080b Write table-driven test: annotation validation — invalid annotation values (empty, uppercase, special chars, >63 chars) → `AdoptionConfigInvalid` condition set, adoption skipped, normal reconciliation proceeds
+- [ ] T080c Write table-driven test: adopted child resources carry `ogx.io/adopted-from` and `ogx.io/adopted-at` annotations after ownership transfer (FR-017a)
 - [ ] T081 Write test: clean install without adoption annotations → no adoption code path triggered, normal PVC created
 
 ### E2E tests
@@ -253,7 +256,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 - [ ] T094 Update `specs/constitution.md`: rename examples/references from LlamaStack to OGX
 - [ ] T095 Update `specs/001-deploy-time-providers-l1/*.md`: rename operator references
-- [ ] T096 Update `specs/002-operator-generated-config/*.md`: rename operator references, note that v1alpha2 is now folded into OGXServer `ogx.io/v1alpha1`
+- [ ] T096 Update `specs/002-operator-generated-config/*.md`: rename operator references, note that v1alpha2 is now folded into OGXServer `ogx.io/v1beta1`, and that the folded network block is **`spec.network`** on OGXServer (not `spec.networking`)
 
 ---
 
@@ -395,11 +398,11 @@ T097–T099 must run last
 
 ## Summary
 
-- **Total tasks**: 103
+- **Total tasks**: 104
 - **Phase 1 (API — PR 1)**: 32 tasks (T001–T032)
 - **Phase 2 (Controller — PR 2)**: 29 tasks (T033–T061)
 - **Phase 3 (Adoption — PR 2)**: 11 tasks (T062–T071a)
-- **Phase 4 (Tests — PR 2)**: 17 tasks (T072–T086, including T080a, T080b)
+- **Phase 4 (Tests — PR 2)**: 18 tasks (T072–T086, including T080a, T080b, T080c)
 - **Phase 5 (Docs — PR 2)**: 10 tasks (T087–T096)
 - **Phase 6 (Final verification)**: 3 tasks (T097–T099)
 - **Config generation (PR 3)**: Deferred to spec 002 follow-up

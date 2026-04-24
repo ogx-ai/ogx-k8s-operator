@@ -4,7 +4,7 @@
 
 ## Summary
 
-Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1alpha1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, networking, workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation.
+Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1beta1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`**, workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation.
 
 Upstream runtime contracts (`LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, etc.) are being updated upstream and are out of scope for the initial PRs.
 
@@ -40,13 +40,14 @@ Upstream runtime contracts (`LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`
 ### New and Renamed Files
 
 ```text
-api/v1alpha1/
-├── groupversion_info.go          # MODIFY: API group → ogx.io
+api/v1beta1/
+├── groupversion_info.go          # NEW: API group ogx.io, version v1beta1
 ├── ogxserver_types.go            # NEW: expanded OGXServer types (replaces llamastackdistribution_types.go)
 ├── ogxserver_types_test.go       # NEW: adoption helper tests
 └── zz_generated.deepcopy.go      # REGENERATE
 
-api/v1alpha2/                     # DELETE (folded into ogx.io/v1alpha1)
+api/v1alpha1/                     # DELETE after migration (legacy llamastack.io types removed)
+api/v1alpha2/                     # DELETE (folded into ogx.io/v1beta1)
 
 controllers/
 ├── ogxserver_controller.go        # RENAME from llamastackdistribution_controller.go
@@ -57,7 +58,7 @@ controllers/
 ├── kubebuilder_rbac.go            # MODIFY: ogx.io markers
 ├── status.go                      # MODIFY: OGXServer types, new conditions
 ├── resource_helper.go             # MODIFY: new spec shape
-├── network_resources.go           # MODIFY: new networking spec
+├── network_resources.go           # MODIFY: new `spec.network` shape
 └── manifests/base/*.yaml          # MODIFY: app: ogx labels
 
 config/
@@ -65,7 +66,7 @@ config/
 ├── crd/patches/cainjection_in_ogxservers.yaml  # RENAME
 ├── rbac/ogxs_editor_role.yaml     # RENAME from llsd_editor_role.yaml
 ├── rbac/ogxs_viewer_role.yaml     # RENAME from llsd_viewer_role.yaml
-├── samples/_v1alpha1_ogxserver.yaml  # RENAME + restructure to new schema
+├── samples/_v1beta1_ogxserver.yaml  # RENAME + restructure to new schema
 └── samples/example-*.yaml         # MODIFY: new apiVersion, Kind, spec shape
 ```
 
@@ -75,8 +76,8 @@ Phases map 1:1 to the task list in `tasks.md`. See that file for the complete ta
 
 ### Phase 1: API Changes (PR 1)
 
-New `OGXServer` types under `ogx.io/v1alpha1` with the expanded spec from 002:
-- `OGXServerSpec` with `distribution`, `providers`, `resources`, `storage`, `disabled`, `networking`, `workload`, `externalProviders`, `overrideConfig`
+New `OGXServer` types under `ogx.io/v1beta1` with the expanded spec from 002:
+- `OGXServerSpec` with `distribution`, `providers`, `resources`, `storage`, `disabled`, **`network`**, `workload`, `externalProviders`, `overrideConfig`
 - CEL validation: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`; `distribution.name` mutually exclusive with `distribution.image`
 - Status types: `OGXServerStatus` with `ResolvedDistribution`, `ConfigGeneration`, `ServerVersion`
 - Adoption annotation helpers (`GetAdoptStorageSource`, `GetEffectivePVCName`)
@@ -85,7 +86,7 @@ New `OGXServer` types under `ogx.io/v1alpha1` with the expanded spec from 002:
 ### Phase 2: Controller Foundation (PR 2)
 
 Rename controller files and adapt the reconciler to the new spec structure:
-- Map `spec.distribution` → image, `spec.workload` → Deployment, `spec.networking` → Service/Ingress/NetworkPolicy
+- Map `spec.distribution` → image, `spec.workload` → Deployment, **`spec.network`** → Service/Ingress/NetworkPolicy
 - `overrideConfig` path: mount user-provided ConfigMap
 - Default path: deploy with distribution's embedded config (no ConfigMap mount)
 - Update all packages (`pkg/deploy`, `pkg/cluster`), `main.go`, manifests
@@ -93,11 +94,11 @@ Rename controller files and adapt the reconciler to the new spec structure:
 ### Phase 3: Adoption Logic (PR 2)
 
 Annotation-driven adoption of legacy resources:
-- Validate annotation values are non-empty, valid RFC 1123 DNS labels (FR-007); reject with `AdoptionConfigInvalid` condition if invalid
-- `ogx.io/adopt-storage` → adopt PVC, scale old Deployment to zero, transfer ownerRef
+- Validate annotation values are non-empty, valid RFC 1123 DNS labels (FR-007); set `AdoptionConfigInvalid` condition if invalid, skip adoption, proceed with normal reconciliation
+- `ogx.io/adopt-storage` → adopt PVC, scale old Deployment to zero, replace ownerRef (remove old controller ref, then `SetControllerReference` to new CR), annotate adopted resources with `ogx.io/adopted-from` and `ogx.io/adopted-at` (FR-017a)
 - `ogx.io/adopt-networking` → adopt Service (update selectors) + Ingress, transfer ownerRefs. When CR name differs from legacy name, adopted resources coexist alongside new resources from the kustomize pipeline (FR-015)
 - Idempotency via `metav1.IsControlledBy`
-- `StorageAdopted` / `NetworkingAdopted` / `AdoptionConfigInvalid` conditions
+- `StorageAdopted` / `NetworkingAdopted` / `AdoptionConfigInvalid` conditions; audit annotations on child resources (FR-017a)
 - RBAC markers for legacy resource access (marked `// TRANSITIONAL`)
 
 ### Phase 4–6: Tests, Docs, Verification (PR 2)
@@ -140,19 +141,19 @@ Step 6: Clean up legacy resources
 
 ### Storage adoption flow
 
-1. Validate annotation value is non-empty and a valid RFC 1123 DNS label (FR-007); reject with `AdoptionConfigInvalid` condition if invalid
+1. Validate annotation value is non-empty and a valid RFC 1123 DNS label (FR-007); set `AdoptionConfigInvalid` condition if invalid, skip adoption, proceed with normal reconciliation
 2. Resolve legacy PVC name: `{legacyName}-pvc`
 3. If PVC not found, log warning and skip (no error)
 4. If PVC already has ownerRef pointing to this CR, return early (idempotent)
 5. If old Deployment still exists and is running, scale to zero and requeue
 6. Wait for old pods to terminate (requeue with delay)
-7. Transfer PVC ownerRef to new CR, emit event
+7. Replace PVC ownerRef: remove existing controller ownerRef (legacy CR), then call `ctrl.SetControllerReference` to set new CR as controller owner. Annotate PVC with `ogx.io/adopted-from` and `ogx.io/adopted-at`. Emit event.
 
 ### Networking adoption flow
 
-1. Validate annotation value is non-empty and a valid RFC 1123 DNS label (FR-007); reject with `AdoptionConfigInvalid` condition if invalid
-2. Adopt Service: update `spec.selector` to new pod labels, transfer ownerRef
-3. Adopt Ingress: transfer ownerRef
+1. Validate annotation value is non-empty and a valid RFC 1123 DNS label (FR-007); set `AdoptionConfigInvalid` condition if invalid, skip adoption, proceed with normal reconciliation
+2. Adopt Service: update `spec.selector` to new pod labels, replace ownerRef (remove old controller ref, `SetControllerReference` to new CR), annotate with `ogx.io/adopted-from` and `ogx.io/adopted-at`
+3. Adopt Ingress: replace ownerRef (same pattern), annotate with `ogx.io/adopted-from` and `ogx.io/adopted-at`
 4. **Same-name case** (CR name == legacy name): resource names match the kustomize pipeline's naming convention — managed normally after ownership transfer, no duplicate resources
 5. **Different-name case** (CR name != legacy name): adopted legacy resources coexist alongside new resources created by the kustomize pipeline. Both sets are owned by the new CR. Removing the `ogx.io/adopt-networking` annotation causes the operator to delete the adopted legacy resources.
 
@@ -165,7 +166,7 @@ Scaling old Deployment to zero (not deleting) preserves a rollback path: remove 
 | Approach | Why Rejected |
 |----------|-------------|
 | Automatic adoption controller (startup scan) | Deployment `spec.selector.matchLabels` is immutable — can't patch `app: llama-stack` to `app: ogx`, causing persistent reconciliation failures and cascading label mismatches |
-| Conversion webhook | Overkill for alpha API; significant webhook infrastructure complexity |
+| Conversion webhook | Not needed for this breaking cut (new group/kind; users recreate CRs); webhook would add operational complexity without serving legacy `ogx.io` versions |
 | Standalone migration CLI | Annotation-driven adoption in the operator is simpler; no separate tool to install |
 | In-place CRD rename | API group can't be changed this way; not supported by Kubernetes |
 | Parallel reconcilers | Two reconcilers fighting over same child resources; complex ownership |
