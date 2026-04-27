@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 )
 
 func GetOperatorNamespace() (string, error) {
@@ -16,15 +16,13 @@ func GetOperatorNamespace() (string, error) {
 	return string(data), err
 }
 
-func GetServicePort(instance *llamav1alpha1.LlamaStackDistribution) int32 {
-	// Use the container's port (defaulted to 8321 if unset)
-	port := instance.Spec.Server.ContainerSpec.Port
-	if port == 0 {
-		port = llamav1alpha1.DefaultServerPort
+func GetServicePort(instance *ogxiov1beta1.OGXServer) int32 {
+	if instance.Spec.Network != nil && instance.Spec.Network.Port != 0 {
+		return instance.Spec.Network.Port
 	}
-	return port
+	return ogxiov1beta1.DefaultServerPort
 }
 
-func GetServiceName(instance *llamav1alpha1.LlamaStackDistribution) string {
+func GetServiceName(instance *ogxiov1beta1.OGXServer) string {
 	return fmt.Sprintf("%s-service", instance.Name)
 }

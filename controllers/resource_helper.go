@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -64,7 +64,7 @@ const (
 var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$`)
 
 // getManagedCABundleConfigMapName returns the name of the managed CA bundle ConfigMap.
-func getManagedCABundleConfigMapName(instance *llamav1alpha1.LlamaStackDistribution) string {
+func getManagedCABundleConfigMapName(instance *ogxiov1beta1.OGXServer) string {
 	return instance.Name + ManagedCABundleConfigMapSuffix
 }
 
@@ -139,7 +139,7 @@ func validateConfigMapKeys(keys []string) error {
 }
 
 // getHealthProbe returns the health probe handler for the container.
-func getHealthProbe(instance *llamav1alpha1.LlamaStackDistribution) corev1.ProbeHandler {
+func getHealthProbe(instance *ogxiov1beta1.OGXServer) corev1.ProbeHandler {
 	return corev1.ProbeHandler{
 		HTTPGet: &corev1.HTTPGetAction{
 			Path: "/v1/health",
@@ -149,7 +149,7 @@ func getHealthProbe(instance *llamav1alpha1.LlamaStackDistribution) corev1.Probe
 }
 
 // getStartupProbe returns the startup probe for the container.
-func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Probe {
+func getStartupProbe(instance *ogxiov1beta1.OGXServer) *corev1.Probe {
 	return &corev1.Probe{
 		ProbeHandler:        getHealthProbe(instance),
 		InitialDelaySeconds: startupProbeInitialDelaySeconds,
@@ -160,30 +160,28 @@ func getStartupProbe(instance *llamav1alpha1.LlamaStackDistribution) *corev1.Pro
 }
 
 // buildContainerSpec creates the container specification.
-func buildContainerSpec(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, image string) corev1.Container {
+func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, image string) corev1.Container {
 	workers, workersSet := getEffectiveWorkers(instance)
-
 	container := corev1.Container{
-		Name:         getContainerName(instance),
+		Name:         ogxiov1beta1.DefaultContainerName,
 		Image:        image,
-		Resources:    resolveContainerResources(instance.Spec.Server.ContainerSpec, workers, workersSet),
+		Resources:    resolveContainerResources(instance, workers, workersSet),
 		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
 		StartupProbe: getStartupProbe(instance),
 	}
-
-	// Configure environment variables and mounts
 	configureContainerEnvironment(ctx, r, instance, &container)
 	configureContainerMounts(ctx, r, instance, &container)
 	configureContainerCommands(instance, &container)
-
 	return container
 }
 
 // resolveContainerResources ensures the container always has CPU and memory
 // requests defined so that HPAs using utilization metrics can function.
-func resolveContainerResources(spec llamav1alpha1.ContainerSpec, workers int32, workersSet bool) corev1.ResourceRequirements {
-	resources := spec.Resources
-
+func resolveContainerResources(instance *ogxiov1beta1.OGXServer, workers int32, workersSet bool) corev1.ResourceRequirements {
+	var resources corev1.ResourceRequirements
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Resources != nil {
+		resources = *instance.Spec.Workload.Resources
+	}
 	ensureRequests(&resources, workers)
 	if workersSet {
 		ensureLimitsMatchRequests(&resources)
@@ -197,7 +195,7 @@ func resolveContainerResources(spec llamav1alpha1.ContainerSpec, workers int32, 
 	ctrlLog.Log.WithName("resource_helper").WithValues(
 		"workers", workers,
 		"workersEnabled", workersSet,
-	).V(1).Info("Defaulted resource values for llama-stack container",
+	).V(1).Info("Defaulted resource values for ogx container",
 		"cpuRequest", cpuReq.String(),
 		"memoryRequest", memReq.String(),
 		"cpuLimit", cpuLimit.String(),
@@ -218,7 +216,7 @@ func ensureRequests(resources *corev1.ResourceRequirements, workers int32) {
 	}
 
 	if memQty, ok := resources.Requests[corev1.ResourceMemory]; !ok || memQty.IsZero() {
-		resources.Requests[corev1.ResourceMemory] = llamav1alpha1.DefaultServerMemoryRequest
+		resources.Requests[corev1.ResourceMemory] = ogxiov1beta1.DefaultServerMemoryRequest
 	}
 }
 
@@ -236,32 +234,32 @@ func ensureLimitsMatchRequests(resources *corev1.ResourceRequirements) {
 	}
 }
 
-// getContainerName returns the container name, using custom name if specified.
-func getContainerName(instance *llamav1alpha1.LlamaStackDistribution) string {
-	if instance.Spec.Server.ContainerSpec.Name != "" {
-		return instance.Spec.Server.ContainerSpec.Name
-	}
-	return llamav1alpha1.DefaultContainerName
-}
-
 // getContainerPort returns the container port, using custom port if specified.
-func getContainerPort(instance *llamav1alpha1.LlamaStackDistribution) int32 {
-	if instance.Spec.Server.ContainerSpec.Port != 0 {
-		return instance.Spec.Server.ContainerSpec.Port
+func getContainerPort(instance *ogxiov1beta1.OGXServer) int32 {
+	if instance.Spec.Network != nil && instance.Spec.Network.Port != 0 {
+		return instance.Spec.Network.Port
 	}
-	return llamav1alpha1.DefaultServerPort
+	return ogxiov1beta1.DefaultServerPort
 }
 
 // getEffectiveWorkers returns a positive worker count, defaulting to 1.
-func getEffectiveWorkers(instance *llamav1alpha1.LlamaStackDistribution) (int32, bool) {
-	if instance.Spec.Server.Workers != nil && *instance.Spec.Server.Workers > 0 {
-		return *instance.Spec.Server.Workers, true
+func getEffectiveWorkers(instance *ogxiov1beta1.OGXServer) (int32, bool) {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Workers != nil && *instance.Spec.Workload.Workers > 0 {
+		return *instance.Spec.Workload.Workers, true
 	}
 	return 1, false
 }
 
+// getEffectiveReplicas returns the desired replica count, defaulting to 1.
+func getEffectiveReplicas(instance *ogxiov1beta1.OGXServer) int32 {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Replicas != nil {
+		return *instance.Spec.Workload.Replicas
+	}
+	return 1
+}
+
 // configureContainerEnvironment sets up environment variables for the container.
-func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	mountPath := getMountPath(instance)
 	workers, _ := getEffectiveWorkers(instance)
 
@@ -301,11 +299,13 @@ func configureContainerEnvironment(ctx context.Context, r *LlamaStackDistributio
 	)
 
 	// Finally, add the user provided env vars
-	container.Env = append(container.Env, instance.Spec.Server.ContainerSpec.Env...)
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
+		container.Env = append(container.Env, instance.Spec.Workload.Overrides.Env...)
+	}
 }
 
 // configureContainerMounts sets up volume mounts for the container.
-func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func configureContainerMounts(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	// Add volume mount for storage
 	addStorageVolumeMount(instance, container)
 
@@ -317,9 +317,9 @@ func configureContainerMounts(ctx context.Context, r *LlamaStackDistributionReco
 }
 
 // hasAnyCABundle checks if any CA bundle will be mounted (explicit or auto-detected).
-func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution) bool {
+func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer) bool {
 	// Check for explicit CA bundle configuration
-	if instance.Spec.Server.TLSConfig != nil && instance.Spec.Server.TLSConfig.CABundle != nil {
+	if instance.Spec.CABundle != nil {
 		return true
 	}
 
@@ -334,9 +334,9 @@ func hasAnyCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, in
 }
 
 // configureContainerCommands sets up container commands and args.
-func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.ConfigMapName != "" {
 		// Override the container entrypoint to use the custom config file instead of the default
 		// template. The script will determine the llama-stack version and use the appropriate module
 		// path to start the server.
@@ -346,35 +346,36 @@ func configureContainerCommands(instance *llamav1alpha1.LlamaStackDistribution, 
 	}
 
 	// Apply user-specified command and args (takes precedence)
-	if len(instance.Spec.Server.ContainerSpec.Command) > 0 {
-		container.Command = instance.Spec.Server.ContainerSpec.Command
-	}
-
-	if len(instance.Spec.Server.ContainerSpec.Args) > 0 {
-		container.Args = instance.Spec.Server.ContainerSpec.Args
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
+		if len(instance.Spec.Workload.Overrides.Command) > 0 {
+			container.Command = instance.Spec.Workload.Overrides.Command
+		}
+		if len(instance.Spec.Workload.Overrides.Args) > 0 {
+			container.Args = instance.Spec.Workload.Overrides.Args
+		}
 	}
 }
 
 // getMountPath returns the mount path, using custom path if specified.
-func getMountPath(instance *llamav1alpha1.LlamaStackDistribution) string {
-	if instance.Spec.Server.Storage != nil && instance.Spec.Server.Storage.MountPath != "" {
-		return instance.Spec.Server.Storage.MountPath
+func getMountPath(instance *ogxiov1beta1.OGXServer) string {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Storage != nil && instance.Spec.Workload.Storage.MountPath != "" {
+		return instance.Spec.Workload.Storage.MountPath
 	}
-	return llamav1alpha1.DefaultMountPath
+	return ogxiov1beta1.DefaultMountPath
 }
 
 // addStorageVolumeMount adds the storage volume mount to the container.
-func addStorageVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func addStorageVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	mountPath := getMountPath(instance)
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      "lls-storage",
+		Name:      "ogx-storage",
 		MountPath: mountPath,
 	})
 }
 
 // addUserConfigVolumeMount adds the user config volume mount to the container if specified.
-func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
-	if instance.Spec.Server.UserConfig != nil && instance.Spec.Server.UserConfig.ConfigMapName != "" {
+func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.ConfigMapName != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
 			MountPath: "/etc/llama-stack/",
@@ -385,7 +386,7 @@ func addUserConfigVolumeMount(instance *llamav1alpha1.LlamaStackDistribution, co
 
 // addCABundleVolumeMount adds the managed CA bundle volume mount to the container.
 // Mounts the operator-managed ConfigMap containing all concatenated certificates.
-func addCABundleVolumeMount(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container *corev1.Container) {
+func addCABundleVolumeMount(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	// Mount managed CA bundle if any CA bundles are configured
 	if hasAnyCABundle(ctx, r, instance) {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
@@ -417,7 +418,7 @@ func createCABundleVolume(managedConfigMapName string) corev1.Volume {
 }
 
 // configurePodStorage configures the pod storage and returns the complete pod spec.
-func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, container corev1.Container) corev1.PodSpec {
+func configurePodStorage(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container corev1.Container) corev1.PodSpec {
 	fsGroup := FSGroup
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
@@ -444,8 +445,8 @@ func configurePodStorage(ctx context.Context, r *LlamaStackDistributionReconcile
 }
 
 // configureStorage handles storage volume configuration.
-func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	if instance.Spec.Server.Storage != nil {
+func configureStorage(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Storage != nil {
 		configurePersistentStorage(instance, podSpec)
 	} else {
 		configureEmptyDirStorage(podSpec)
@@ -453,13 +454,13 @@ func configureStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *c
 }
 
 // configurePersistentStorage sets up PVC-based storage.
-func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func configurePersistentStorage(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	// Use PVC for persistent storage
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-		Name: "lls-storage",
+		Name: "ogx-storage",
 		VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: instance.Name + "-pvc",
+				ClaimName: instance.GetEffectivePVCName(),
 			},
 		},
 	})
@@ -469,7 +470,7 @@ func configurePersistentStorage(instance *llamav1alpha1.LlamaStackDistribution, 
 func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 	// Use emptyDir for non-persistent storage
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
-		Name: "lls-storage",
+		Name: "ogx-storage",
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
@@ -478,7 +479,7 @@ func configureEmptyDirStorage(podSpec *corev1.PodSpec) {
 
 // configureTLSCABundle handles TLS CA bundle configuration.
 // Mounts the operator-managed CA bundle ConfigMap that contains all certificates.
-func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconciler, instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	// Check if any CA bundles are configured (explicit or auto-detected ODH)
 	if !hasAnyCABundle(ctx, r, instance) {
 		return
@@ -491,63 +492,53 @@ func configureTLSCABundle(ctx context.Context, r *LlamaStackDistributionReconcil
 }
 
 // configureUserConfig handles user configuration setup.
-func configureUserConfig(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	userConfig := instance.Spec.Server.UserConfig
-	if userConfig == nil || userConfig.ConfigMapName == "" {
+func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	overrideConfig := instance.Spec.OverrideConfig
+	if overrideConfig == nil || overrideConfig.ConfigMapName == "" {
 		return
 	}
 
-	// Add ConfigMap volume if user config is specified
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 		Name: "user-config",
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: userConfig.ConfigMapName,
+					Name: overrideConfig.ConfigMapName,
 				},
 			},
 		},
 	})
 }
 
-// configurePodOverrides applies pod-level overrides from the LlamaStackDistribution spec.
-func configurePodOverrides(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	// Set ServiceAccount name - use override if specified, otherwise use default
-	if instance.Spec.Server.PodOverrides != nil && instance.Spec.Server.PodOverrides.ServiceAccountName != "" {
-		podSpec.ServiceAccountName = instance.Spec.Server.PodOverrides.ServiceAccountName
+// configurePodOverrides applies pod-level overrides from the OGXServer spec.
+func configurePodOverrides(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil && instance.Spec.Workload.Overrides.ServiceAccountName != "" {
+		podSpec.ServiceAccountName = instance.Spec.Workload.Overrides.ServiceAccountName
 	} else {
 		podSpec.ServiceAccountName = instance.Name + "-sa"
 	}
 
-	// Apply other pod overrides if specified
-	if instance.Spec.Server.PodOverrides != nil {
-		// Add volumes if specified
-		if len(instance.Spec.Server.PodOverrides.Volumes) > 0 {
-			podSpec.Volumes = append(podSpec.Volumes, instance.Spec.Server.PodOverrides.Volumes...)
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
+		overrides := instance.Spec.Workload.Overrides
+		if len(overrides.Volumes) > 0 {
+			podSpec.Volumes = append(podSpec.Volumes, overrides.Volumes...)
 		}
-
-		// Add volume mounts if specified
-		if len(instance.Spec.Server.PodOverrides.VolumeMounts) > 0 {
+		if len(overrides.VolumeMounts) > 0 {
 			if len(podSpec.Containers) > 0 {
-				podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, instance.Spec.Server.PodOverrides.VolumeMounts...)
+				podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, overrides.VolumeMounts...)
 			}
-		}
-
-		// Apply termination grace period if specified
-		if instance.Spec.Server.PodOverrides.TerminationGracePeriodSeconds != nil {
-			podSpec.TerminationGracePeriodSeconds = instance.Spec.Server.PodOverrides.TerminationGracePeriodSeconds
 		}
 	}
 }
 
-func configurePodScheduling(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
-	if len(instance.Spec.Server.TopologySpreadConstraints) > 0 {
-		podSpec.TopologySpreadConstraints = deepCopyTopologySpreadConstraints(instance.Spec.Server.TopologySpreadConstraints)
-	} else if instance.Spec.Replicas > 1 {
+func configurePodScheduling(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	if instance.Spec.Workload != nil && len(instance.Spec.Workload.TopologySpreadConstraints) > 0 {
+		podSpec.TopologySpreadConstraints = deepCopyTopologySpreadConstraints(instance.Spec.Workload.TopologySpreadConstraints)
+	} else if getEffectiveReplicas(instance) > 1 {
 		podSpec.TopologySpreadConstraints = defaultTopologySpreadConstraints(instance)
 	}
 
-	if instance.Spec.Replicas > 1 {
+	if getEffectiveReplicas(instance) > 1 {
 		ensureDefaultPodAntiAffinity(instance, podSpec)
 	}
 }
@@ -560,7 +551,7 @@ func deepCopyTopologySpreadConstraints(constraints []corev1.TopologySpreadConstr
 	return copied
 }
 
-func defaultTopologySpreadConstraints(instance *llamav1alpha1.LlamaStackDistribution) []corev1.TopologySpreadConstraint {
+func defaultTopologySpreadConstraints(instance *ogxiov1beta1.OGXServer) []corev1.TopologySpreadConstraint {
 	labelSelector := defaultInstanceLabelSelector(instance)
 	return []corev1.TopologySpreadConstraint{
 		newTopologySpreadConstraint(labelSelector, "topology.kubernetes.io/region"),
@@ -578,7 +569,7 @@ func newTopologySpreadConstraint(selector *metav1.LabelSelector, topologyKey str
 	}
 }
 
-func ensureDefaultPodAntiAffinity(instance *llamav1alpha1.LlamaStackDistribution, podSpec *corev1.PodSpec) {
+func ensureDefaultPodAntiAffinity(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	if podSpec.Affinity != nil && podSpec.Affinity.PodAntiAffinity != nil {
 		return
 	}
@@ -606,7 +597,7 @@ func ensureDefaultPodAntiAffinity(instance *llamav1alpha1.LlamaStackDistribution
 	podSpec.Affinity.PodAntiAffinity = defaultAntiAffinity.DeepCopy()
 }
 
-func defaultInstanceLabelSelector(instance *llamav1alpha1.LlamaStackDistribution) *metav1.LabelSelector {
+func defaultInstanceLabelSelector(instance *ogxiov1beta1.OGXServer) *metav1.LabelSelector {
 	return &metav1.LabelSelector{
 		MatchLabels: map[string]string{
 			instanceLabelKey: instance.Name,
@@ -615,14 +606,14 @@ func defaultInstanceLabelSelector(instance *llamav1alpha1.LlamaStackDistribution
 }
 
 // validateDistribution validates the distribution configuration.
-func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav1alpha1.LlamaStackDistribution) error {
+func (r *OGXServerReconciler) validateDistribution(instance *ogxiov1beta1.OGXServer) error {
 	// If using distribution name, validate it exists in clusterInfo
-	if instance.Spec.Server.Distribution.Name != "" {
+	if instance.Spec.Distribution.Name != "" {
 		if r.ClusterInfo == nil {
 			return errors.New("failed to initialize cluster info")
 		}
-		if _, exists := r.ClusterInfo.DistributionImages[instance.Spec.Server.Distribution.Name]; !exists {
-			return fmt.Errorf("failed to validate distribution: %s. Distribution name not supported", instance.Spec.Server.Distribution.Name)
+		if _, exists := r.ClusterInfo.DistributionImages[instance.Spec.Distribution.Name]; !exists {
+			return fmt.Errorf("failed to validate distribution: %s. Distribution name not supported", instance.Spec.Distribution.Name)
 		}
 	}
 
@@ -631,7 +622,7 @@ func (r *LlamaStackDistributionReconciler) validateDistribution(instance *llamav
 
 // resolveImage determines the container image to use based on the distribution configuration.
 // It returns the resolved image and any error encountered.
-func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alpha1.DistributionType) (string, error) {
+func (r *OGXServerReconciler) resolveImage(distribution ogxiov1beta1.DistributionSpec) (string, error) {
 	distributionMap := r.ClusterInfo.DistributionImages
 	switch {
 	case distribution.Name != "":
@@ -652,15 +643,15 @@ func (r *LlamaStackDistributionReconciler) resolveImage(distribution llamav1alph
 	}
 }
 
-func buildPodDisruptionBudgetSpec(instance *llamav1alpha1.LlamaStackDistribution) *policyv1.PodDisruptionBudgetSpec {
+func buildPodDisruptionBudgetSpec(instance *ogxiov1beta1.OGXServer) *policyv1.PodDisruptionBudgetSpec {
 	if !needsPodDisruptionBudget(instance) {
 		return nil
 	}
 
 	spec := &policyv1.PodDisruptionBudgetSpec{}
-	if instance.Spec.Server.PodDisruptionBudget != nil {
-		spec.MinAvailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MinAvailable)
-		spec.MaxUnavailable = copyIntOrString(instance.Spec.Server.PodDisruptionBudget.MaxUnavailable)
+	if instance.Spec.Workload != nil && instance.Spec.Workload.PodDisruptionBudget != nil {
+		spec.MinAvailable = copyIntOrString(instance.Spec.Workload.PodDisruptionBudget.MinAvailable)
+		spec.MaxUnavailable = copyIntOrString(instance.Spec.Workload.PodDisruptionBudget.MaxUnavailable)
 	} else {
 		// Fix for RHAIENG-3783: Use maxUnavailable instead of minAvailable
 		// to avoid allowedDisruptions=0 with single-replica deployments
@@ -671,14 +662,12 @@ func buildPodDisruptionBudgetSpec(instance *llamav1alpha1.LlamaStackDistribution
 	return spec
 }
 
-func buildHPASpec(instance *llamav1alpha1.LlamaStackDistribution) *autoscalingv2.HorizontalPodAutoscalerSpec {
-	auto := instance.Spec.Server.Autoscaling
-	if auto == nil || auto.MaxReplicas == 0 {
+func buildHPASpec(instance *ogxiov1beta1.OGXServer) *autoscalingv2.HorizontalPodAutoscalerSpec {
+	if instance.Spec.Workload == nil || instance.Spec.Workload.Autoscaling == nil || instance.Spec.Workload.Autoscaling.MaxReplicas == 0 {
 		return nil
 	}
-
-	minReplicas := resolveMinReplicas(auto.MinReplicas, instance.Spec.Replicas)
-
+	auto := instance.Spec.Workload.Autoscaling
+	minReplicas := resolveMinReplicas(auto.MinReplicas, getEffectiveReplicas(instance))
 	spec := &autoscalingv2.HorizontalPodAutoscalerSpec{
 		ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
 			APIVersion: "apps/v1",
@@ -689,7 +678,6 @@ func buildHPASpec(instance *llamav1alpha1.LlamaStackDistribution) *autoscalingv2
 		MaxReplicas: auto.MaxReplicas,
 		Metrics:     buildHPAMetrics(auto),
 	}
-
 	return spec
 }
 
@@ -704,7 +692,7 @@ func resolveMinReplicas(value *int32, defaultVal int32) *int32 {
 	return &resolved
 }
 
-func buildHPAMetrics(auto *llamav1alpha1.AutoscalingSpec) []autoscalingv2.MetricSpec {
+func buildHPAMetrics(auto *ogxiov1beta1.AutoscalingSpec) []autoscalingv2.MetricSpec {
 	var metrics []autoscalingv2.MetricSpec
 
 	if auto.TargetCPUUtilizationPercentage != nil {
@@ -749,11 +737,11 @@ func buildHPAMetrics(auto *llamav1alpha1.AutoscalingSpec) []autoscalingv2.Metric
 	return metrics
 }
 
-func needsPodDisruptionBudget(instance *llamav1alpha1.LlamaStackDistribution) bool {
-	if instance.Spec.Server.PodDisruptionBudget != nil {
+func needsPodDisruptionBudget(instance *ogxiov1beta1.OGXServer) bool {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.PodDisruptionBudget != nil {
 		return true
 	}
-	return instance.Spec.Replicas > 1
+	return getEffectiveReplicas(instance) > 1
 }
 
 func copyIntOrString(value *intstr.IntOrString) *intstr.IntOrString {

@@ -22,7 +22,7 @@ import (
 	"net/url"
 
 	"github.com/go-logr/logr"
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -37,9 +37,9 @@ const (
 	IngressNameSuffix = "-ingress"
 )
 
-// buildIngress creates an Ingress for external access to the LlamaStackDistribution.
-func (r *LlamaStackDistributionReconciler) buildIngress(
-	instance *llamav1alpha1.LlamaStackDistribution,
+// buildIngress creates an Ingress for external access to the OGXServer.
+func (r *OGXServerReconciler) buildIngress(
+	instance *ogxiov1beta1.OGXServer,
 ) (*networkingv1.Ingress, error) {
 	servicePort := deploy.GetServicePort(instance)
 	serviceName := deploy.GetServiceName(instance)
@@ -50,7 +50,7 @@ func (r *LlamaStackDistributionReconciler) buildIngress(
 			Name:      instance.Name + IngressNameSuffix,
 			Namespace: instance.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				"app.kubernetes.io/managed-by": "ogx-operator",
 				"app.kubernetes.io/instance":   instance.Name,
 			},
 		},
@@ -87,10 +87,10 @@ func (r *LlamaStackDistributionReconciler) buildIngress(
 	return ingress, nil
 }
 
-// reconcileIngress creates, updates, or deletes the Ingress based on exposeRoute setting.
-func (r *LlamaStackDistributionReconciler) reconcileIngress(
+// reconcileIngress creates, updates, or deletes the Ingress based on expose setting.
+func (r *OGXServerReconciler) reconcileIngress(
 	ctx context.Context,
-	instance *llamav1alpha1.LlamaStackDistribution,
+	instance *ogxiov1beta1.OGXServer,
 ) error {
 	logger := log.FromContext(ctx)
 	ingressName := instance.Name + IngressNameSuffix
@@ -99,19 +99,19 @@ func (r *LlamaStackDistributionReconciler) reconcileIngress(
 	err := r.Get(ctx, types.NamespacedName{Name: ingressName, Namespace: instance.Namespace}, existing)
 	existsAlready := err == nil
 
-	exposeRoute := instance.Spec.Network != nil && instance.Spec.Network.ExposeRoute
+	expose := instance.Spec.Network != nil && instance.Spec.Network.ExternalAccess != nil && instance.Spec.Network.ExternalAccess.Enabled
 
-	if !exposeRoute {
+	if !expose {
 		return r.handleDisabledIngress(ctx, instance, existing, existsAlready, ingressName)
 	}
 
 	return r.handleEnabledIngress(ctx, instance, existing, err, existsAlready, ingressName, logger)
 }
 
-// handleDisabledIngress handles Ingress deletion when exposeRoute is false.
-func (r *LlamaStackDistributionReconciler) handleDisabledIngress(
+// handleDisabledIngress handles Ingress deletion when expose is not set.
+func (r *OGXServerReconciler) handleDisabledIngress(
 	ctx context.Context,
-	instance *llamav1alpha1.LlamaStackDistribution,
+	instance *ogxiov1beta1.OGXServer,
 	existing *networkingv1.Ingress,
 	existsAlready bool,
 	ingressName string,
@@ -127,7 +127,7 @@ func (r *LlamaStackDistributionReconciler) handleDisabledIngress(
 		return nil
 	}
 
-	logger.Info("Deleting Ingress as exposeRoute is disabled", "name", ingressName)
+	logger.Info("Deleting Ingress as expose is disabled", "name", ingressName)
 	if err := r.Delete(ctx, existing); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete Ingress: %w", err)
 	}
@@ -135,10 +135,10 @@ func (r *LlamaStackDistributionReconciler) handleDisabledIngress(
 	return nil
 }
 
-// handleEnabledIngress handles Ingress creation/update when exposeRoute is true.
-func (r *LlamaStackDistributionReconciler) handleEnabledIngress(
+// handleEnabledIngress handles Ingress creation/update when expose is set.
+func (r *OGXServerReconciler) handleEnabledIngress(
 	ctx context.Context,
-	instance *llamav1alpha1.LlamaStackDistribution,
+	instance *ogxiov1beta1.OGXServer,
 	existing *networkingv1.Ingress,
 	getErr error,
 	existsAlready bool,
@@ -176,11 +176,11 @@ func (r *LlamaStackDistributionReconciler) handleEnabledIngress(
 }
 
 // getIngressURL returns the external URL from an Ingress if available.
-func (r *LlamaStackDistributionReconciler) getIngressURL(
+func (r *OGXServerReconciler) getIngressURL(
 	ctx context.Context,
-	instance *llamav1alpha1.LlamaStackDistribution,
+	instance *ogxiov1beta1.OGXServer,
 ) *string {
-	if instance.Spec.Network == nil || !instance.Spec.Network.ExposeRoute {
+	if instance.Spec.Network == nil || instance.Spec.Network.ExternalAccess == nil || !instance.Spec.Network.ExternalAccess.Enabled {
 		return nil
 	}
 
@@ -225,8 +225,8 @@ func buildURLString(host string) *string {
 }
 
 // BuildIngressForTest is a test helper that exposes buildIngress for unit testing.
-func (r *LlamaStackDistributionReconciler) BuildIngressForTest(
-	instance *llamav1alpha1.LlamaStackDistribution,
+func (r *OGXServerReconciler) BuildIngressForTest(
+	instance *ogxiov1beta1.OGXServer,
 ) (*networkingv1.Ingress, error) {
 	return r.buildIngress(instance)
 }

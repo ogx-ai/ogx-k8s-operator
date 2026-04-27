@@ -8,11 +8,12 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	controllers "github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
@@ -33,113 +34,117 @@ const (
 	testTimeout  = 5 * time.Second
 	testInterval = 100 * time.Millisecond
 
-	// Test-specific identifiers (not production defaults).
-	testImage             = "lls/lls-ollama:1.0"
+	testImage             = "ogx/ogx-ollama:1.0"
 	testOperatorNamespace = "default"
-	testStorageVolumeName = "lls-storage"
+	testStorageVolumeName = "ogx-storage"
 	testInstanceName      = "test-instance"
 )
 
-// DistributionBuilder - Builder pattern for test instances of operator custom resource.
-type DistributionBuilder struct {
-	instance *llamav1alpha1.LlamaStackDistribution
+// OGXServerBuilder - Builder pattern for test instances of operator custom resource.
+type OGXServerBuilder struct {
+	instance *ogxiov1beta1.OGXServer
 }
 
-func NewDistributionBuilder() *DistributionBuilder {
-	return &DistributionBuilder{
-		instance: &llamav1alpha1.LlamaStackDistribution{
+func NewOGXServerBuilder() *OGXServerBuilder {
+	return &OGXServerBuilder{
+		instance: &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      testInstanceName,
-				Namespace: "default", // Will be overridden in tests
+				Namespace: "default",
 			},
-			Spec: llamav1alpha1.LlamaStackDistributionSpec{
-				Replicas: 1,
-				Server: llamav1alpha1.ServerSpec{
-					Distribution: llamav1alpha1.DistributionType{
-						Name: "starter", // Real distribution from distributions.json
-					},
-					ContainerSpec: llamav1alpha1.ContainerSpec{
-						Name: llamav1alpha1.DefaultContainerName,
-						Port: llamav1alpha1.DefaultServerPort,
-					},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{
+					Name: "starter",
 				},
 			},
 		},
 	}
 }
 
-func (b *DistributionBuilder) WithName(name string) *DistributionBuilder {
+func (b *OGXServerBuilder) WithName(name string) *OGXServerBuilder {
 	b.instance.Name = name
 	return b
 }
 
-func (b *DistributionBuilder) WithNamespace(namespace string) *DistributionBuilder {
+func (b *OGXServerBuilder) WithNamespace(namespace string) *OGXServerBuilder {
 	b.instance.Namespace = namespace
 	return b
 }
 
-func (b *DistributionBuilder) WithPort(port int32) *DistributionBuilder {
-	b.instance.Spec.Server.ContainerSpec.Port = port
-	return b
-}
-
-func (b *DistributionBuilder) WithReplicas(replicas int32) *DistributionBuilder {
-	b.instance.Spec.Replicas = replicas
-	return b
-}
-
-func (b *DistributionBuilder) WithStorage(storage *llamav1alpha1.StorageSpec) *DistributionBuilder {
-	b.instance.Spec.Server.Storage = storage
-	return b
-}
-
-func (b *DistributionBuilder) WithDistribution(distributionName string) *DistributionBuilder {
-	b.instance.Spec.Server.Distribution.Name = distributionName
-	return b
-}
-
-func (b *DistributionBuilder) WithResources(resources corev1.ResourceRequirements) *DistributionBuilder {
-	b.instance.Spec.Server.ContainerSpec.Resources = resources
-	return b
-}
-
-func (b *DistributionBuilder) WithServiceAccountName(serviceAccountName string) *DistributionBuilder {
-	if b.instance.Spec.Server.PodOverrides == nil {
-		b.instance.Spec.Server.PodOverrides = &llamav1alpha1.PodOverrides{}
+func (b *OGXServerBuilder) WithPort(port int32) *OGXServerBuilder {
+	if b.instance.Spec.Network == nil {
+		b.instance.Spec.Network = &ogxiov1beta1.NetworkSpec{}
 	}
-	b.instance.Spec.Server.PodOverrides.ServiceAccountName = serviceAccountName
+	b.instance.Spec.Network.Port = port
 	return b
 }
 
-func (b *DistributionBuilder) WithUserConfig(configMapName string) *DistributionBuilder {
-	b.instance.Spec.Server.UserConfig = &llamav1alpha1.UserConfigSpec{
+func (b *OGXServerBuilder) WithReplicas(replicas int32) *OGXServerBuilder {
+	if b.instance.Spec.Workload == nil {
+		b.instance.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+	}
+	b.instance.Spec.Workload.Replicas = &replicas
+	return b
+}
+
+func (b *OGXServerBuilder) WithStorage(storage *ogxiov1beta1.PVCStorageSpec) *OGXServerBuilder {
+	if b.instance.Spec.Workload == nil {
+		b.instance.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+	}
+	b.instance.Spec.Workload.Storage = storage
+	return b
+}
+
+func (b *OGXServerBuilder) WithDistribution(distributionName string) *OGXServerBuilder {
+	b.instance.Spec.Distribution.Name = distributionName
+	return b
+}
+
+func (b *OGXServerBuilder) WithResources(resources corev1.ResourceRequirements) *OGXServerBuilder {
+	if b.instance.Spec.Workload == nil {
+		b.instance.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+	}
+	b.instance.Spec.Workload.Resources = &resources
+	return b
+}
+
+func (b *OGXServerBuilder) WithServiceAccountName(serviceAccountName string) *OGXServerBuilder {
+	if b.instance.Spec.Workload == nil {
+		b.instance.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+	}
+	if b.instance.Spec.Workload.Overrides == nil {
+		b.instance.Spec.Workload.Overrides = &ogxiov1beta1.WorkloadOverrides{}
+	}
+	b.instance.Spec.Workload.Overrides.ServiceAccountName = serviceAccountName
+	return b
+}
+
+func (b *OGXServerBuilder) WithOverrideConfig(configMapName string) *OGXServerBuilder {
+	b.instance.Spec.OverrideConfig = &ogxiov1beta1.OverrideConfigSpec{
 		ConfigMapName: configMapName,
 	}
 	return b
 }
 
-func (b *DistributionBuilder) WithCABundle(configMapName string, configMapKeys []string) *DistributionBuilder {
-	if b.instance.Spec.Server.TLSConfig == nil {
-		b.instance.Spec.Server.TLSConfig = &llamav1alpha1.TLSConfig{}
-	}
-	b.instance.Spec.Server.TLSConfig.CABundle = &llamav1alpha1.CABundleConfig{
+func (b *OGXServerBuilder) WithCABundle(configMapName string, configMapKeys []string) *OGXServerBuilder {
+	b.instance.Spec.CABundle = &ogxiov1beta1.CABundleConfig{
 		ConfigMapName: configMapName,
 		ConfigMapKeys: configMapKeys,
 	}
 	return b
 }
 
-func (b *DistributionBuilder) Build() *llamav1alpha1.LlamaStackDistribution {
+func (b *OGXServerBuilder) Build() *ogxiov1beta1.OGXServer {
 	return b.instance.DeepCopy()
 }
 
-func DefaultTestStorage() *llamav1alpha1.StorageSpec {
-	return &llamav1alpha1.StorageSpec{}
+func DefaultTestStorage() *ogxiov1beta1.PVCStorageSpec {
+	return &ogxiov1beta1.PVCStorageSpec{}
 }
 
-func CustomTestStorage(size string, mountPath string) *llamav1alpha1.StorageSpec {
+func CustomTestStorage(size string, mountPath string) *ogxiov1beta1.PVCStorageSpec {
 	sizeQuantity := resource.MustParse(size)
-	return &llamav1alpha1.StorageSpec{
+	return &ogxiov1beta1.PVCStorageSpec{
 		Size:      &sizeQuantity,
 		MountPath: mountPath,
 	}
@@ -210,11 +215,9 @@ func AssertPVCExists(t *testing.T, client client.Client, namespace, name string)
 func AssertServiceExposesDeployment(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
 	t.Helper()
 
-	// Behavior: Service should target deployment pods via selectors
 	require.Equal(t, service.Spec.Selector, deployment.Spec.Template.Labels,
 		"service selector should match deployment pod labels for traffic routing")
 
-	// Behavior: Service port should route to deployment container port
 	require.NotEmpty(t, service.Spec.Ports, "service should expose at least one port")
 	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers, "deployment should have at least one container")
 
@@ -227,11 +230,9 @@ func AssertServiceExposesDeployment(t *testing.T, service *corev1.Service, deplo
 func AssertNetworkPolicyProtectsDeployment(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment) {
 	t.Helper()
 
-	// Behavior: NetworkPolicy should target the same pods as deployment
 	require.Equal(t, deployment.Spec.Template.Labels, networkPolicy.Spec.PodSelector.MatchLabels,
 		"network policy should protect the same pods as deployment")
 
-	// Behavior: NetworkPolicy should allow traffic on deployment container port
 	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers, "deployment should have containers")
 	require.NotEmpty(t, networkPolicy.Spec.Ingress, "network policy should have ingress rules")
 	require.NotEmpty(t, networkPolicy.Spec.Ingress[0].Ports, "network policy should allow specific ports")
@@ -242,20 +243,18 @@ func AssertNetworkPolicyProtectsDeployment(t *testing.T, networkPolicy *networki
 		"network policy should allow traffic on deployment container port")
 }
 
-func AssertResourceOwnedByInstance(t *testing.T, resource metav1.Object, instance *llamav1alpha1.LlamaStackDistribution) {
+func AssertResourceOwnedByInstance(t *testing.T, resource metav1.Object, instance *ogxiov1beta1.OGXServer) {
 	t.Helper()
 
-	// Behavior: Resource should be owned by the LlamaStackDistribution instance
 	ownerRefs := resource.GetOwnerReferences()
 	require.Len(t, ownerRefs, 1, "resource should have exactly one owner reference")
 	require.Equal(t, instance.GetUID(), ownerRefs[0].UID,
-		"resource should be owned by the LlamaStackDistribution instance for garbage collection")
+		"resource should be owned by the OGXServer instance for garbage collection")
 }
 
 func AssertClusterRoleBindingLinksServiceAccount(t *testing.T, crb *rbacv1.ClusterRoleBinding, serviceAccount *corev1.ServiceAccount) {
 	t.Helper()
 
-	// Behavior: ClusterRoleBinding should grant permissions to the ServiceAccount
 	require.NotEmpty(t, crb.Subjects, "cluster role binding should have subjects")
 
 	found := false
@@ -275,7 +274,6 @@ func AssertClusterRoleBindingLinksServiceAccount(t *testing.T, crb *rbacv1.Clust
 func AssertDeploymentUsesServiceAccount(t *testing.T, deployment *appsv1.Deployment, serviceAccount *corev1.ServiceAccount) {
 	t.Helper()
 
-	// Behavior: Deployment should use the ServiceAccount for pod identity
 	require.Equal(t, serviceAccount.Name, deployment.Spec.Template.Spec.ServiceAccountName,
 		"deployment pods should use the service account for proper permissions")
 }
@@ -290,14 +288,12 @@ func AssertPVCHasSize(t *testing.T, pvc *corev1.PersistentVolumeClaim, expectedS
 		"PVC should request %s storage, got %s", expectedSize, storageRequest.String())
 }
 
-// AssertServicePortMatches verifies that a service has the expected port configuration.
 func AssertServicePortMatches(t *testing.T, service *corev1.Service, expectedPort corev1.ServicePort) {
 	t.Helper()
 	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
 	require.Equal(t, expectedPort, service.Spec.Ports[0], "Service port should match expected")
 }
 
-// AssertServiceAndDeploymentPortsAlign verifies that service target port matches deployment container port.
 func AssertServiceAndDeploymentPortsAlign(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
 	t.Helper()
 	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
@@ -309,29 +305,22 @@ func AssertServiceAndDeploymentPortsAlign(t *testing.T, service *corev1.Service,
 	require.Equal(t, serviceTargetPort, containerPort, "Service target port should match deployment container port")
 }
 
-// AssertServiceSelectorMatches verifies that a service has the expected selector.
 func AssertServiceSelectorMatches(t *testing.T, service *corev1.Service, expectedSelector map[string]string) {
 	t.Helper()
 	require.Equal(t, expectedSelector, service.Spec.Selector, "Service selector should match expected")
 }
 
-// AssertServiceAndDeploymentSelectorsAlign verifies that service selector matches deployment pod labels.
 func AssertServiceAndDeploymentSelectorsAlign(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
 	t.Helper()
 	require.Equal(t, service.Spec.Selector, deployment.Spec.Template.Labels, "Service selector should match deployment pod labels")
 }
 
-// AssertNetworkPolicyTargetsDeploymentPods verifies that network policy targets the same pods as deployment.
 func AssertNetworkPolicyTargetsDeploymentPods(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment) {
 	t.Helper()
 	require.Equal(t, deployment.Spec.Template.Labels, networkPolicy.Spec.PodSelector.MatchLabels,
 		"NetworkPolicy should target same pods as deployment")
 }
 
-// hasMatchingIngressRule is a generic helper function that checks if a network policy
-// contains at least one ingress rule that meets two specific criteria:
-// 1. The rule allows traffic on the specified 'port'.
-// 2. The rule's source (the 'From' field) matches a custom condition defined by the 'peerPredicate'.
 func hasMatchingIngressRule(
 	t *testing.T,
 	policy *networkingv1.NetworkPolicy,
@@ -340,39 +329,28 @@ func hasMatchingIngressRule(
 ) bool {
 	t.Helper()
 	for _, rule := range policy.Spec.Ingress {
-		// First, check if this rule's source (any of its 'From' peers) matches our criteria.
-		// If not, move on to the next one.
 		if !slices.ContainsFunc(rule.From, peerPredicate) {
 			continue
 		}
 
-		// Check if this same rule also allows traffic on the required port.
-		// Both conditions must be met by a single rule for the policy to be
-		// considered valid.
 		portMatches := slices.ContainsFunc(rule.Ports, func(p networkingv1.NetworkPolicyPort) bool {
 			return p.Port != nil && p.Port.IntVal == port
 		})
 
 		if portMatches {
-			// This rule meets both the source and port requirements.
 			return true
 		}
 	}
 
-	// Returning false signifies that no single rule in the entire policy satisfied
-	// both the source (predicate) and port conditions for this specific check.
 	return false
 }
 
-// AssertNetworkPolicyAllowsDeploymentPort verifies that the network policy
-// allows traffic from both intra-stack components and the operator.
 func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment, operatorNamespace string) {
 	t.Helper()
 	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
 	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
 	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 
-	// Behavior 1: Verify a rule exists for same-namespace communication.
 	sameNamespacePredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
 		return peer.PodSelector != nil && len(peer.PodSelector.MatchLabels) == 0 && peer.NamespaceSelector == nil
 	}
@@ -380,9 +358,6 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 		hasMatchingIngressRule(t, networkPolicy, containerPort, sameNamespacePredicate),
 		"NetworkPolicy is missing a rule to allow traffic from all pods in the same namespace on port %d", containerPort)
 
-	// Behavior 2: Verify a rule for operator communication exists.
-	// This allows the operator to communicate with the server pods it manages
-	// from its separate namespace for tasks like health checks.
 	operatorPredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
 		return peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == operatorNamespace
 	}
@@ -391,14 +366,12 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 		"NetworkPolicy is missing a rule to allow traffic from the operator in namespace '%s' on port %d", operatorNamespace, containerPort)
 }
 
-// AssertNetworkPolicyIsIngressOnly verifies that network policy is configured for ingress-only traffic.
 func AssertNetworkPolicyIsIngressOnly(t *testing.T, networkPolicy *networkingv1.NetworkPolicy) {
 	t.Helper()
 	expectedPolicyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
 	require.Equal(t, expectedPolicyTypes, networkPolicy.Spec.PolicyTypes, "NetworkPolicy should be ingress-only")
 }
 
-// AssertNetworkPolicyAbsent verifies that a NetworkPolicy with the given key does not exist.
 func AssertNetworkPolicyAbsent(t *testing.T, c client.Client, key types.NamespacedName) {
 	t.Helper()
 	require.Eventually(t, func() bool {
@@ -414,11 +387,9 @@ func AssertServiceAccountDeploymentAlign(t *testing.T, deployment *appsv1.Deploy
 		"Deployment should use the created ServiceAccount for pod permissions")
 }
 
-func ReconcileDistribution(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution, enableNetworkPolicy bool) {
+func ReconcileOGXServer(t *testing.T, instance *ogxiov1beta1.OGXServer) {
 	t.Helper()
-	// Create reconciler and run reconciliation
 	reconciler := createTestReconciler()
-	reconciler.EnableNetworkPolicy = enableNetworkPolicy
 	_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{
 			Name:      instance.Name,
@@ -432,18 +403,14 @@ func ResourceTestName(instanceName, suffix string) string {
 	return instanceName + suffix
 }
 
-func createTestReconciler() *controllers.LlamaStackDistributionReconciler {
+func createTestReconciler() *controllers.OGXServerReconciler {
 	clusterInfo := &cluster.ClusterInfo{
 		OperatorNamespace: testOperatorNamespace,
 		DistributionImages: map[string]string{
-			"starter": testImage, // Use same distribution as builder
+			"starter": testImage,
 		},
 	}
-	return &controllers.LlamaStackDistributionReconciler{
-		Client:      k8sClient,
-		Scheme:      scheme.Scheme,
-		ClusterInfo: clusterInfo,
-	}
+	return controllers.NewTestReconciler(k8sClient, scheme.Scheme, clusterInfo, &http.Client{})
 }
 
 func findVolumeByName(t *testing.T, deployment *appsv1.Deployment, volumeName string) *corev1.Volume {
@@ -468,42 +435,33 @@ func findVolumeMountByName(t *testing.T, container corev1.Container, volumeName 
 	return nil
 }
 
-// waitForResource waits for a resource to exist (convenience version).
 func waitForResource(t *testing.T, client client.Client, namespace, name string, resource client.Object) {
 	t.Helper()
 	key := types.NamespacedName{Name: name, Namespace: namespace}
 	waitForResourceWithKey(t, client, key, resource)
 }
 
-// waitForResourceWithKey waits for a resource using an existing NamespacedName.
 func waitForResourceWithKey(t *testing.T, client client.Client, key types.NamespacedName, resource client.Object) {
 	t.Helper()
 	waitForResourceWithKeyAndCondition(t, client, key, resource, nil, fmt.Sprintf("timed out waiting for %T %s to be available", resource, key))
 }
 
-// waitForResourceWithKeyAndCondition provides the full flexibility for complex conditions.
 func waitForResourceWithKeyAndCondition(t *testing.T, client client.Client, key types.NamespacedName, resource client.Object, condition func() bool, message string) {
 	t.Helper()
-	// envtest interacts with a real API server, which is eventually consistent.
 	require.Eventually(t, func() bool {
 		err := client.Get(t.Context(), key, resource)
 		if err != nil {
 			return false
 		}
-		// If no condition specified, just check existence
 		if condition == nil {
 			return true
 		}
-		// Otherwise check the custom condition
 		return condition()
 	}, testTimeout, testInterval, message)
 }
 
-// createTestNamespace creates a unique test namespace and registers cleanup.
 func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 	t.Helper()
-	// envtest does not fully support namespace deletion and cleanup between test cases.
-	// To ensure test isolation and avoid interference, a unique namespace is created for each test run.
 	testenvNamespaceCounter++
 	nsName := fmt.Sprintf("%s-%d", namePrefix, testenvNamespaceCounter)
 	namespace := &corev1.Namespace{
@@ -513,8 +471,6 @@ func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), namespace))
 
-	// Attempt to delete the namespace after the test. While envtest might not fully reclaim it,
-	// this is good practice and helps keep the test environment cleaner.
 	t.Cleanup(func() {
 		if err := k8sClient.Delete(t.Context(), namespace); err != nil {
 			t.Logf("Failed to delete test namespace %s: %v", namespace.Name, err)
@@ -523,17 +479,12 @@ func createTestNamespace(t *testing.T, namePrefix string) *corev1.Namespace {
 	return namespace
 }
 
-// loadTestCertificate generates a valid self-signed test certificate.
-// This function generates certificates programmatically to avoid dependencies on external scripts
-// or the openssl command, making tests portable across different environments including CI/CD.
 func loadTestCertificate(t *testing.T) string {
 	t.Helper()
 
-	// Generate a private key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err, "Failed to generate private key")
 
-	// Create a certificate template
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	require.NoError(t, err, "Failed to generate serial number")
 
@@ -555,11 +506,9 @@ func loadTestCertificate(t *testing.T) string {
 		IsCA:                  true,
 	}
 
-	// Create a self-signed certificate
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	require.NoError(t, err, "Failed to create certificate")
 
-	// Encode certificate to PEM format
 	certPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: certDER,

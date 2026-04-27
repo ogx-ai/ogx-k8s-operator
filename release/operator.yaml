@@ -5018,7 +5018,14 @@ rules:
   - create
   - get
   - list
+  - update
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
 - apiGroups:
   - ""
   resources:

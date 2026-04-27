@@ -22,7 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	llamaxk8siov1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -58,10 +58,9 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Register all schemes needed by controller tests
-	err = llamaxk8siov1alpha1.AddToScheme(scheme.Scheme)
+	err = ogxiov1beta1.AddToScheme(scheme.Scheme)
 	if err != nil {
-		logf.Log.Error(err, "failed to add llamaxk8siov1alpha1 scheme")
+		logf.Log.Error(err, "failed to add ogxiov1beta1 scheme")
 		os.Exit(1)
 	}
 
