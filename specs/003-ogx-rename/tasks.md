@@ -7,7 +7,7 @@
 
 ## Overview
 
-This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1beta1`) that incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`**, workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation. **`v1beta1`** is required for downstream consumers that only integrate non-alpha API versions.
+This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1beta1`) that incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS, expose, **`networkPolicy`** with native K8s ingress/egress types replacing `AllowedFromSpec` and ConfigMap feature flag), workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation. **`v1beta1`** is required for downstream consumers that only integrate non-alpha API versions.
 
 **NOTE**: Upstream runtime contracts (`llama_stack.core.server.server`, `LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, `/.llama`, etc.) are currently being updated upstream and may change. Preserving or renaming these is out of scope for the initial PRs — handle in a follow-up once upstream stabilizes.
 
@@ -23,7 +23,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 1: API Changes (PR 1)
 
-**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1beta1` with the full expanded spec (distribution, providers, resources, state storage, **`network`**, workload, overrideConfig). Generate CRD YAML and deepcopy. No controller changes yet.
+**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1beta1` with the full expanded spec (distribution, providers, resources, state storage, **`network`** (port, TLS, expose, **`networkPolicy`** with native K8s types), workload, overrideConfig). Generate CRD YAML and deepcopy. No controller changes yet.
 
 ### Go module and API group
 
@@ -44,8 +44,8 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
   - `StateStorageSpec` — `kv`, `sql`
   - `CABundleConfig` — `configMapName`
   - `TLSSpec` — `enabled`, `secretName`, `caBundle`
-  - `AllowedFromSpec` — `namespaces`, `labels`
-  - `NetworkSpec` (JSON field **`network`**) — `port`, `tls`, `expose` (`*apiextensionsv1.JSON`), `allowedFrom`
+  - `NetworkPolicySpec` — `enabled` (`*bool`, default true), `ingress` (`[]networkingv1.NetworkPolicyIngressRule`), `egress` (`[]networkingv1.NetworkPolicyEgressRule`) — native K8s types, replaces legacy `AllowedFromSpec` and ConfigMap feature flag
+  - `NetworkSpec` (JSON field **`network`**) — `port`, `tls`, `expose` (`*apiextensionsv1.JSON`), `networkPolicy` (`*NetworkPolicySpec`)
   - `PVCStorageSpec` — `size`, `mountPath`
   - `PodDisruptionBudgetSpec` — `minAvailable`, `maxUnavailable`
   - `AutoscalingSpec` — `minReplicas`, `maxReplicas`, `targetCPUUtilizationPercentage`, `targetMemoryUtilizationPercentage`
@@ -114,7 +114,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 2: Controller Foundation (PR 2)
 
-**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, **`spec.network`** (Service, Ingress, NetworkPolicy), and workload (Deployment, HPA, PDB).
+**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, **`spec.network`** (Service, Ingress, NetworkPolicy via native K8s types with per-CR enable/disable and auto-injected kube-dns egress), and workload (Deployment, HPA, PDB). Remove ConfigMap-based `enableNetworkPolicy` feature flag.
 
 ### Controller rename
 
@@ -129,7 +129,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 - [ ] T038 Update reconciler to work with new `OGXServerSpec` structure: map `spec.distribution` to container image, `spec.workload.replicas` to deployment replicas, **`spec.network.port`** to container/service port, etc.
 - [ ] T039 Update `controllers/resource_helper.go`: adapt to new spec shape (distribution, workload.storage, workload.resources, workload.overrides, **`spec.network.tls`**). Preserve all upstream runtime contract strings per FR-002.
 - [ ] T040 Update `controllers/status.go`: rename all `LlamaStackDistribution*` type references to `OGXServer*`, add new status fields (`ResolvedDistribution`, `ConfigGeneration`)
-- [ ] T041 Update `controllers/network_resources.go`: adapt to **`spec.network`** shape (expose, allowedFrom, tls), rename type references, update managed-by label to `"ogx-operator"`
+- [ ] T041 Update `controllers/network_resources.go`: adapt to **`spec.network`** shape (expose, `networkPolicy` with native K8s types, tls), rename type references, update managed-by label to `"ogx-operator"`. Implement NetworkPolicy reconciliation: when `networkPolicy.enabled` is false, delete existing NP; when enabled with no custom rules, generate safe defaults; when custom `ingress`/`egress` provided, use verbatim; auto-inject kube-dns egress rule (UDP/TCP 53 to kube-system) when any egress rules are configured. Remove ConfigMap-based `enableNetworkPolicy` feature flag.
 - [ ] T042 Update `controllers/kubebuilder_rbac.go`: change RBAC markers from `llamastack.io` to `ogx.io`, `llamastackdistributions` to `ogxservers`
 - [ ] T043 Update `controllers/suite_test.go`: rename scheme registration
 - [ ] T044 Update `controllers/testing_support_test.go`: rename builder and reconciler references, adapt to new spec structure
@@ -143,7 +143,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 - [ ] T047 Update `controllers/manifests/base/kustomization.yaml`: labels to `app.kubernetes.io/managed-by: ogx-operator`, `app.kubernetes.io/part-of: ogx`, `ogx.io/watch: "true"`
 - [ ] T048 Update `controllers/manifests/base/deployment.yaml`: `app: llama-stack` → `app: ogx`
-- [ ] T049 Update `controllers/manifests/base/service.yaml`, `networkpolicy.yaml`, `hpa.yaml`, `pdb.yaml`: `app: llama-stack` → `app: ogx`
+- [ ] T049 Update `controllers/manifests/base/service.yaml`, `networkpolicy.yaml`, `hpa.yaml`, `pdb.yaml`: `app: llama-stack` → `app: ogx`. Note: `networkpolicy.yaml` base template now serves as the skeleton for operator-managed NP; the controller populates `ingress`/`egress` rules from `spec.network.networkPolicy` at reconcile time.
 
 ### Package updates
 
@@ -193,7 +193,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 ### Controller tests
 
 - [ ] T072 Update `controllers/resource_helper_test.go`: adapt to new spec structure
-- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new **`spec.network`** schema
+- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new **`spec.network.networkPolicy`** schema (test default NP generation, custom ingress/egress passthrough, kube-dns auto-injection, `enabled: false` deletion)
 - [ ] T074 Update all test files in `pkg/deploy/`: `kustomizer_test.go`, `deploy_test.go`, `suite_test.go`, `plugins/networkpolicy_transformer_test.go`, `plugins/field_mutator_test.go`
 
 ### Adoption tests
@@ -274,9 +274,17 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 This is a **breaking change**. Only the OGX operator will be available after the upgrade — there is no period where both operators coexist in the same workload. Users must manually create new OGXServer CRs and migrate configuration.
 
-### Key label change: NetworkPolicy impact
+### Key changes: NetworkPolicy
 
-The rename changes `DefaultLabelValue` from `llama-stack` to `ogx`. This affects every resource that uses `podSelector` or `selector` with the `app` label:
+Two changes affect NetworkPolicy behavior:
+
+**1. Label change**: `DefaultLabelValue` changes from `llama-stack` to `ogx`, affecting `podSelector` on all resources.
+
+**2. NetworkPolicy API redesign**: The legacy `AllowedFromSpec` (namespace names and labels) and the ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.networkPolicy`:
+
+- **`enabled`** (default `true`): per-CR toggle replacing the global ConfigMap feature flag. Set to `false` to disable NP creation entirely.
+- **`ingress`** (`[]networkingv1.NetworkPolicyIngressRule`): native K8s types. When nil, operator generates safe defaults (same-namespace + operator-namespace on service port). When set, used verbatim.
+- **`egress`** (`[]networkingv1.NetworkPolicyEgressRule`): native K8s types. When nil, egress is unrestricted. When set, operator auto-injects a kube-dns egress rule (UDP/TCP 53 to kube-system) to prevent DNS breakage.
 
 **Before (old operator)**:
 ```yaml
@@ -295,7 +303,7 @@ spec:
         - { protocol: TCP, port: 8321 }
 ```
 
-**After (new operator)**:
+**After (new operator, default behavior — no custom rules)**:
 ```yaml
 spec:
   podSelector:
@@ -311,6 +319,8 @@ spec:
       ports:
         - { protocol: TCP, port: 8321 }
 ```
+
+**Migration from old `allowedFrom`**: Translate `allowedFrom.namespaces` and `allowedFrom.labels` to equivalent `spec.network.networkPolicy.ingress[].from` entries using `namespaceSelector`. Translate ConfigMap `enableNetworkPolicy: false` to `spec.network.networkPolicy.enabled: false` on the CR.
 
 ### Upgrade Path (with PVC data preservation)
 

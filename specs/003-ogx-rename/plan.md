@@ -4,7 +4,7 @@
 
 ## Summary
 
-Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1beta1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`**, workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation.
+Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1beta1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS, expose, **`networkPolicy`** with native K8s ingress/egress types), workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation. The legacy `AllowedFromSpec` and ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.networkPolicy` with per-CR `enabled` toggle and native `NetworkPolicyIngressRule`/`NetworkPolicyEgressRule` types.
 
 Upstream runtime contracts (`LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, etc.) are being updated upstream and are out of scope for the initial PRs.
 
@@ -58,7 +58,7 @@ controllers/
 ├── kubebuilder_rbac.go            # MODIFY: ogx.io markers
 ├── status.go                      # MODIFY: OGXServer types, new conditions
 ├── resource_helper.go             # MODIFY: new spec shape
-├── network_resources.go           # MODIFY: new `spec.network` shape
+├── network_resources.go           # MODIFY: new `spec.network.networkPolicy` shape (native K8s types, per-CR enable, auto kube-dns egress)
 └── manifests/base/*.yaml          # MODIFY: app: ogx labels
 
 config/
@@ -78,6 +78,7 @@ Phases map 1:1 to the task list in `tasks.md`. See that file for the complete ta
 
 New `OGXServer` types under `ogx.io/v1beta1` with the expanded spec from 002:
 - `OGXServerSpec` with `distribution`, `providers`, `resources`, `storage`, `disabled`, **`network`**, `workload`, `externalProviders`, `overrideConfig`
+- **`spec.network.networkPolicy`**: `NetworkPolicySpec` with `enabled` (default true), `ingress` (`[]networkingv1.NetworkPolicyIngressRule`), `egress` (`[]networkingv1.NetworkPolicyEgressRule`). Uses native Kubernetes NetworkPolicy types for zero-conversion, full-power policy configuration. When nil/default, operator generates safe defaults (ingress on service port from same-namespace + operator-namespace; egress unrestricted). Replaces the legacy `AllowedFromSpec` and the ConfigMap-based `enableNetworkPolicy` feature flag.
 - CEL validation: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`; `distribution.name` mutually exclusive with `distribution.image`
 - Status types: `OGXServerStatus` with `ResolvedDistribution`, `ConfigGeneration`, `ServerVersion`
 - Adoption annotation helpers (`GetAdoptStorageSource`, `GetEffectivePVCName`)
@@ -87,6 +88,7 @@ New `OGXServer` types under `ogx.io/v1beta1` with the expanded spec from 002:
 
 Rename controller files and adapt the reconciler to the new spec structure:
 - Map `spec.distribution` → image, `spec.workload` → Deployment, **`spec.network`** → Service/Ingress/NetworkPolicy
+- **NetworkPolicy reconciliation**: read `spec.network.networkPolicy.enabled` (default true); when disabled, delete existing NP. When enabled with no custom rules, generate default ingress (same-namespace + operator-namespace on service port, egress unrestricted). When custom `ingress`/`egress` provided, use verbatim. Auto-inject kube-dns egress rule (UDP/TCP 53) when any egress rules are configured. Remove the ConfigMap-based `enableNetworkPolicy` feature flag and `pkg/featureflags/` package.
 - `overrideConfig` path: mount user-provided ConfigMap
 - Default path: deploy with distribution's embedded config (no ConfigMap mount)
 - Update all packages (`pkg/deploy`, `pkg/cluster`), `main.go`, manifests
