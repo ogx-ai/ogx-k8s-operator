@@ -45,20 +45,19 @@ data:
           backend: kv_default
           namespace: prompts
 ---
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: llamastack-with-userconfig
+  name: ogxserver-with-userconfig
 spec:
-  replicas: 1
-  server:
-    distribution:
-      name: starter
-    containerSpec:
-      port: 8321
+  distribution:
+    name: starter
+  overrideConfig:
+    configMapName: llama-stack-config
+  network:
+    port: 8321
+  workload:
+    overrides:
       env:
       - name: OLLAMA_EMBEDDING_MODEL
         value: all-minilm:l6-v2
-    userConfig:
-      configMapName: llama-stack-config
-      # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
