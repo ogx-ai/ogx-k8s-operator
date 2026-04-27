@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  IMG: quay.io/llamastack/llama-stack-k8s-operator:${{ github.event.inputs.version }}
+  IMG: quay.io/ogx-ai/ogx-k8s-operator:${{ github.event.inputs.version }}
 
 jobs:
   build-arch:

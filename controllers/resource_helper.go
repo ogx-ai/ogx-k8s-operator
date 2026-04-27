@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"

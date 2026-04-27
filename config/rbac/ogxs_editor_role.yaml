@@ -1,16 +1,16 @@
-# permissions for end users to edit LlamaStackDistributions.
+# permissions for end users to edit OGXServers.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: llsd-editor-role
+  name: ogxs-editor-role
   labels:
     rbac.authorization.k8s.io/aggregate-to-edit: "true"
     rbac.authorization.k8s.io/aggregate-to-admin: "true"
 rules:
 - apiGroups:
-  - llamastack.io
+  - ogx.io
   resources:
-  - llamastackdistributions
+  - ogxservers
   verbs:
   - create
   - delete
@@ -20,8 +20,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - llamastack.io
+  - ogx.io
   resources:
-  - llamastackdistributions/status
+  - ogxservers/status
   verbs:
   - get

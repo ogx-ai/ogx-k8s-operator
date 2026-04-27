@@ -62,32 +62,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - llamastack.io
-  resources:
-  - llamastackdistributions
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - llamastack.io
-  resources:
-  - llamastackdistributions/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - llamastack.io
-  resources:
-  - llamastackdistributions/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
   - networking.k8s.io
   resources:
   - ingresses
@@ -100,6 +74,32 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ogx.io
+  resources:
+  - ogxservers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ogx.io
+  resources:
+  - ogxservers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ogx.io
+  resources:
+  - ogxservers/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - policy
   resources:

@@ -5,7 +5,7 @@ kind: Kustomization
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/llamastack.io_llamastackdistributions.yaml
+- bases/ogx.io_ogxservers.yaml
 #+kubebuilder:scaffold:crdkustomizeresource
 
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
@@ -20,13 +20,13 @@ resources:
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 # Uncomment 'CERTMANAGER' sections to enable the CA injection in the admission webhooks.
 # 'CERTMANAGER' needs to be enabled to use ca injection
-#- patches/cainjection_in_llamastackdistributions.yaml
+#- patches/cainjection_in_ogxservers.yaml
 
 
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 # Uncomment 'CERTMANAGER' sections to enable the CA injection in the admission webhooks.
 # 'CERTMANAGER' needs to be enabled to use ca injection
-#- patches/cainjection_in_llamastackdistributions.yaml
+#- patches/cainjection_in_ogxservers.yaml
 
 # the following config is for teaching kustomize how to do kustomization for CRDs.
 configurations:

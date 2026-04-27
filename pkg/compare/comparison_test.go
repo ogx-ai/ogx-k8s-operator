@@ -3,7 +3,7 @@ package compare_test
 import (
 	"testing"
 
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/compare"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/compare"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

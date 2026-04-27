@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"

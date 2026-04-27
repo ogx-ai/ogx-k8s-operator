@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"

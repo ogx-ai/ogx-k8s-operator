@@ -1,22 +1,22 @@
-# permissions for end users to view LlamaStackDistributions.
+# permissions for end users to view OGXServers.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: llsd-viewer-role
+  name: ogxs-viewer-role
   labels:
     rbac.authorization.k8s.io/aggregate-to-view: "true"
 rules:
 - apiGroups:
-  - llamastack.io
+  - ogx.io
   resources:
-  - llamastackdistributions
+  - ogxservers
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - llamastack.io
+  - ogx.io
   resources:
-  - llamastackdistributions/status
+  - ogxservers/status
   verbs:
   - get
