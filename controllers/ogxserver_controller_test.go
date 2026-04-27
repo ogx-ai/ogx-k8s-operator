@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	controllers "github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
@@ -36,41 +36,41 @@ func TestStorageConfiguration(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		buildInstance  func(namespace string) *llamav1alpha1.LlamaStackDistribution
+		buildInstance  func(namespace string) *ogxiov1beta1.OGXServer
 		expectedVolume corev1.Volume
 		expectedMount  corev1.VolumeMount
 	}{
 		{
 			name: "No storage configuration - should use emptyDir",
-			buildInstance: func(namespace string) *llamav1alpha1.LlamaStackDistribution {
-				return NewDistributionBuilder().
+			buildInstance: func(namespace string) *ogxiov1beta1.OGXServer {
+				return NewOGXServerBuilder().
 					WithName("test").
 					WithNamespace(namespace).
 					WithStorage(nil).
 					Build()
 			},
 			expectedVolume: corev1.Volume{
-				Name: "lls-storage",
+				Name: testStorageVolumeName,
 				VolumeSource: corev1.VolumeSource{
 					EmptyDir: &corev1.EmptyDirVolumeSource{},
 				},
 			},
 			expectedMount: corev1.VolumeMount{
-				Name:      "lls-storage",
-				MountPath: llamav1alpha1.DefaultMountPath,
+				Name:      testStorageVolumeName,
+				MountPath: ogxiov1beta1.DefaultMountPath,
 			},
 		},
 		{
 			name: "Storage with default values",
-			buildInstance: func(namespace string) *llamav1alpha1.LlamaStackDistribution {
-				return NewDistributionBuilder().
+			buildInstance: func(namespace string) *ogxiov1beta1.OGXServer {
+				return NewOGXServerBuilder().
 					WithName("test").
 					WithNamespace(namespace).
 					WithStorage(DefaultTestStorage()).
 					Build()
 			},
 			expectedVolume: corev1.Volume{
-				Name: "lls-storage",
+				Name: testStorageVolumeName,
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: "test-pvc",
@@ -78,21 +78,21 @@ func TestStorageConfiguration(t *testing.T) {
 				},
 			},
 			expectedMount: corev1.VolumeMount{
-				Name:      "lls-storage",
-				MountPath: llamav1alpha1.DefaultMountPath,
+				Name:      testStorageVolumeName,
+				MountPath: ogxiov1beta1.DefaultMountPath,
 			},
 		},
 		{
 			name: "Storage with custom values",
-			buildInstance: func(namespace string) *llamav1alpha1.LlamaStackDistribution {
-				return NewDistributionBuilder().
+			buildInstance: func(namespace string) *ogxiov1beta1.OGXServer {
+				return NewOGXServerBuilder().
 					WithName("test").
 					WithNamespace(namespace).
 					WithStorage(CustomTestStorage("20Gi", "/custom/path")).
 					Build()
 			},
 			expectedVolume: corev1.Volume{
-				Name: "lls-storage",
+				Name: testStorageVolumeName,
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 						ClaimName: "test-pvc",
@@ -100,7 +100,7 @@ func TestStorageConfiguration(t *testing.T) {
 				},
 			},
 			expectedMount: corev1.VolumeMount{
-				Name:      "lls-storage",
+				Name:      testStorageVolumeName,
 				MountPath: "/custom/path",
 			},
 		},
@@ -115,12 +115,12 @@ func TestStorageConfiguration(t *testing.T) {
 			require.NoError(t, k8sClient.Create(t.Context(), instance))
 			t.Cleanup(func() {
 				if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
-					t.Logf("Failed to delete LlamaStackDistribution instance %s/%s: %v", instance.Namespace, instance.Name, err)
+					t.Logf("Failed to delete OGXServer instance %s/%s: %v", instance.Namespace, instance.Name, err)
 				}
 			})
 
 			// act: reconcile the instance
-			ReconcileDistribution(t, instance, false)
+			ReconcileOGXServer(t, instance)
 
 			// assert
 			deployment := &appsv1.Deployment{}
@@ -135,12 +135,12 @@ func TestStorageConfiguration(t *testing.T) {
 			AssertDeploymentHasVolumeMount(t, deployment, tt.expectedMount.MountPath)
 
 			// verify PVC is created when storage is configured
-			if instance.Spec.Server.Storage != nil {
+			if instance.Spec.Workload != nil && instance.Spec.Workload.Storage != nil {
 				expectedPVCName := tt.expectedVolume.PersistentVolumeClaim.ClaimName
 				pvc := AssertPVCExists(t, k8sClient, instance.Namespace, expectedPVCName)
-				expectedSize := instance.Spec.Server.Storage.Size
+				expectedSize := instance.Spec.Workload.Storage.Size
 				if expectedSize == nil {
-					AssertPVCHasSize(t, pvc, llamav1alpha1.DefaultStorageSize.String())
+					AssertPVCHasSize(t, pvc, ogxiov1beta1.DefaultStorageSize.String())
 				} else {
 					AssertPVCHasSize(t, pvc, expectedSize.String())
 				}
@@ -154,7 +154,6 @@ func TestConfigMapWatchingFunctionality(t *testing.T) {
 
 	// Create a test namespace
 	namespace := createTestNamespace(t, "test-configmap-watch")
-
 	// Create a ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -182,16 +181,16 @@ server:
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
 
-	// Create a LlamaStackDistribution that references the ConfigMap
-	instance := NewDistributionBuilder().
+	// Create an OGXServer that references the ConfigMap
+	instance := NewOGXServerBuilder().
 		WithName("test-configmap-reference").
 		WithNamespace(namespace.Name).
-		WithUserConfig(configMap.Name).
+		WithOverrideConfig(configMap.Name).
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
 	// Reconcile to create initial deployment
-	ReconcileDistribution(t, instance, false)
+	ReconcileOGXServer(t, instance)
 
 	// Get the initial deployment and check for ConfigMap hash annotation
 	deployment := &appsv1.Deployment{}
@@ -230,7 +229,7 @@ server:
 	time.Sleep(2 * time.Second)
 
 	// Trigger reconciliation (in real scenarios this would be triggered by the watch)
-	ReconcileDistribution(t, instance, false)
+	ReconcileOGXServer(t, instance)
 
 	// Verify the deployment was updated with a new hash
 	waitForResourceWithKeyAndCondition(
@@ -261,14 +260,14 @@ func TestReconcile(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// --- arrange ---
-	instanceName := "llamastackdistribution-sample"
-	instancePort := llamav1alpha1.DefaultServerPort
+	instanceName := "ogxserver-sample"
+	instancePort := ogxiov1beta1.DefaultServerPort
 	expectedSelector := map[string]string{
-		llamav1alpha1.DefaultLabelKey: llamav1alpha1.DefaultLabelValue,
-		"app.kubernetes.io/instance":  instanceName,
+		ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultLabelValue,
+		"app.kubernetes.io/instance": instanceName,
 	}
 	expectedPort := corev1.ServicePort{
-		Name:       llamav1alpha1.DefaultServicePortName,
+		Name:       ogxiov1beta1.DefaultServicePortName,
 		Port:       instancePort,
 		TargetPort: intstr.FromInt(int(instancePort)),
 		Protocol:   corev1.ProtocolTCP,
@@ -279,7 +278,7 @@ func TestReconcile(t *testing.T) {
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespaceName)
 
 	namespace := createTestNamespace(t, operatorNamespaceName)
-	instance := NewDistributionBuilder().
+	instance := NewOGXServerBuilder().
 		WithName(instanceName).
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
@@ -288,7 +287,7 @@ func TestReconcile(t *testing.T) {
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
 	// --- act ---
-	ReconcileDistribution(t, instance, true)
+	ReconcileOGXServer(t, instance)
 
 	service := &corev1.Service{}
 	waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-service", service)
@@ -347,22 +346,21 @@ func newMockAPIResponse(t *testing.T, data any) *http.Response {
 	}
 }
 
-func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
+func TestOGXServerProviderAndVersionInfo(t *testing.T) {
 	// arrange
-	enableNetworkPolicy := false
-	expectedLlamaStackVersionInfo := "v-test"
+	expectedServerVersion := "v-test"
 	expectedProviderID := "mock-ollama"
 
 	// define the data structure for the mock providers response
 	providerData := struct {
-		Data []llamav1alpha1.ProviderInfo `json:"data"`
+		Data []ogxiov1beta1.ProviderInfo `json:"data"`
 	}{
-		Data: []llamav1alpha1.ProviderInfo{
+		Data: []ogxiov1beta1.ProviderInfo{
 			{
 				ProviderID:   expectedProviderID,
 				ProviderType: "remote::ollama",
 				API:          "inference",
-				Health:       llamav1alpha1.ProviderHealthStatus{Status: "OK", Message: ""},
+				Health:       ogxiov1beta1.ProviderHealthStatus{Status: "OK", Message: ""},
 				Config:       apiextensionsv1.JSON{Raw: []byte(`{"url": "http://mock.server"}`)},
 			},
 		},
@@ -372,7 +370,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 	versionData := struct {
 		Version string `json:"version"`
 	}{
-		Version: expectedLlamaStackVersionInfo,
+		Version: expectedServerVersion,
 	}
 
 	// create the mock http client that uses our custom roundtripper
@@ -396,7 +394,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 	}
 
 	namespace := createTestNamespace(t, "test-status")
-	instance := NewDistributionBuilder().
+	instance := NewOGXServerBuilder().
 		WithName("test-status-instance").
 		WithNamespace(namespace.Name).
 		Build()
@@ -404,7 +402,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 
 	testClusterInfo := &cluster.ClusterInfo{
 		DistributionImages: map[string]string{
-			"starter": "docker.io/llamastack/distribution-starter:latest",
+			"starter": testImage,
 		},
 	}
 
@@ -413,7 +411,6 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 		scheme.Scheme,
 		testClusterInfo,
 		mockClient,
-		enableNetworkPolicy,
 	)
 
 	// act (part 1)
@@ -441,7 +438,7 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 	require.NoError(t, err)
 
 	// assert
-	updatedInstance := &llamav1alpha1.LlamaStackDistribution{}
+	updatedInstance := &ogxiov1beta1.OGXServer{}
 	waitForResource(t, k8sClient, namespace.Name, instance.Name, updatedInstance)
 
 	// validate provider info
@@ -451,13 +448,13 @@ func TestLlamaStackProviderAndVersionInfo(t *testing.T) {
 	require.Equal(t, "OK", actualProvider.Health.Status, "provider health should match the mock response")
 	require.NotEmpty(t, actualProvider.Config, "provider config should be populated")
 	// validate llama stack version
-	require.Equal(t, expectedLlamaStackVersionInfo,
-		updatedInstance.Status.Version.LlamaStackServerVersion,
+	require.Equal(t, expectedServerVersion,
+		updatedInstance.Status.Version.ServerVersion,
 		"server version should match the mock response")
 
 	// validate service URL
 	expectedServiceURL := fmt.Sprintf("http://%s-service.%s.svc.cluster.local:%d",
-		instance.Name, instance.Namespace, llamav1alpha1.DefaultServerPort)
+		instance.Name, instance.Namespace, ogxiov1beta1.DefaultServerPort)
 	require.Equal(t, expectedServiceURL, updatedInstance.Status.ServiceURL,
 		"service URL should be set to the internal Kubernetes service URL")
 }
@@ -466,22 +463,31 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	tests := []struct {
-		name  string
-		setup func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution)
+		name                  string
+		disableNPBeforeCreate bool
+		setup                 func(t *testing.T, instance *ogxiov1beta1.OGXServer)
 	}{
 		{
-			name: "enabled then disabled deletes NetworkPolicy",
-			setup: func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution) {
+			name:                  "enabled then disabled deletes NetworkPolicy",
+			disableNPBeforeCreate: false,
+			setup: func(t *testing.T, instance *ogxiov1beta1.OGXServer) {
 				t.Helper()
-				// ensure NetworkPolicy exists by reconciling with feature enabled.
-				ReconcileDistribution(t, instance, true)
+				ReconcileOGXServer(t, instance)
 				waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-network-policy", &networkingv1.NetworkPolicy{})
+				require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, instance))
+				if instance.Spec.Network == nil {
+					instance.Spec.Network = &ogxiov1beta1.NetworkSpec{}
+				}
+			instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
+				Enabled: boolPtr(false),
+			}
+			require.NoError(t, k8sClient.Update(t.Context(), instance))
 			},
 		},
 		{
-			name: "disabled from start leaves NetworkPolicy absent",
-			setup: func(t *testing.T, instance *llamav1alpha1.LlamaStackDistribution) {
-				// no setup needed - NetworkPolicy doesn't exist
+			name:                  "disabled from start leaves NetworkPolicy absent",
+			disableNPBeforeCreate: true,
+			setup: func(t *testing.T, instance *ogxiov1beta1.OGXServer) {
 				t.Helper()
 			},
 		},
@@ -489,26 +495,30 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// --- arrange ---
 			operatorNamespaceName := "test-operator-namespace"
 			t.Setenv("OPERATOR_NAMESPACE", operatorNamespaceName)
 
 			namespace := createTestNamespace(t, "test-networkpolicy")
-			instance := NewDistributionBuilder().
+			instance := NewOGXServerBuilder().
 				WithName(fmt.Sprintf("np-config-%d", i)).
 				WithNamespace(namespace.Name).
 				WithDistribution("starter").
 				Build()
-			require.NoError(t, k8sClient.Create(t.Context(), instance))
+			if tt.disableNPBeforeCreate {
+				if instance.Spec.Network == nil {
+					instance.Spec.Network = &ogxiov1beta1.NetworkSpec{}
+				}
+			instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
+				Enabled: boolPtr(false),
+			}
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), instance))
 			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
 
-			// preconditions for this scenario
 			tt.setup(t, instance)
 
-			// --- act ---
-			ReconcileDistribution(t, instance, false)
+			ReconcileOGXServer(t, instance)
 
-			// --- assert ---
 			npKey := types.NamespacedName{Name: instance.Name + "-network-policy", Namespace: instance.Namespace}
 			AssertNetworkPolicyAbsent(t, k8sClient, npKey)
 		})
@@ -566,7 +576,7 @@ func TestCABundleConfigMapKeyValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// --- arrange ---
 			namespace := createTestNamespace(t, "test-cabundle-validation")
-			instance := NewDistributionBuilder().
+			instance := NewOGXServerBuilder().
 				WithName("test-cabundle").
 				WithNamespace(namespace.Name).
 				WithCABundle("test-ca-configmap", tt.configMapKeys).
@@ -623,7 +633,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		}
 		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
 
-		instance := NewDistributionBuilder().
+		instance := NewOGXServerBuilder().
 			WithName("test-managed").
 			WithNamespace(namespace.Name).
 			WithCABundle("source-ca-bundle", []string{"root-ca.crt", "intermediate.crt"}).
@@ -633,7 +643,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
 
 		// --- act ---
-		ReconcileDistribution(t, instance, false)
+		ReconcileOGXServer(t, instance)
 
 		// --- assert ---
 		managedConfigMapName := instance.Name + "-ca-bundle"
@@ -652,7 +662,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		AssertResourceOwnedByInstance(t, managedConfigMap, instance)
 
 		// Verify labels
-		require.Equal(t, "llama-stack-operator", managedConfigMap.Labels["app.kubernetes.io/managed-by"])
+		require.Equal(t, "ogx-operator", managedConfigMap.Labels["app.kubernetes.io/managed-by"])
 		require.Equal(t, instance.Name, managedConfigMap.Labels["app.kubernetes.io/instance"])
 		require.Equal(t, "ca-bundle", managedConfigMap.Labels["app.kubernetes.io/component"])
 		require.Equal(t, controllers.WatchLabelValue, managedConfigMap.Labels[controllers.WatchLabelKey],
@@ -677,7 +687,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		}
 		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
 
-		instance := NewDistributionBuilder().
+		instance := NewOGXServerBuilder().
 			WithName("test-update").
 			WithNamespace(namespace.Name).
 			WithCABundle("source-ca-bundle", nil).
@@ -686,7 +696,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		require.NoError(t, k8sClient.Create(t.Context(), instance))
 		t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
 
-		ReconcileDistribution(t, instance, false)
+		ReconcileOGXServer(t, instance)
 
 		managedConfigMapName := instance.Name + "-ca-bundle"
 		managedConfigMap := &corev1.ConfigMap{}
@@ -699,7 +709,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		sourceConfigMap.Data["ca-bundle.crt"] = testCert + "\n" + testCert
 		require.NoError(t, k8sClient.Update(t.Context(), sourceConfigMap))
 
-		ReconcileDistribution(t, instance, false)
+		ReconcileOGXServer(t, instance)
 
 		// --- assert ---
 		require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
@@ -733,7 +743,7 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1234567890ABCDEF
 		}
 		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
 
-		instance := NewDistributionBuilder().
+		instance := NewOGXServerBuilder().
 			WithName("test-reject").
 			WithNamespace(namespace.Name).
 			WithCABundle("source-with-key", nil).
@@ -776,7 +786,7 @@ InvalidCertificateDataThatIsNotValidX509
 		}
 		require.NoError(t, k8sClient.Create(t.Context(), sourceConfigMap))
 
-		instance := NewDistributionBuilder().
+		instance := NewOGXServerBuilder().
 			WithName("test-reject-invalid").
 			WithNamespace(namespace.Name).
 			WithCABundle("source-with-invalid-cert", nil).
@@ -860,7 +870,7 @@ onemore: registry.redhat.io/org/imagename@sha256:1234567890123456789012345678901
 	require.NotContains(t, result, "malformed", "Malformed entry should be skipped")
 }
 
-func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
+func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// Create operator namespace
@@ -870,13 +880,11 @@ func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
 	// Create test ConfigMap with image overrides
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
+			Name:      "ogx-operator-config",
 			Namespace: operatorNamespace.Name,
 		},
 		Data: map[string]string{
 			"image-overrides": "starter: quay.io/custom/llama-stack:starter",
-			"featureFlags": `enableNetworkPolicy:
-    enabled: false`,
 		},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
@@ -888,7 +896,7 @@ func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
 	}
 
 	// Call the function
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+	reconciler, err := controllers.NewOGXServerReconciler(
 		t.Context(),
 		k8sClient,
 		scheme.Scheme,
@@ -902,7 +910,6 @@ func TestNewLlamaStackDistributionReconciler_WithImageOverrides(t *testing.T) {
 	require.Len(t, reconciler.ImageMappingOverrides, 1, "Should have one image override")
 	require.Equal(t, "quay.io/custom/llama-stack:starter",
 		reconciler.ImageMappingOverrides["starter"], "Override should match expected value")
-	require.False(t, reconciler.EnableNetworkPolicy, "Network policy should be disabled")
 }
 
 func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
@@ -916,18 +923,15 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	// Create initial ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
+			Name:      "ogx-operator-config",
 			Namespace: operatorNamespace.Name,
 		},
-		Data: map[string]string{
-			"featureFlags": `enableNetworkPolicy:
-    enabled: false`,
-		},
+		Data: map[string]string{},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
 
-	// Create LlamaStackDistribution instance using starter
-	instance := NewDistributionBuilder().
+	// Create test instance using starter
+	instance := NewOGXServerBuilder().
 		WithName("test-configmap-update").
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
@@ -940,7 +944,7 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		DistributionImages: map[string]string{"starter": "default-starter-image"},
 	}
 
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+	reconciler, err := controllers.NewOGXServerReconciler(
 		t.Context(),
 		k8sClient,
 		scheme.Scheme,
@@ -970,6 +974,9 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	}, configMap))
 
 	// Update ConfigMap with new overrides
+	if configMap.Data == nil {
+		configMap.Data = make(map[string]string)
+	}
 	configMap.Data["image-overrides"] = "starter: quay.io/custom/llama-stack:starter"
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
@@ -989,80 +996,6 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		}, "Deployment should be updated with new image")
 }
 
-func TestRefreshOperatorConfigPicksUpChanges(t *testing.T) {
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
-
-	namespace := createTestNamespace(t, "test-refresh-config")
-	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
-	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
-
-	configMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
-			Namespace: operatorNamespace.Name,
-		},
-		Data: map[string]string{
-			"featureFlags": `enableNetworkPolicy:
-    enabled: false`,
-		},
-	}
-	require.NoError(t, k8sClient.Create(t.Context(), configMap))
-
-	instance := NewDistributionBuilder().
-		WithName("test-refresh-config").
-		WithNamespace(namespace.Name).
-		WithDistribution("starter").
-		Build()
-	require.NoError(t, k8sClient.Create(t.Context(), instance))
-
-	clusterInfo := &cluster.ClusterInfo{
-		OperatorNamespace:  operatorNamespace.Name,
-		DistributionImages: map[string]string{"starter": "default-starter-image"},
-	}
-
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
-		t.Context(),
-		k8sClient,
-		scheme.Scheme,
-		clusterInfo,
-		k8sClient,
-	)
-	require.NoError(t, err)
-
-	// Initial reconcile creates resources.
-	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
-	})
-	require.NoError(t, err)
-
-	// Verify network policy is NOT created (feature disabled).
-	networkPolicy := &networkingv1.NetworkPolicy{}
-	npName := instance.Name + "-network-policy"
-	err = k8sClient.Get(t.Context(), types.NamespacedName{Name: npName, Namespace: instance.Namespace}, networkPolicy)
-	require.True(t, apierrors.IsNotFound(err), "NetworkPolicy should not exist when feature is disabled")
-
-	// Re-fetch the ConfigMap to get the latest resource version (initializeOperatorConfigMap
-	// may have updated it to add the watch label).
-	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
-		Name:      configMap.Name,
-		Namespace: configMap.Namespace,
-	}, configMap))
-
-	// Enable network policy via operator config update.
-	configMap.Data["featureFlags"] = `enableNetworkPolicy:
-    enabled: true`
-	require.NoError(t, k8sClient.Update(t.Context(), configMap))
-
-	// Reconcile again -- refreshOperatorConfig picks up the new flag.
-	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
-	})
-	require.NoError(t, err)
-
-	// Verify network policy IS created now.
-	waitForResource(t, k8sClient, instance.Namespace, npName, networkPolicy)
-}
-
 func TestReconcileRequeuesAfterSuccess(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -1072,17 +1005,14 @@ func TestReconcileRequeuesAfterSuccess(t *testing.T) {
 
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llama-stack-operator-config",
+			Name:      "ogx-operator-config",
 			Namespace: operatorNamespace.Name,
 		},
-		Data: map[string]string{
-			"featureFlags": `enableNetworkPolicy:
-    enabled: false`,
-		},
+		Data: map[string]string{},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
 
-	instance := NewDistributionBuilder().
+	instance := NewOGXServerBuilder().
 		WithName("test-requeue").
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
@@ -1094,7 +1024,7 @@ func TestReconcileRequeuesAfterSuccess(t *testing.T) {
 		DistributionImages: map[string]string{"starter": "default-starter-image"},
 	}
 
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(
+	reconciler, err := controllers.NewOGXServerReconciler(
 		t.Context(),
 		k8sClient,
 		scheme.Scheme,
@@ -1140,10 +1070,10 @@ func TestMapConfigMapToReconcileRequests(t *testing.T) {
 	require.NoError(t, k8sClient.Create(t.Context(), userConfigMap))
 
 	// Create an instance that references this ConfigMap.
-	instance := NewDistributionBuilder().
+	instance := NewOGXServerBuilder().
 		WithName("test-cm-mapping").
 		WithNamespace(namespace.Name).
-		WithUserConfig(userConfigMap.Name).
+		WithOverrideConfig(userConfigMap.Name).
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 	t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
@@ -1174,7 +1104,7 @@ func TestMapConfigMapToReconcileRequests_SkipsManagedConfigMaps(t *testing.T) {
 			Name:      "managed-cm",
 			Namespace: namespace.Name,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				"app.kubernetes.io/managed-by": "ogx-operator",
 				controllers.WatchLabelKey:      controllers.WatchLabelValue,
 			},
 		},
@@ -1211,7 +1141,7 @@ func TestUserConfigMapPredicate(t *testing.T) {
 		{
 			name: "operator-managed ConfigMap is rejected even with watch label",
 			labels: map[string]string{
-				"app.kubernetes.io/managed-by": "llama-stack-operator",
+				"app.kubernetes.io/managed-by": "ogx-operator",
 				controllers.WatchLabelKey:      controllers.WatchLabelValue,
 			},
 			expected: false,
@@ -1250,3 +1180,5 @@ func TestUserConfigMapPredicate(t *testing.T) {
 		})
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }

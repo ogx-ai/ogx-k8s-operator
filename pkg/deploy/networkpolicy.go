@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,7 +15,7 @@ import (
 
 // ApplyNetworkPolicy creates or updates a NetworkPolicy.
 func ApplyNetworkPolicy(ctx context.Context, c client.Client, scheme *runtime.Scheme,
-	instance *llamav1alpha1.LlamaStackDistribution, networkPolicy *networkingv1.NetworkPolicy, log logr.Logger) error {
+	instance *ogxiov1beta1.OGXServer, networkPolicy *networkingv1.NetworkPolicy, log logr.Logger) error {
 	// Set the controller reference
 	if err := ctrl.SetControllerReference(instance, networkPolicy, scheme); err != nil {
 		return fmt.Errorf("failed to set controller reference: %w", err)

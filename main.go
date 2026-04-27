@@ -22,8 +22,7 @@ import (
 	"fmt"
 	"os"
 
-	llamaxk8siov1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
-	ogxv1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"go.uber.org/zap/zapcore"
@@ -62,8 +61,7 @@ var (
 func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
-	utilruntime.Must(ogxv1beta1.AddToScheme(scheme))
+	utilruntime.Must(ogxiov1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -72,11 +70,11 @@ func setupWebhook(mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
 	for name := range clusterInfo.DistributionImages {
 		distNames = append(distNames, name)
 	}
-	return ogxv1beta1.SetupWebhookWithManager(mgr, distNames)
+	return ogxiov1beta1.SetupWebhookWithManager(mgr, distNames)
 }
 
 func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo, directClient client.Reader) error {
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme, clusterInfo, directClient)
+	reconciler, err := controllers.NewOGXServerReconciler(ctx, cli, scheme, clusterInfo, directClient)
 	if err != nil {
 		return fmt.Errorf("failed to create reconciler: %w", err)
 	}
@@ -88,7 +86,7 @@ func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, c
 
 func newCacheOptions() cache.Options {
 	managedBySelector := labels.SelectorFromSet(labels.Set{
-		"app.kubernetes.io/managed-by": "llama-stack-operator",
+		"app.kubernetes.io/managed-by": "ogx-operator",
 	})
 	managedByFilter := cache.ByObject{Label: managedBySelector}
 
@@ -149,7 +147,7 @@ func main() {
 		Cache:                      newCacheOptions(),
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
-		LeaderElectionID:           "54e06e98.llamastack.io",
+		LeaderElectionID:           "54e06e98.ogx.io",
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily

@@ -19,7 +19,7 @@ package controllers_test
 import (
 	"testing"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/assert"
@@ -30,29 +30,24 @@ import (
 
 func TestBuildIngress(t *testing.T) {
 	scheme := runtime.NewScheme()
-	require.NoError(t, llamav1alpha1.AddToScheme(scheme))
+	require.NoError(t, ogxiov1beta1.AddToScheme(scheme))
 
 	clusterInfo := &cluster.ClusterInfo{
 		DistributionImages: map[string]string{"starter": "test-image:latest"},
 	}
 
-	reconciler := controllers.NewTestReconciler(nil, scheme, clusterInfo, nil, true)
+	reconciler := controllers.NewTestReconciler(nil, scheme, clusterInfo, nil)
 
-	instance := &llamav1alpha1.LlamaStackDistribution{
+	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-llsd",
+			Name:      "test-ogx",
 			Namespace: "test-ns",
 			UID:       "test-uid",
 		},
-		Spec: llamav1alpha1.LlamaStackDistributionSpec{
-			Replicas: 1,
-			Server: llamav1alpha1.ServerSpec{
-				Distribution: llamav1alpha1.DistributionType{
-					Name: "starter",
-				},
-			},
-			Network: &llamav1alpha1.NetworkSpec{
-				ExposeRoute: true,
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+			Network: &ogxiov1beta1.NetworkSpec{
+				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{Enabled: true},
 			},
 		},
 	}
@@ -61,48 +56,38 @@ func TestBuildIngress(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ingress)
 
-	// Verify Ingress metadata
-	assert.Equal(t, "test-llsd-ingress", ingress.Name)
+	assert.Equal(t, "test-ogx-ingress", ingress.Name)
 	assert.Equal(t, "test-ns", ingress.Namespace)
 
-	// Verify Ingress spec
 	require.Len(t, ingress.Spec.Rules, 1)
 	require.NotNil(t, ingress.Spec.Rules[0].HTTP)
 	require.Len(t, ingress.Spec.Rules[0].HTTP.Paths, 1)
 
-	// Verify backend points to the service
-	assert.Equal(t, "test-llsd-service", ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name)
+	assert.Equal(t, "test-ogx-service", ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name)
 	assert.Equal(t, int32(8321), ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number)
 }
 
 func TestBuildIngress_CustomPort(t *testing.T) {
 	scheme := runtime.NewScheme()
-	require.NoError(t, llamav1alpha1.AddToScheme(scheme))
+	require.NoError(t, ogxiov1beta1.AddToScheme(scheme))
 
 	clusterInfo := &cluster.ClusterInfo{
 		DistributionImages: map[string]string{"starter": "test-image:latest"},
 	}
 
-	reconciler := controllers.NewTestReconciler(nil, scheme, clusterInfo, nil, true)
+	reconciler := controllers.NewTestReconciler(nil, scheme, clusterInfo, nil)
 
-	instance := &llamav1alpha1.LlamaStackDistribution{
+	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-llsd",
+			Name:      "test-ogx",
 			Namespace: "test-ns",
 			UID:       "test-uid",
 		},
-		Spec: llamav1alpha1.LlamaStackDistributionSpec{
-			Replicas: 1,
-			Server: llamav1alpha1.ServerSpec{
-				Distribution: llamav1alpha1.DistributionType{
-					Name: "starter",
-				},
-				ContainerSpec: llamav1alpha1.ContainerSpec{
-					Port: 9000,
-				},
-			},
-			Network: &llamav1alpha1.NetworkSpec{
-				ExposeRoute: true,
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+			Network: &ogxiov1beta1.NetworkSpec{
+				Port:           9000,
+				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{Enabled: true},
 			},
 		},
 	}
@@ -111,6 +96,5 @@ func TestBuildIngress_CustomPort(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ingress)
 
-	// Verify custom port is used
 	assert.Equal(t, int32(9000), ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number)
 }

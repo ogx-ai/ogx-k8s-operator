@@ -17,10 +17,12 @@ limitations under the License.
 package plugins
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"sigs.k8s.io/kustomize/api/resmap"
 	"sigs.k8s.io/kustomize/api/resource"
 	"sigs.k8s.io/yaml"
@@ -37,14 +39,14 @@ const (
 
 // NetworkPolicyTransformerConfig holds the configuration for the NetworkPolicy transformer.
 type NetworkPolicyTransformerConfig struct {
-	// InstanceName is the name of the LlamaStackDistribution instance.
+	// InstanceName is the name of the OGXServer instance.
 	InstanceName string
 	// ServicePort is the port the service is exposed on.
 	ServicePort int32
 	// OperatorNamespace is the namespace where the operator is running.
 	OperatorNamespace string
 	// NetworkSpec is the network configuration from the CR spec.
-	NetworkSpec *llamav1alpha1.NetworkSpec
+	NetworkSpec *ogxiov1beta1.NetworkSpec
 }
 
 // CreateNetworkPolicyTransformer creates a transformer for NetworkPolicy resources.
@@ -91,11 +93,62 @@ func (t *networkPolicyTransformer) transformNetworkPolicy(res *resource.Resource
 		return err
 	}
 
-	// Build and set ingress rules
-	ingressRules := t.buildIngressRules()
-	spec["ingress"] = ingressRules
+	if err := t.applyNetworkPolicySpec(spec); err != nil {
+		return err
+	}
 
 	return updateResource(res, data)
+}
+
+// applyNetworkPolicySpec sets ingress/egress from the CR when explicitly provided; otherwise uses defaults.
+func (t *networkPolicyTransformer) applyNetworkPolicySpec(spec map[string]any) error {
+	np := t.config.NetworkSpec
+	if np != nil && np.Policy != nil && len(np.Policy.Ingress) > 0 {
+		ingress, err := networkPolicyRulesToAnySlice(np.Policy.Ingress)
+		if err != nil {
+			return fmt.Errorf("failed to convert NetworkPolicy ingress rules: %w", err)
+		}
+		spec["ingress"] = ingress
+		policyTypes := []any{"Ingress"}
+		if len(np.Policy.Egress) > 0 {
+			egress, err := networkPolicyEgressRulesToAnySlice(np.Policy.Egress)
+			if err != nil {
+				return fmt.Errorf("failed to convert NetworkPolicy egress rules: %w", err)
+			}
+			spec["egress"] = egress
+			policyTypes = append(policyTypes, "Egress")
+		}
+		spec["policyTypes"] = policyTypes
+		return nil
+	}
+
+	ingressRules := t.buildIngressRules()
+	spec["ingress"] = ingressRules
+	return nil
+}
+
+func networkPolicyRulesToAnySlice(rules []networkingv1.NetworkPolicyIngressRule) ([]any, error) {
+	b, err := json.Marshal(rules)
+	if err != nil {
+		return nil, err
+	}
+	var out []any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func networkPolicyEgressRulesToAnySlice(rules []networkingv1.NetworkPolicyEgressRule) ([]any, error) {
+	b, err := json.Marshal(rules)
+	if err != nil {
+		return nil, err
+	}
+	var out []any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (t *networkPolicyTransformer) updatePodSelector(spec map[string]any) error {
@@ -111,7 +164,7 @@ func (t *networkPolicyTransformer) updatePodSelector(spec map[string]any) error 
 		podSelector["matchLabels"] = matchLabels
 	}
 
-	matchLabels["app"] = llamav1alpha1.DefaultLabelValue
+	matchLabels["app"] = ogxiov1beta1.DefaultLabelValue
 	matchLabels["app.kubernetes.io/instance"] = t.config.InstanceName
 
 	return nil
@@ -136,34 +189,9 @@ func (t *networkPolicyTransformer) buildIngressRules() []any {
 }
 
 func (t *networkPolicyTransformer) buildPeers() []any {
-	// Check if all namespaces are allowed
-	if t.isAllNamespacesAllowed() {
-		return []any{
-			map[string]any{
-				"namespaceSelector": map[string]any{}, // Empty selector matches all
-			},
-		}
-	}
-
 	peers := t.buildDefaultPeers()
-	peers = append(peers, t.buildNamespacePeers()...)
-	peers = append(peers, t.buildLabelPeers()...)
 	peers = append(peers, t.buildRouterPeers()...)
-
 	return peers
-}
-
-func (t *networkPolicyTransformer) isAllNamespacesAllowed() bool {
-	if t.config.NetworkSpec == nil || t.config.NetworkSpec.AllowedFrom == nil {
-		return false
-	}
-
-	for _, ns := range t.config.NetworkSpec.AllowedFrom.Namespaces {
-		if ns == AllNamespacesSelector {
-			return true
-		}
-	}
-	return false
 }
 
 // buildDefaultPeers builds the default NetworkPolicy peers:
@@ -184,56 +212,6 @@ func (t *networkPolicyTransformer) buildDefaultPeers() []any {
 			},
 		},
 	}
-}
-
-// buildNamespacePeers builds NetworkPolicy peers for explicit namespace list.
-func (t *networkPolicyTransformer) buildNamespacePeers() []any {
-	if t.config.NetworkSpec == nil || t.config.NetworkSpec.AllowedFrom == nil {
-		return nil
-	}
-
-	namespaces := t.config.NetworkSpec.AllowedFrom.Namespaces
-	peers := make([]any, 0, len(namespaces))
-	for _, ns := range namespaces {
-		if ns == AllNamespacesSelector {
-			continue // Already handled separately
-		}
-		// No podSelector - allow all pods in the namespace
-		peers = append(peers, map[string]any{
-			"namespaceSelector": map[string]any{
-				"matchLabels": map[string]any{
-					"kubernetes.io/metadata.name": ns,
-				},
-			},
-		})
-	}
-
-	return peers
-}
-
-// buildLabelPeers builds NetworkPolicy peers for label-based namespace selection.
-func (t *networkPolicyTransformer) buildLabelPeers() []any {
-	if t.config.NetworkSpec == nil || t.config.NetworkSpec.AllowedFrom == nil {
-		return nil
-	}
-
-	labels := t.config.NetworkSpec.AllowedFrom.Labels
-	peers := make([]any, 0, len(labels))
-	for _, labelKey := range labels {
-		// No podSelector - allow all pods in matching namespaces
-		peers = append(peers, map[string]any{
-			"namespaceSelector": map[string]any{
-				"matchExpressions": []any{
-					map[string]any{
-						"key":      labelKey,
-						"operator": "Exists",
-					},
-				},
-			},
-		})
-	}
-
-	return peers
 }
 
 // buildRouterPeers builds NetworkPolicy peers for ingress controller traffic.
