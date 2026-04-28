@@ -259,14 +259,13 @@ type CABundleConfig struct {
 	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
 }
 
-// TLSSpec defines TLS configuration.
+// TLSSpec defines TLS termination configuration for the server.
 type TLSSpec struct {
-	// Enabled toggles TLS termination.
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-	// SecretName references a TLS Secret.
-	// +optional
-	SecretName string `json:"secretName,omitempty"`
+	// SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
+	// for server TLS termination.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SecretName string `json:"secretName"`
 }
 
 // NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
@@ -310,7 +309,8 @@ type NetworkSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default:=8321
 	Port int32 `json:"port,omitempty"`
-	// TLS configures TLS for the server.
+	// TLS configures optional TLS termination for the server.
+	// When omitted, the server listens over plain HTTP.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
 	// Expose controls external service exposure via Ingress/Route.

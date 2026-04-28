@@ -571,14 +571,18 @@ spec:
                     minimum: 1
                     type: integer
                   tls:
-                    description: TLS configures TLS for the server.
+                    description: |-
+                      TLS configures optional TLS termination for the server.
+                      When omitted, the server listens over plain HTTP.
                     properties:
-                      enabled:
-                        description: Enabled toggles TLS termination.
-                        type: boolean
                       secretName:
-                        description: SecretName references a TLS Secret.
+                        description: |-
+                          SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
+                          for server TLS termination.
+                        minLength: 1
                         type: string
+                    required:
+                    - secretName
                     type: object
                 type: object
               overrideConfig:
