@@ -93,13 +93,10 @@ spec:
                     maxItems: 50
                     type: array
                   configMapName:
-                    description: ConfigMapName is the name of the ConfigMap containing
-                      CA bundle certificates.
+                    description: |-
+                      ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
+                      The ConfigMap must be in the same namespace as the OGXServer.
                     minLength: 1
-                    type: string
-                  configMapNamespace:
-                    description: ConfigMapNamespace is the namespace of the ConfigMap
-                      (defaults to the CR namespace).
                     type: string
                 required:
                 - configMapName

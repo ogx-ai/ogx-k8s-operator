@@ -244,12 +244,10 @@ type StateStorageSpec struct {
 // CABundleConfig defines the CA bundle configuration for custom certificates.
 type CABundleConfig struct {
 	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
+	// The ConfigMap must be in the same namespace as the OGXServer.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ConfigMapName string `json:"configMapName"`
-	// ConfigMapNamespace is the namespace of the ConfigMap (defaults to the CR namespace).
-	// +optional
-	ConfigMapNamespace string `json:"configMapNamespace,omitempty"`
 	// ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
 	// All certificates from these keys will be concatenated into a single CA bundle file.
 	// +optional
