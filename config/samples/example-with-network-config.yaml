@@ -35,7 +35,7 @@ spec:
             - protocol: TCP
               port: 8321
 ---
-# Example with expose enabled and NetworkPolicy disabled
+# Example with external access enabled and NetworkPolicy disabled
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:
@@ -51,7 +51,8 @@ spec:
         - name: OLLAMA_URL
           value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
   network:
-    expose: {}
+    externalAccess:
+      enabled: true
     networkPolicy:
       ingress:
         - from:

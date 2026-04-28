@@ -302,11 +302,14 @@ type NetworkPolicySpec struct {
 	Egress []networkingv1.NetworkPolicyEgressRule `json:"egress,omitempty"`
 }
 
-// ExposeConfig controls external service exposure via Ingress/Route.
-// Presence of this field (non-nil) enables external access.
+// ExternalAccessConfig controls external service exposure.
 // +kubebuilder:validation:XValidation:rule="!has(self.hostname) || self.hostname.size() > 0",message="hostname must not be empty if specified"
-type ExposeConfig struct {
-	// Hostname sets a custom hostname for the Ingress/Route.
+type ExternalAccessConfig struct {
+	// Enabled controls whether external access is created.
+	// +optional
+	// +kubebuilder:default:=false
+	Enabled bool `json:"enabled,omitempty"`
+	// Hostname sets a custom hostname for the external endpoint.
 	// When omitted, an auto-generated hostname is used.
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
@@ -324,9 +327,9 @@ type NetworkSpec struct {
 	// When omitted, the server listens over plain HTTP.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
-	// Expose controls external service exposure via Ingress/Route.
+	// ExternalAccess controls external service exposure.
 	// +optional
-	Expose *ExposeConfig `json:"expose,omitempty"`
+	ExternalAccess *ExternalAccessConfig `json:"externalAccess,omitempty"`
 	// Policy configures the operator-managed NetworkPolicy.
 	// When nil, the operator creates a default NetworkPolicy with safe ingress rules.
 	// +optional
@@ -611,9 +614,9 @@ type OGXServerStatus struct {
 	AvailableReplicas int32 `json:"availableReplicas,omitempty"`
 	// ServiceURL is the internal Kubernetes service URL.
 	ServiceURL string `json:"serviceURL,omitempty"`
-	// RouteURL is the external URL when expose is configured.
+	// ExternalURL is the external URL when external access is configured.
 	// +optional
-	RouteURL *string `json:"routeURL,omitempty"`
+	ExternalURL *string `json:"externalURL,omitempty"`
 }
 
 // +kubebuilder:object:root=true

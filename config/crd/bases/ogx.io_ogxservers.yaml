@@ -154,12 +154,16 @@ spec:
               network:
                 description: Network defines network access controls.
                 properties:
-                  expose:
-                    description: Expose controls external service exposure via Ingress/Route.
+                  externalAccess:
+                    description: ExternalAccess controls external service exposure.
                     properties:
+                      enabled:
+                        default: false
+                        description: Enabled controls whether external access is created.
+                        type: boolean
                       hostname:
                         description: |-
-                          Hostname sets a custom hostname for the Ingress/Route.
+                          Hostname sets a custom hostname for the external endpoint.
                           When omitted, an auto-generated hostname is used.
                         type: string
                     type: object
@@ -3719,6 +3723,10 @@ spec:
                       type: object
                     type: array
                 type: object
+              externalURL:
+                description: ExternalURL is the external URL when external access
+                  is configured.
+                type: string
               phase:
                 description: Phase represents the current phase of the server.
                 enum:
@@ -3745,9 +3753,6 @@ spec:
                       digest when available).
                     type: string
                 type: object
-              routeURL:
-                description: RouteURL is the external URL when expose is configured.
-                type: string
               serviceURL:
                 description: ServiceURL is the internal Kubernetes service URL.
                 type: string

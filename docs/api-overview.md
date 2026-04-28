@@ -318,27 +318,27 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `minReplicas` _integer_ | MinReplicas is the lower bound replica count. |  |  |
-| `maxReplicas` _integer_ | MaxReplicas is the upper bound replica count. |  |  |
-| `targetCPUUtilizationPercentage` _integer_ | TargetCPUUtilizationPercentage configures CPU based scaling. |  |  |
-| `targetMemoryUtilizationPercentage` _integer_ | TargetMemoryUtilizationPercentage configures memory based scaling. |  |  |
+| `minReplicas` _integer_ | MinReplicas is the lower bound replica count. |  | Minimum: 1 <br /> |
+| `maxReplicas` _integer_ | MaxReplicas is the upper bound replica count. |  | Minimum: 1 <br />Required: \{\} <br /> |
+| `targetCPUUtilizationPercentage` _integer_ | TargetCPUUtilizationPercentage configures CPU-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
+| `targetMemoryUtilizationPercentage` _integer_ | TargetMemoryUtilizationPercentage configures memory-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
 
 #### CABundleConfig
 
 CABundleConfig defines the CA bundle configuration for custom certificates.
 
 _Appears in:_
-- [TLSSpec](#tlsspec)
+- [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates. |  |  |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates. |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `configMapNamespace` _string_ | ConfigMapNamespace is the namespace of the ConfigMap (defaults to the CR namespace). |  |  |
 | `configMapKeys` _string array_ | ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.<br />All certificates from these keys will be concatenated into a single CA bundle file. |  | MaxItems: 50 <br /> |
 
 #### ConfigGenerationStatus
 
-ConfigGenerationStatus reports the state of config generation.
+ConfigGenerationStatus tracks config generation details.
 
 _Appears in:_
 - [OGXServerStatus](#ogxserverstatus)
@@ -347,6 +347,10 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `observedGeneration` _integer_ | ObservedGeneration is the spec generation that was last processed. |  |  |
 | `configMapName` _string_ | ConfigMapName is the name of the generated ConfigMap. |  |  |
+| `generatedAt` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ | GeneratedAt is the timestamp of the last generation. |  |  |
+| `providerCount` _integer_ | ProviderCount is the number of configured providers. |  |  |
+| `resourceCount` _integer_ | ResourceCount is the number of registered resources. |  |  |
+| `configVersion` _integer_ | ConfigVersion is the config.yaml schema version. |  |  |
 
 #### DistributionConfig
 
@@ -363,7 +367,7 @@ _Appears in:_
 
 #### DistributionSpec
 
-DistributionSpec defines the distribution configuration.
+DistributionSpec identifies the OGX distribution image to deploy.
 Exactly one of name or image must be specified.
 
 _Appears in:_
@@ -371,29 +375,85 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ | Name is the distribution name that maps to supported distributions. |  |  |
-| `image` _string_ | Image is the direct container image reference to use. |  |  |
+| `name` _string_ | Name is the distribution name that maps to a supported distribution (e.g., "starter", "remote-vllm").<br />Resolved to a container image via distributions.json and image-overrides. |  |  |
+| `image` _string_ | Image is a direct container image reference to use. |  |  |
+
+#### ExternalAccessConfig
+
+ExternalAccessConfig controls external service exposure.
+
+_Appears in:_
+- [NetworkSpec](#networkspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled controls whether external access is created. | false |  |
+| `hostname` _string_ | Hostname sets a custom hostname for the external endpoint.<br />When omitted, an auto-generated hostname is used. |  |  |
+
+#### ExternalProviderRef
+
+ExternalProviderRef references an external provider image.
+
+_Appears in:_
+- [ExternalProvidersSpec](#externalprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `providerId` _string_ | ProviderID is the unique provider identifier. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `image` _string_ | Image is the container image containing the provider implementation. |  | MinLength: 1 <br />Required: \{\} <br /> |
+
+#### ExternalProvidersSpec
+
+ExternalProvidersSpec defines external provider injection.
+
+_Appears in:_
+- [OGXServerSpec](#ogxserverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `inference` _[ExternalProviderRef](#externalproviderref) array_ | Inference lists external inference providers to inject. |  | MinItems: 1 <br /> |
 
 #### KVStorageSpec
 
-KVStorageSpec configures key-value state storage.
+KVStorageSpec configures the key-value storage backend.
 
 _Appears in:_
 - [StateStorageSpec](#statestoragespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `type` _string_ | Type is the backend type: sqlite or redis. |  | Enum: [sqlite redis] <br /> |
-| `endpoint` _string_ | Endpoint is the connection endpoint for remote backends. |  |  |
-| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret key holding the backend password. |  |  |
+| `type` _string_ | Type is the KV storage backend type. | sqlite | Enum: [sqlite redis] <br /> |
+| `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
+| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication. |  |  |
+
+#### ModelConfig
+
+ModelConfig defines a model registration with optional provider assignment and metadata.
+
+_Appears in:_
+- [ResourcesSpec](#resourcesspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the model identifier (e.g., "llama3.2-8b"). |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `provider` _string_ | Provider is the ID of the provider to register this model with.<br />Defaults to the first inference provider when omitted. |  |  |
+| `contextLength` _integer_ | ContextLength is the model context window size. |  |  |
+| `modelType` _string_ | ModelType is the model type classification. |  |  |
+| `quantization` _string_ | Quantization is the quantization method. |  |  |
 
 #### NetworkPolicySpec
 
 NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
-When nil or enabled with no rules, the operator generates safe defaults:
-ingress on the service port from same-namespace and operator-namespace; egress unrestricted.
-When ingress or egress rules are explicitly provided, they are used verbatim.
-When any egress rules are configured, a kube-dns egress rule is auto-injected.
+
+Ingress is always enforced unless explicitly omitted from policyTypes.
+The operator always includes default ingress rules (allow from same-namespace
+and operator-namespace on the service port), merging them with any
+user-specified rules.
+
+Egress is unrestricted by default. It is only enforced when egress rules
+are provided or "Egress" is explicitly included in policyTypes.
+When any egress rules are configured, or when "Egress" is explicitly included in
+policyTypes, a kube-dns egress rule is auto-injected to prevent DNS breakage.
 
 _Appears in:_
 - [NetworkSpec](#networkspec)
@@ -401,8 +461,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled controls whether the operator manages a NetworkPolicy for this server.<br />Defaults to true. Set to false to disable NetworkPolicy creation entirely. | true |  |
-| `ingress` _[NetworkPolicyIngressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyingressrule-v1-networking) array_ | Ingress rules. When nil, the operator generates default ingress rules<br />(allow from same-namespace and operator-namespace on the service port).<br />When explicitly set, these rules are used verbatim. |  |  |
-| `egress` _[NetworkPolicyEgressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyegressrule-v1-networking) array_ | Egress rules. When nil, egress is unrestricted (no Egress policyType set).<br />When explicitly set, these rules are used and a kube-dns egress rule is<br />auto-injected to prevent DNS breakage. |  |  |
+| `policyTypes` _[PolicyType](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#policytype-v1-networking) array_ | PolicyTypes specifies which policy directions are enforced.<br />Follows Kubernetes NetworkPolicy semantics: when omitted or empty,<br />Ingress is always included and Egress is included only if egress<br />rules are provided. |  | items:Enum: [Ingress Egress] <br /> |
+| `ingress` _[NetworkPolicyIngressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyingressrule-v1-networking) array_ | Ingress defines additional ingress rules, merged with operator defaults<br />(allow from same-namespace and operator-namespace on the service port). |  |  |
+| `egress` _[NetworkPolicyEgressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyegressrule-v1-networking) array_ | Egress rules. When non-empty, a kube-dns egress rule is auto-injected<br />to prevent DNS breakage. |  |  |
 
 #### NetworkSpec
 
@@ -413,10 +474,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `port` _integer_ | Port overrides the default container and service port. |  |  |
-| `tls` _[TLSSpec](#tlsspec)_ | TLS configures TLS termination. |  |  |
-| `expose` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Expose configures external access (e.g. Ingress). Polymorphic JSON for flexibility. |  |  |
-| `networkPolicy` _[NetworkPolicySpec](#networkpolicyspec)_ | NetworkPolicy configures the operator-managed NetworkPolicy.<br />When nil, the operator creates a default NetworkPolicy with safe ingress rules. |  |  |
+| `port` _integer_ | Port is the server listen port. | 8321 | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `tls` _[TLSSpec](#tlsspec)_ | TLS configures optional TLS termination for the server.<br />When omitted, the server listens over plain HTTP. |  |  |
+| `externalAccess` _[ExternalAccessConfig](#externalaccessconfig)_ | ExternalAccess controls external service exposure. |  |  |
+| `policy` _[NetworkPolicySpec](#networkpolicyspec)_ | Policy configures the operator-managed NetworkPolicy.<br />When nil, the operator creates a default NetworkPolicy with safe ingress rules. |  |  |
 
 #### OGXServer
 
@@ -477,15 +538,16 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `distribution` _[DistributionSpec](#distributionspec)_ | Distribution specifies which OGX distribution image to deploy. |  |  |
-| `providers` _[ProvidersSpec](#providersspec)_ | Providers configures inference, safety, and other provider backends. |  |  |
-| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources defines models, tools, and shields to register. |  |  |
-| `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV, SQL). |  |  |
-| `disabled` _string array_ | Disabled lists API categories to disable. |  |  |
+| `distribution` _[DistributionSpec](#distributionspec)_ | Distribution identifies the OGX distribution to deploy. |  | Required: \{\} <br /> |
+| `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
+| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models, tools, and shields to register.<br />Mutually exclusive with overrideConfig. |  |  |
+| `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
+| `disabled` _string array_ | Disabled lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference telemetry tool_runtime vector_io] <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
-| `workload` _[WorkloadSpec](#workloadspec)_ | Workload defines deployment, scaling, and pod configuration. |  |  |
-| `externalProviders` _[ProviderConfig](#providerconfig) array_ | ExternalProviders references external provider configurations. |  |  |
-| `overrideConfig` _[OverrideConfigSpec](#overrideconfigspec)_ | OverrideConfig references a user-provided ConfigMap that replaces all generated config.<br />Mutually exclusive with providers, resources, storage, and disabled. |  |  |
+| `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates<br />used to verify outbound TLS connections to providers and backends. |  |  |
+| `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
+| `externalProviders` _[ExternalProvidersSpec](#externalprovidersspec)_ | ExternalProviders configures external provider injection. |  |  |
+| `overrideConfig` _[OverrideConfigSpec](#overrideconfigspec)_ | OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabled. |  |  |
 
 #### OGXServerStatus
 
@@ -499,35 +561,36 @@ _Appears in:_
 | `phase` _[OGXServerPhase](#ogxserverphase)_ | Phase represents the current phase of the server. |  | Enum: [Pending Initializing Ready Failed Terminating] <br /> |
 | `version` _[VersionInfo](#versioninfo)_ | Version contains version information for both operator and server. |  |  |
 | `distributionConfig` _[DistributionConfig](#distributionconfig)_ | DistributionConfig contains provider information from the running server. |  |  |
-| `resolvedDistribution` _[ResolvedDistributionStatus](#resolveddistributionstatus)_ | ResolvedDistribution reports the resolved distribution image. |  |  |
-| `configGeneration` _[ConfigGenerationStatus](#configgenerationstatus)_ | ConfigGeneration reports the state of config generation. |  |  |
+| `resolvedDistribution` _[ResolvedDistributionStatus](#resolveddistributionstatus)_ | ResolvedDistribution tracks the resolved image and config source. |  |  |
+| `configGeneration` _[ConfigGenerationStatus](#configgenerationstatus)_ | ConfigGeneration tracks config generation details. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the server's state. |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas. |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL. |  |  |
-| `routeURL` _string_ | RouteURL is the external URL when expose is configured. |  |  |
+| `externalURL` _string_ | ExternalURL is the external URL when external access is configured. |  |  |
 
 #### OverrideConfigSpec
 
-OverrideConfigSpec references a user-provided ConfigMap for full config control.
+OverrideConfigSpec specifies a user-provided ConfigMap for full config.yaml override.
+Mutually exclusive with providers, resources, storage, and disabled.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing the server configuration. |  |  |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing config.yaml.<br />Must be in the same namespace as the CR. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### PVCStorageSpec
 
-PVCStorageSpec defines PVC size and mount path.
+PVCStorageSpec defines PVC storage for persistent data.
 
 _Appears in:_
 - [WorkloadSpec](#workloadspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the PVC storage request. |  |  |
-| `mountPath` _string_ | MountPath is the path where the PVC is mounted in the container. |  |  |
+| `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the PVC. |  |  |
+| `mountPath` _string_ | MountPath is the container mount path for the PVC. | /.ogx |  |
 
 #### PodDisruptionBudgetSpec
 
@@ -543,18 +606,18 @@ _Appears in:_
 
 #### ProviderConfig
 
-ProviderConfig defines a single provider configuration.
+ProviderConfig defines the configuration for a single provider instance.
 
 _Appears in:_
-- [OGXServerSpec](#ogxserverspec)
+- [ProvidersSpec](#providersspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `id` _string_ | ID is the unique identifier for this provider instance. |  |  |
-| `provider` _string_ | Provider is the provider type (e.g. "remote::ollama"). |  |  |
-| `endpoint` _string_ | Endpoint is the URL for remote providers. |  |  |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey references a Secret key holding the provider's API key. |  |  |
-| `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings holds provider-specific configuration. |  |  |
+| `id` _string_ | ID is a unique provider identifier. Required when multiple providers are<br />configured for the same API type. Auto-generated from provider when omitted<br />for single-provider configurations. |  |  |
+| `provider` _string_ | Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").<br />Maps to provider_type with "remote::" prefix in config.yaml. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `endpoint` _string_ | Endpoint is the provider endpoint URL. Maps to config.url in config.yaml. |  |  |
+| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution.<br />Use this instead of embedding secretKeyRef inside settings. |  | MinProperties: 1 <br /> |
+| `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific settings merged into the provider's<br />config section in config.yaml. Acts as an escape hatch for fields not<br />directly exposed in the CRD schema. Passed through as-is without any<br />secret resolution. Use secretRefs for secret values. |  |  |
 
 #### ProviderHealthStatus
 
@@ -585,59 +648,60 @@ _Appears in:_
 
 #### ProvidersSpec
 
-ProvidersSpec groups provider configurations by API category.
+ProvidersSpec contains typed provider slices for each API type.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `inference` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Inference providers. |  |  |
-| `safety` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Safety providers. |  |  |
-| `vectorIo` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | VectorIO providers. |  |  |
-| `toolRuntime` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | ToolRuntime providers. |  |  |
-| `telemetry` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Telemetry providers. |  |  |
+| `inference` _[ProviderConfig](#providerconfig) array_ | Inference configures inference providers (e.g., vLLM, TGI). |  | MinItems: 1 <br /> |
+| `safety` _[ProviderConfig](#providerconfig) array_ | Safety configures safety providers (e.g., llama-guard). |  | MinItems: 1 <br /> |
+| `vectorIo` _[ProviderConfig](#providerconfig) array_ | VectorIo configures vector I/O providers (e.g., pgvector, chromadb). |  | MinItems: 1 <br /> |
+| `toolRuntime` _[ProviderConfig](#providerconfig) array_ | ToolRuntime configures tool runtime providers. |  | MinItems: 1 <br /> |
+| `telemetry` _[ProviderConfig](#providerconfig) array_ | Telemetry configures telemetry providers (e.g., opentelemetry). |  | MinItems: 1 <br /> |
 
 #### ResolvedDistributionStatus
 
-ResolvedDistributionStatus reports the resolved distribution image.
+ResolvedDistributionStatus tracks the resolved distribution image for change detection.
 
 _Appears in:_
 - [OGXServerStatus](#ogxserverstatus)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `image` _string_ | Image is the resolved container image reference. |  |  |
-| `source` _string_ | Source indicates how the image was resolved (e.g. "name", "image"). |  |  |
+| `image` _string_ | Image is the resolved container image reference (with digest when available). |  |  |
+| `configSource` _string_ | ConfigSource indicates the config origin: "embedded" or "oci-label". |  |  |
+| `configHash` _string_ | ConfigHash is the SHA256 hash of the base config used. |  |  |
 
 #### ResourcesSpec
 
-ResourcesSpec defines models, tools, and shields to register.
+ResourcesSpec defines declarative registration of models, tools, and shields.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `models` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io) array_ | Models to register. Each element is a JSON object for polymorphic form. |  |  |
-| `tools` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io) array_ | Tools to register. |  |  |
-| `shields` _string array_ | Shields to register by name. |  |  |
+| `models` _[ModelConfig](#modelconfig) array_ | Models to register with inference providers. |  | MinItems: 1 <br /> |
+| `tools` _string array_ | Tools are tool group names to register with the toolRuntime provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `shields` _string array_ | Shields to register by name. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
 #### SQLStorageSpec
 
-SQLStorageSpec configures SQL state storage.
+SQLStorageSpec configures the relational storage backend.
 
 _Appears in:_
 - [StateStorageSpec](#statestoragespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `type` _string_ | Type is the backend type: sqlite or postgres. |  | Enum: [sqlite postgres] <br /> |
-| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret key holding the full connection string. |  |  |
+| `type` _string_ | Type is the SQL storage backend type. | sqlite | Enum: [sqlite postgres] <br /> |
+| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres". |  |  |
 
 #### SecretKeyRef
 
-SecretKeyRef is a reference to a key in a Kubernetes Secret.
+SecretKeyRef references a specific key in a Kubernetes Secret.
 
 _Appears in:_
 - [KVStorageSpec](#kvstoragespec)
@@ -646,8 +710,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `name` _string_ | Name is the name of the Secret. |  |  |
-| `key` _string_ | Key is the key within the Secret. |  |  |
+| `name` _string_ | Name is the name of the Kubernetes Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `key` _string_ | Key is the key within the Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### StateStorageSpec
 
@@ -663,16 +727,14 @@ _Appears in:_
 
 #### TLSSpec
 
-TLSSpec defines TLS configuration.
+TLSSpec defines TLS termination configuration for the server.
 
 _Appears in:_
 - [NetworkSpec](#networkspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enabled` _boolean_ | Enabled toggles TLS termination. |  |  |
-| `secretName` _string_ | SecretName references a TLS Secret. |  |  |
-| `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates. |  |  |
+| `secretName` _string_ | SecretName references a Kubernetes TLS Secret containing a valid TLS certificate<br />for server TLS termination. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### VersionInfo
 
@@ -689,34 +751,34 @@ _Appears in:_
 
 #### WorkloadOverrides
 
-WorkloadOverrides allows advanced pod-level customization.
+WorkloadOverrides allows low-level customization of the Pod template.
 
 _Appears in:_
 - [WorkloadSpec](#workloadspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `serviceAccountName` _string_ | ServiceAccountName allows users to specify their own ServiceAccount. |  |  |
-| `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ | Env specifies additional environment variables. |  |  |
-| `command` _string array_ | Command overrides the container entrypoint. |  |  |
-| `args` _string array_ | Args overrides the container arguments. |  |  |
-| `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ | Volumes specifies additional volumes. |  |  |
-| `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ | VolumeMounts specifies additional volume mounts. |  |  |
+| `serviceAccountName` _string_ | ServiceAccountName specifies a custom ServiceAccount. |  |  |
+| `env` _[EnvVar](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#envvar-v1-core) array_ | Env specifies additional environment variables. |  | MinItems: 1 <br /> |
+| `command` _string array_ | Command overrides the container command. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `args` _string array_ | Args overrides the container arguments. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `volumes` _[Volume](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volume-v1-core) array_ | Volumes adds additional volumes to the Pod. |  | MinItems: 1 <br /> |
+| `volumeMounts` _[VolumeMount](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#volumemount-v1-core) array_ | VolumeMounts adds additional volume mounts to the container. |  | MinItems: 1 <br /> |
 
 #### WorkloadSpec
 
-WorkloadSpec defines deployment-level configuration.
+WorkloadSpec consolidates Kubernetes deployment settings.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `replicas` _integer_ | Replicas is the desired pod count. | 1 |  |
+| `replicas` _integer_ | Replicas is the desired Pod replica count. | 1 | Minimum: 0 <br /> |
 | `workers` _integer_ | Workers configures the number of uvicorn worker processes. |  | Minimum: 1 <br /> |
 | `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ | Resources defines CPU/memory requests and limits. |  |  |
 | `autoscaling` _[AutoscalingSpec](#autoscalingspec)_ | Autoscaling configures HPA for the server pods. |  |  |
 | `storage` _[PVCStorageSpec](#pvcstoragespec)_ | Storage defines PVC configuration. |  |  |
 | `podDisruptionBudget` _[PodDisruptionBudgetSpec](#poddisruptionbudgetspec)_ | PodDisruptionBudget controls voluntary disruption tolerance. |  |  |
-| `topologySpreadConstraints` _[TopologySpreadConstraint](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#topologyspreadconstraint-v1-core) array_ | TopologySpreadConstraints defines fine-grained spreading rules. |  |  |
+| `topologySpreadConstraints` _[TopologySpreadConstraint](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#topologyspreadconstraint-v1-core) array_ | TopologySpreadConstraints defines Pod spreading rules. |  | MinItems: 1 <br /> |
 | `overrides` _[WorkloadOverrides](#workloadoverrides)_ | Overrides allows pod-level customization. |  |  |
