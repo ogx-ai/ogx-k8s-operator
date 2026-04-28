@@ -589,7 +589,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Auto-generated from provider<br />when omitted. Must be unique across all API types. |  |  |
-| `provider` _string_ | Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").<br />Maps to provider_type with "remote::" prefix in config.yaml. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `provider` _string_ | Provider is the provider type, specified with a "remote::" or "inline::"<br />prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin"). |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `endpoint` _string_ | Endpoint is the provider endpoint URL. Maps to config.url in config.yaml. |  |  |
 | `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution.<br />Use this instead of embedding secretKeyRef inside settings. |  | MinProperties: 1 <br /> |
 | `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific settings merged into the provider's<br />config section in config.yaml. Acts as an escape hatch for fields not<br />directly exposed in the CRD schema. Passed through as-is without any<br />secret resolution. Use secretRefs for secret values. |  |  |

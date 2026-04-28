@@ -624,8 +624,8 @@ spec:
                           type: string
                         provider:
                           description: |-
-                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
-                            Maps to provider_type with "remote::" prefix in config.yaml.
+                            Provider is the provider type, specified with a "remote::" or "inline::"
+                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
                           minLength: 1
                           type: string
                         secretRefs:
@@ -667,6 +667,9 @@ spec:
                       x-kubernetes-validations:
                       - message: id must not be empty if specified
                         rule: '!has(self.id) || self.id.size() > 0'
+                      - message: provider must have a 'remote::' or 'inline::' prefix
+                          (e.g., 'remote::vllm', 'inline::builtin')
+                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
                     minItems: 1
                     type: array
                   safety:
@@ -686,8 +689,8 @@ spec:
                           type: string
                         provider:
                           description: |-
-                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
-                            Maps to provider_type with "remote::" prefix in config.yaml.
+                            Provider is the provider type, specified with a "remote::" or "inline::"
+                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
                           minLength: 1
                           type: string
                         secretRefs:
@@ -729,6 +732,9 @@ spec:
                       x-kubernetes-validations:
                       - message: id must not be empty if specified
                         rule: '!has(self.id) || self.id.size() > 0'
+                      - message: provider must have a 'remote::' or 'inline::' prefix
+                          (e.g., 'remote::vllm', 'inline::builtin')
+                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
                     minItems: 1
                     type: array
                   toolRuntime:
@@ -748,8 +754,8 @@ spec:
                           type: string
                         provider:
                           description: |-
-                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
-                            Maps to provider_type with "remote::" prefix in config.yaml.
+                            Provider is the provider type, specified with a "remote::" or "inline::"
+                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
                           minLength: 1
                           type: string
                         secretRefs:
@@ -791,6 +797,9 @@ spec:
                       x-kubernetes-validations:
                       - message: id must not be empty if specified
                         rule: '!has(self.id) || self.id.size() > 0'
+                      - message: provider must have a 'remote::' or 'inline::' prefix
+                          (e.g., 'remote::vllm', 'inline::builtin')
+                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
                     minItems: 1
                     type: array
                   vectorIo:
@@ -811,8 +820,8 @@ spec:
                           type: string
                         provider:
                           description: |-
-                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
-                            Maps to provider_type with "remote::" prefix in config.yaml.
+                            Provider is the provider type, specified with a "remote::" or "inline::"
+                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
                           minLength: 1
                           type: string
                         secretRefs:
@@ -854,6 +863,9 @@ spec:
                       x-kubernetes-validations:
                       - message: id must not be empty if specified
                         rule: '!has(self.id) || self.id.size() > 0'
+                      - message: provider must have a 'remote::' or 'inline::' prefix
+                          (e.g., 'remote::vllm', 'inline::builtin')
+                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
                     minItems: 1
                     type: array
                 type: object
