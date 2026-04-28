@@ -620,9 +620,8 @@ spec:
                           type: string
                         id:
                           description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
+                            ID is a unique provider identifier. Auto-generated from provider
+                            when omitted. Must be unique across all API types.
                           type: string
                         provider:
                           description: |-
@@ -671,10 +670,6 @@ spec:
                         rule: '!has(self.id) || self.id.size() > 0'
                     minItems: 1
                     type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   safety:
                     description: Safety configures safety providers (e.g., llama-guard).
                     items:
@@ -687,9 +682,8 @@ spec:
                           type: string
                         id:
                           description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
+                            ID is a unique provider identifier. Auto-generated from provider
+                            when omitted. Must be unique across all API types.
                           type: string
                         provider:
                           description: |-
@@ -738,10 +732,6 @@ spec:
                         rule: '!has(self.id) || self.id.size() > 0'
                     minItems: 1
                     type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   telemetry:
                     description: Telemetry configures telemetry providers (e.g., opentelemetry).
                     items:
@@ -754,9 +744,8 @@ spec:
                           type: string
                         id:
                           description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
+                            ID is a unique provider identifier. Auto-generated from provider
+                            when omitted. Must be unique across all API types.
                           type: string
                         provider:
                           description: |-
@@ -805,10 +794,6 @@ spec:
                         rule: '!has(self.id) || self.id.size() > 0'
                     minItems: 1
                     type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   toolRuntime:
                     description: ToolRuntime configures tool runtime providers.
                     items:
@@ -821,9 +806,8 @@ spec:
                           type: string
                         id:
                           description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
+                            ID is a unique provider identifier. Auto-generated from provider
+                            when omitted. Must be unique across all API types.
                           type: string
                         provider:
                           description: |-
@@ -872,10 +856,6 @@ spec:
                         rule: '!has(self.id) || self.id.size() > 0'
                     minItems: 1
                     type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   vectorIo:
                     description: VectorIo configures vector I/O providers (e.g., pgvector,
                       chromadb).
@@ -889,9 +869,8 @@ spec:
                           type: string
                         id:
                           description: |-
-                            ID is a unique provider identifier. Required when multiple providers are
-                            configured for the same API type. Auto-generated from provider when omitted
-                            for single-provider configurations.
+                            ID is a unique provider identifier. Auto-generated from provider
+                            when omitted. Must be unique across all API types.
                           type: string
                         provider:
                           description: |-
@@ -940,10 +919,6 @@ spec:
                         rule: '!has(self.id) || self.id.size() > 0'
                     minItems: 1
                     type: array
-                    x-kubernetes-validations:
-                    - message: each provider must have an explicit id when multiple
-                        providers are specified
-                      rule: self.size() <= 1 || self.all(p, has(p.id))
                 type: object
               resources:
                 description: |-

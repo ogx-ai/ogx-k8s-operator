@@ -101,9 +101,8 @@ type SecretKeyRef struct {
 // ProviderConfig defines the configuration for a single provider instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.id) || self.id.size() > 0",message="id must not be empty if specified"
 type ProviderConfig struct {
-	// ID is a unique provider identifier. Required when multiple providers are
-	// configured for the same API type. Auto-generated from provider when omitted
-	// for single-provider configurations.
+	// ID is a unique provider identifier. Auto-generated from provider
+	// when omitted. Must be unique across all API types.
 	// +optional
 	ID string `json:"id,omitempty"`
 	// Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
@@ -134,27 +133,22 @@ type ProvidersSpec struct {
 	// Inference configures inference providers (e.g., vLLM, TGI).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Inference []ProviderConfig `json:"inference,omitempty"`
 	// Safety configures safety providers (e.g., llama-guard).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Safety []ProviderConfig `json:"safety,omitempty"`
 	// VectorIo configures vector I/O providers (e.g., pgvector, chromadb).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	VectorIo []ProviderConfig `json:"vectorIo,omitempty"`
 	// ToolRuntime configures tool runtime providers.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
 	// Telemetry configures telemetry providers (e.g., opentelemetry).
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:XValidation:rule="self.size() <= 1 || self.all(p, has(p.id))",message="each provider must have an explicit id when multiple providers are specified"
 	Telemetry []ProviderConfig `json:"telemetry,omitempty"`
 }
 

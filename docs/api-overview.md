@@ -588,7 +588,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `id` _string_ | ID is a unique provider identifier. Required when multiple providers are<br />configured for the same API type. Auto-generated from provider when omitted<br />for single-provider configurations. |  |  |
+| `id` _string_ | ID is a unique provider identifier. Auto-generated from provider<br />when omitted. Must be unique across all API types. |  |  |
 | `provider` _string_ | Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").<br />Maps to provider_type with "remote::" prefix in config.yaml. |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `endpoint` _string_ | Endpoint is the provider endpoint URL. Maps to config.url in config.yaml. |  |  |
 | `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution.<br />Use this instead of embedding secretKeyRef inside settings. |  | MinProperties: 1 <br /> |
