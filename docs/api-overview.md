@@ -518,7 +518,7 @@ _Appears in:_
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
 | `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models, tools, and shields to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference telemetry tool_runtime vector_io] <br /> |
+| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference tool_runtime vector_io] <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
 | `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates<br />used to verify outbound TLS connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
@@ -634,7 +634,6 @@ _Appears in:_
 | `safety` _[ProviderConfig](#providerconfig) array_ | Safety configures safety providers (e.g., llama-guard). |  | MinItems: 1 <br /> |
 | `vectorIo` _[ProviderConfig](#providerconfig) array_ | VectorIo configures vector I/O providers (e.g., pgvector, chromadb). |  | MinItems: 1 <br /> |
 | `toolRuntime` _[ProviderConfig](#providerconfig) array_ | ToolRuntime configures tool runtime providers. |  | MinItems: 1 <br /> |
-| `telemetry` _[ProviderConfig](#providerconfig) array_ | Telemetry configures telemetry providers (e.g., opentelemetry). |  | MinItems: 1 <br /> |
 
 #### ResolvedDistributionStatus
 

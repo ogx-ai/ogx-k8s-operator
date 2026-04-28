@@ -120,7 +120,6 @@ func validateProviderIDUniqueness(spec *ProvidersSpec) field.ErrorList {
 		{"safety", spec.Safety},
 		{"vectorIo", spec.VectorIo},
 		{"toolRuntime", spec.ToolRuntime},
-		{"telemetry", spec.Telemetry},
 	}
 
 	for _, f := range fields {
@@ -206,7 +205,6 @@ func collectAllProviderIDs(spec *ProvidersSpec) map[string]bool {
 		spec.Safety,
 		spec.VectorIo,
 		spec.ToolRuntime,
-		spec.Telemetry,
 	} {
 		for _, pc := range slice {
 			id := pc.ID

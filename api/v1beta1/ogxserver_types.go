@@ -146,10 +146,6 @@ type ProvidersSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
-	// Telemetry configures telemetry providers (e.g., opentelemetry).
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	Telemetry []ProviderConfig `json:"telemetry,omitempty"`
 }
 
 // ModelConfig defines a model registration with optional provider assignment and metadata.
@@ -462,7 +458,6 @@ type OverrideConfigSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vector_io cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size() == 0",message="tool_runtime cannot be both in providers and disabledAPIs"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'telemetry') || !has(self.providers.telemetry) || self.providers.telemetry.size() == 0",message="telemetry cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -485,7 +480,7 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:Enum=agents;inference;telemetry;tool_runtime;vector_io
+	// +kubebuilder:validation:items:Enum=agents;inference;tool_runtime;vector_io
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// Network defines network access controls.
 	// +optional
