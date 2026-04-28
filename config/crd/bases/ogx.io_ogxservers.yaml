@@ -70,6 +70,31 @@ spec:
           spec:
             description: OGXServerSpec defines the desired state of OGXServer.
             properties:
+              caBundle:
+                description: |-
+                  CABundle defines the CA bundle configuration for custom certificates
+                  used to verify outbound TLS connections to providers and backends.
+                properties:
+                  configMapKeys:
+                    description: |-
+                      ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
+                      All certificates from these keys will be concatenated into a single CA bundle file.
+                    items:
+                      type: string
+                    maxItems: 50
+                    type: array
+                  configMapName:
+                    description: ConfigMapName is the name of the ConfigMap containing
+                      CA bundle certificates.
+                    minLength: 1
+                    type: string
+                  configMapNamespace:
+                    description: ConfigMapNamespace is the namespace of the ConfigMap
+                      (defaults to the CR namespace).
+                    type: string
+                required:
+                - configMapName
+                type: object
               disabled:
                 description: |-
                   Disabled lists API names to remove from the generated config.
@@ -548,30 +573,6 @@ spec:
                   tls:
                     description: TLS configures TLS for the server.
                     properties:
-                      caBundle:
-                        description: CABundle defines the CA bundle configuration
-                          for custom certificates.
-                        properties:
-                          configMapKeys:
-                            description: |-
-                              ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
-                              All certificates from these keys will be concatenated into a single CA bundle file.
-                            items:
-                              type: string
-                            maxItems: 50
-                            type: array
-                          configMapName:
-                            description: ConfigMapName is the name of the ConfigMap
-                              containing CA bundle certificates.
-                            minLength: 1
-                            type: string
-                          configMapNamespace:
-                            description: ConfigMapNamespace is the namespace of the
-                              ConfigMap (defaults to the CR namespace).
-                            type: string
-                        required:
-                        - configMapName
-                        type: object
                       enabled:
                         description: Enabled toggles TLS termination.
                         type: boolean

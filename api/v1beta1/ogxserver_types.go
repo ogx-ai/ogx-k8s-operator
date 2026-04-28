@@ -267,9 +267,6 @@ type TLSSpec struct {
 	// SecretName references a TLS Secret.
 	// +optional
 	SecretName string `json:"secretName,omitempty"`
-	// CABundle defines the CA bundle configuration for custom certificates.
-	// +optional
-	CABundle *CABundleConfig `json:"caBundle,omitempty"`
 }
 
 // NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
@@ -500,6 +497,10 @@ type OGXServerSpec struct {
 	// Network defines network access controls.
 	// +optional
 	Network *NetworkSpec `json:"network,omitempty"`
+	// CABundle defines the CA bundle configuration for custom certificates
+	// used to verify outbound TLS connections to providers and backends.
+	// +optional
+	CABundle *CABundleConfig `json:"caBundle,omitempty"`
 	// Workload consolidates Kubernetes deployment settings.
 	// +optional
 	Workload *WorkloadSpec `json:"workload,omitempty"`

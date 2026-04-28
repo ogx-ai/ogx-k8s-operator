@@ -54,16 +54,15 @@ spec:
     name: starter
   overrideConfig:
     configMapName: llama-stack-config
+  caBundle:
+    configMapName: custom-ca-bundle
+    # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
+    # configMapKeys not specified - defaults to ["ca-bundle.crt"]
+    # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
+    #   - ca-bundle1.crt
+    #   - ca-bundle2.crt
   network:
     port: 8321
-    tls:
-      caBundle:
-        configMapName: custom-ca-bundle
-        # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
-        # configMapKeys not specified - defaults to ["ca-bundle.crt"]
-        # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
-        #   - ca-bundle1.crt
-        #   - ca-bundle2.crt
   workload:
     overrides:
       env:
