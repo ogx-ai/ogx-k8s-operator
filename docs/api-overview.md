@@ -332,7 +332,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates.<br />The ConfigMap must be in the same namespace as the OGXServer. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates.<br />The ConfigMap must be in the same namespace as the OGXServer and must have<br />the label ogx.io/watch: "true" to be detected by the operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
 | `configMapKeys` _string array_ | ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.<br />All certificates from these keys will be concatenated into a single CA bundle file. |  | MaxItems: 50 <br /> |
 
 #### ConfigGenerationStatus
@@ -553,7 +553,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing config.yaml.<br />Must be in the same namespace as the CR. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing config.yaml.<br />The ConfigMap must be in the same namespace as the OGXServer and must have<br />the label ogx.io/watch: "true" to be detected by the operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### PVCStorageSpec
 
@@ -677,6 +677,8 @@ _Appears in:_
 #### SecretKeyRef
 
 SecretKeyRef references a specific key in a Kubernetes Secret.
+The Secret must be in the same namespace as the OGXServer and must have
+the label ogx.io/watch: "true" to be detected by the operator's cache.
 
 _Appears in:_
 - [KVStorageSpec](#kvstoragespec)
@@ -709,7 +711,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `secretName` _string_ | SecretName references a Kubernetes TLS Secret containing a valid TLS certificate<br />for server TLS termination. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `secretName` _string_ | SecretName references a Kubernetes TLS Secret containing a valid TLS certificate<br />for server TLS termination. The Secret must be in the same namespace as the<br />OGXServer and must have the label ogx.io/watch: "true" to be detected by the<br />operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### VersionInfo
 

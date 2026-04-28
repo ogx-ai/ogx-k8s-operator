@@ -85,6 +85,8 @@ type DistributionSpec struct {
 }
 
 // SecretKeyRef references a specific key in a Kubernetes Secret.
+// The Secret must be in the same namespace as the OGXServer and must have
+// the label ogx.io/watch: "true" to be detected by the operator's cache.
 type SecretKeyRef struct {
 	// Name is the name of the Kubernetes Secret.
 	// +kubebuilder:validation:Required
@@ -244,7 +246,8 @@ type StateStorageSpec struct {
 // CABundleConfig defines the CA bundle configuration for custom certificates.
 type CABundleConfig struct {
 	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
-	// The ConfigMap must be in the same namespace as the OGXServer.
+	// The ConfigMap must be in the same namespace as the OGXServer and must have
+	// the label ogx.io/watch: "true" to be detected by the operator's cache.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ConfigMapName string `json:"configMapName"`
@@ -260,7 +263,9 @@ type CABundleConfig struct {
 // TLSSpec defines TLS termination configuration for the server.
 type TLSSpec struct {
 	// SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
-	// for server TLS termination.
+	// for server TLS termination. The Secret must be in the same namespace as the
+	// OGXServer and must have the label ogx.io/watch: "true" to be detected by the
+	// operator's cache.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	SecretName string `json:"secretName"`
@@ -448,7 +453,8 @@ type WorkloadSpec struct {
 // Mutually exclusive with providers, resources, storage, and disabled.
 type OverrideConfigSpec struct {
 	// ConfigMapName is the name of the ConfigMap containing config.yaml.
-	// Must be in the same namespace as the CR.
+	// The ConfigMap must be in the same namespace as the OGXServer and must have
+	// the label ogx.io/watch: "true" to be detected by the operator's cache.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ConfigMapName string `json:"configMapName"`

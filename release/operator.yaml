@@ -95,7 +95,8 @@ spec:
                   configMapName:
                     description: |-
                       ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
-                      The ConfigMap must be in the same namespace as the OGXServer.
+                      The ConfigMap must be in the same namespace as the OGXServer and must have
+                      the label ogx.io/watch: "true" to be detected by the operator's cache.
                     minLength: 1
                     type: string
                 required:
@@ -576,7 +577,9 @@ spec:
                       secretName:
                         description: |-
                           SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
-                          for server TLS termination.
+                          for server TLS termination. The Secret must be in the same namespace as the
+                          OGXServer and must have the label ogx.io/watch: "true" to be detected by the
+                          operator's cache.
                         minLength: 1
                         type: string
                     required:
@@ -591,7 +594,8 @@ spec:
                   configMapName:
                     description: |-
                       ConfigMapName is the name of the ConfigMap containing config.yaml.
-                      Must be in the same namespace as the CR.
+                      The ConfigMap must be in the same namespace as the OGXServer and must have
+                      the label ogx.io/watch: "true" to be detected by the operator's cache.
                     minLength: 1
                     type: string
                 required:
@@ -627,8 +631,10 @@ spec:
                           type: string
                         secretRefs:
                           additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
+                            description: |-
+                              SecretKeyRef references a specific key in a Kubernetes Secret.
+                              The Secret must be in the same namespace as the OGXServer and must have
+                              the label ogx.io/watch: "true" to be detected by the operator's cache.
                             properties:
                               key:
                                 description: Key is the key within the Secret.
@@ -692,8 +698,10 @@ spec:
                           type: string
                         secretRefs:
                           additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
+                            description: |-
+                              SecretKeyRef references a specific key in a Kubernetes Secret.
+                              The Secret must be in the same namespace as the OGXServer and must have
+                              the label ogx.io/watch: "true" to be detected by the operator's cache.
                             properties:
                               key:
                                 description: Key is the key within the Secret.
@@ -757,8 +765,10 @@ spec:
                           type: string
                         secretRefs:
                           additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
+                            description: |-
+                              SecretKeyRef references a specific key in a Kubernetes Secret.
+                              The Secret must be in the same namespace as the OGXServer and must have
+                              the label ogx.io/watch: "true" to be detected by the operator's cache.
                             properties:
                               key:
                                 description: Key is the key within the Secret.
@@ -822,8 +832,10 @@ spec:
                           type: string
                         secretRefs:
                           additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
+                            description: |-
+                              SecretKeyRef references a specific key in a Kubernetes Secret.
+                              The Secret must be in the same namespace as the OGXServer and must have
+                              the label ogx.io/watch: "true" to be detected by the operator's cache.
                             properties:
                               key:
                                 description: Key is the key within the Secret.
@@ -888,8 +900,10 @@ spec:
                           type: string
                         secretRefs:
                           additionalProperties:
-                            description: SecretKeyRef references a specific key in
-                              a Kubernetes Secret.
+                            description: |-
+                              SecretKeyRef references a specific key in a Kubernetes Secret.
+                              The Secret must be in the same namespace as the OGXServer and must have
+                              the label ogx.io/watch: "true" to be detected by the operator's cache.
                             properties:
                               key:
                                 description: Key is the key within the Secret.
