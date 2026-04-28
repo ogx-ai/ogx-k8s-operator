@@ -341,8 +341,8 @@ func (in *OGXServerSpec) DeepCopyInto(out *OGXServerSpec) {
 		*out = new(StateStorageSpec)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Disabled != nil {
-		in, out := &in.Disabled, &out.Disabled
+	if in.DisabledAPIs != nil {
+		in, out := &in.DisabledAPIs, &out.DisabledAPIs
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}

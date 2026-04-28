@@ -102,9 +102,9 @@ spec:
                 required:
                 - configMapName
                 type: object
-              disabled:
+              disabledAPIs:
                 description: |-
-                  Disabled lists API names to remove from the generated config.
+                  DisabledAPIs lists API names to remove from the generated config.
                   Mutually exclusive with overrideConfig.
                 items:
                   enum:
@@ -3568,22 +3568,22 @@ spec:
               rule: '!has(self.overrideConfig) || !has(self.resources)'
             - message: overrideConfig and storage are mutually exclusive
               rule: '!has(self.overrideConfig) || !has(self.storage)'
-            - message: overrideConfig and disabled are mutually exclusive
-              rule: '!has(self.overrideConfig) || !has(self.disabled)'
-            - message: inference cannot be both in providers and disabled
-              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+            - message: overrideConfig and disabledAPIs are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.disabledAPIs)'
+            - message: inference cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''inference'') || !has(self.providers.inference) || self.providers.inference.size()
                 == 0'
-            - message: vector_io cannot be both in providers and disabled
-              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+            - message: vector_io cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''vector_io'') || !has(self.providers.vectorIo) || self.providers.vectorIo.size()
                 == 0'
-            - message: tool_runtime cannot be both in providers and disabled
-              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+            - message: tool_runtime cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''tool_runtime'') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size()
                 == 0'
-            - message: telemetry cannot be both in providers and disabled
-              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+            - message: telemetry cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''telemetry'') || !has(self.providers.telemetry) || self.providers.telemetry.size()
                 == 0'
           status:

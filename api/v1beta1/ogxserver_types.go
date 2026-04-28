@@ -464,11 +464,11 @@ type OverrideConfigSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.providers)",message="overrideConfig and providers are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabled)",message="overrideConfig and disabled are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabled"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'vector_io') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vector_io cannot be both in providers and disabled"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size() == 0",message="tool_runtime cannot be both in providers and disabled"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d, d == 'telemetry') || !has(self.providers.telemetry) || self.providers.telemetry.size() == 0",message="telemetry cannot be both in providers and disabled"
+// +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabledAPIs)",message="overrideConfig and disabledAPIs are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vector_io cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size() == 0",message="tool_runtime cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'telemetry') || !has(self.providers.telemetry) || self.providers.telemetry.size() == 0",message="telemetry cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -487,12 +487,12 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Storage *StateStorageSpec `json:"storage,omitempty"`
-	// Disabled lists API names to remove from the generated config.
+	// DisabledAPIs lists API names to remove from the generated config.
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:items:Enum=agents;inference;telemetry;tool_runtime;vector_io
-	Disabled []string `json:"disabled,omitempty"`
+	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// Network defines network access controls.
 	// +optional
 	Network *NetworkSpec `json:"network,omitempty"`
