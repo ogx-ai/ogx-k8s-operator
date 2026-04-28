@@ -123,31 +123,6 @@ spec:
                   rule: '!(has(self.name) && has(self.image))'
                 - message: one of name or image must be specified
                   rule: has(self.name) || has(self.image)
-              externalProviders:
-                description: ExternalProviders configures external provider injection.
-                properties:
-                  inference:
-                    description: Inference lists external inference providers to inject.
-                    items:
-                      description: ExternalProviderRef references an external provider
-                        image.
-                      properties:
-                        image:
-                          description: Image is the container image containing the
-                            provider implementation.
-                          minLength: 1
-                          type: string
-                        providerId:
-                          description: ProviderID is the unique provider identifier.
-                          minLength: 1
-                          type: string
-                      required:
-                      - image
-                      - providerId
-                      type: object
-                    minItems: 1
-                    type: array
-                type: object
               network:
                 description: Network defines network access controls.
                 properties:
@@ -3377,6 +3352,8 @@ spec:
                     x-kubernetes-validations:
                     - message: mountPath must not be empty if specified
                       rule: '!has(self.mountPath) || self.mountPath.size() > 0'
+                    - message: size must be a positive quantity
+                      rule: '!has(self.size) || quantity(self.size).isGreaterThan(quantity(''0''))'
                   topologySpreadConstraints:
                     description: TopologySpreadConstraints defines Pod spreading rules.
                     items:

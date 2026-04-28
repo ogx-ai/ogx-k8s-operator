@@ -336,6 +336,7 @@ type NetworkSpec struct {
 
 // PVCStorageSpec defines PVC storage for persistent data.
 // +kubebuilder:validation:XValidation:rule="!has(self.mountPath) || self.mountPath.size() > 0",message="mountPath must not be empty if specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.size) || quantity(self.size).isGreaterThan(quantity('0'))",message="size must be a positive quantity"
 type PVCStorageSpec struct {
 	// Size is the size of the PVC.
 	// +optional
@@ -453,26 +454,6 @@ type OverrideConfigSpec struct {
 	ConfigMapName string `json:"configMapName"`
 }
 
-// ExternalProviderRef references an external provider image.
-type ExternalProviderRef struct {
-	// ProviderID is the unique provider identifier.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	ProviderID string `json:"providerId"`
-	// Image is the container image containing the provider implementation.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Image string `json:"image"`
-}
-
-// ExternalProvidersSpec defines external provider injection.
-type ExternalProvidersSpec struct {
-	// Inference lists external inference providers to inject.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	Inference []ExternalProviderRef `json:"inference,omitempty"`
-}
-
 // OGXServerSpec defines the desired state of OGXServer.
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.providers)",message="overrideConfig and providers are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
@@ -516,9 +497,6 @@ type OGXServerSpec struct {
 	// Workload consolidates Kubernetes deployment settings.
 	// +optional
 	Workload *WorkloadSpec `json:"workload,omitempty"`
-	// ExternalProviders configures external provider injection.
-	// +optional
-	ExternalProviders *ExternalProvidersSpec `json:"externalProviders,omitempty"`
 	// OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.
 	// Mutually exclusive with providers, resources, storage, and disabled.
 	// +optional

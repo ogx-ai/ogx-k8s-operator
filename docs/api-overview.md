@@ -389,29 +389,6 @@ _Appears in:_
 | `enabled` _boolean_ | Enabled controls whether external access is created. | false |  |
 | `hostname` _string_ | Hostname sets a custom hostname for the external endpoint.<br />When omitted, an auto-generated hostname is used. |  |  |
 
-#### ExternalProviderRef
-
-ExternalProviderRef references an external provider image.
-
-_Appears in:_
-- [ExternalProvidersSpec](#externalprovidersspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `providerId` _string_ | ProviderID is the unique provider identifier. |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `image` _string_ | Image is the container image containing the provider implementation. |  | MinLength: 1 <br />Required: \{\} <br /> |
-
-#### ExternalProvidersSpec
-
-ExternalProvidersSpec defines external provider injection.
-
-_Appears in:_
-- [OGXServerSpec](#ogxserverspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `inference` _[ExternalProviderRef](#externalproviderref) array_ | Inference lists external inference providers to inject. |  | MinItems: 1 <br /> |
-
 #### KVStorageSpec
 
 KVStorageSpec configures the key-value storage backend.
@@ -545,7 +522,6 @@ _Appears in:_
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
 | `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates<br />used to verify outbound TLS connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
-| `externalProviders` _[ExternalProvidersSpec](#externalprovidersspec)_ | ExternalProviders configures external provider injection. |  |  |
 | `overrideConfig` _[OverrideConfigSpec](#overrideconfigspec)_ | OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabled. |  |  |
 
 #### OGXServerStatus
