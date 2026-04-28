@@ -9,7 +9,7 @@ spec:
   workload:
     storage:
       size: "10Gi"
-      mountPath: "/.llama"
+      mountPath: "/.ogx"
     overrides:
       env:
       - name: OLLAMA_INFERENCE_MODEL

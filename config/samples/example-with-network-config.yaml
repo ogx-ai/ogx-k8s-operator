@@ -51,7 +51,7 @@ spec:
         - name: OLLAMA_URL
           value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
   network:
-    expose: true
+    expose: {}
     networkPolicy:
       ingress:
         - from:

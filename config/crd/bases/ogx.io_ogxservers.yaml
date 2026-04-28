@@ -20,11 +20,24 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.resolvedDistribution.image
+      name: Distribution
+      priority: 1
+      type: string
+    - jsonPath: .status.configGeneration.configMapName
+      name: Config
+      priority: 1
+      type: string
+    - jsonPath: .status.configGeneration.providerCount
+      name: Providers
+      type: integer
     - jsonPath: .status.version.operatorVersion
       name: Operator Version
+      priority: 1
       type: string
     - jsonPath: .status.version.serverVersion
       name: Server Version
+      priority: 1
       type: string
     - jsonPath: .status.availableReplicas
       name: Available
@@ -58,69 +71,76 @@ spec:
             description: OGXServerSpec defines the desired state of OGXServer.
             properties:
               disabled:
-                description: Disabled lists API categories to disable.
+                description: |-
+                  Disabled lists API names to remove from the generated config.
+                  Mutually exclusive with overrideConfig.
                 items:
+                  enum:
+                  - agents
+                  - inference
+                  - telemetry
+                  - tool_runtime
+                  - vector_io
                   type: string
+                minItems: 1
                 type: array
               distribution:
-                description: Distribution specifies which OGX distribution image to
-                  deploy.
+                description: Distribution identifies the OGX distribution to deploy.
                 properties:
                   image:
-                    description: Image is the direct container image reference to
-                      use.
+                    description: Image is a direct container image reference to use.
                     type: string
                   name:
-                    description: Name is the distribution name that maps to supported
-                      distributions.
+                    description: |-
+                      Name is the distribution name that maps to a supported distribution (e.g., "starter", "remote-vllm").
+                      Resolved to a container image via distributions.json and image-overrides.
                     type: string
                 type: object
                 x-kubernetes-validations:
-                - message: Only one of name or image can be specified
+                - message: only one of name or image can be specified
                   rule: '!(has(self.name) && has(self.image))'
+                - message: one of name or image must be specified
+                  rule: has(self.name) || has(self.image)
               externalProviders:
-                description: ExternalProviders references external provider configurations.
-                items:
-                  description: ProviderConfig defines a single provider configuration.
-                  properties:
-                    apiKey:
-                      description: APIKey references a Secret key holding the provider's
-                        API key.
+                description: ExternalProviders configures external provider injection.
+                properties:
+                  inference:
+                    description: Inference lists external inference providers to inject.
+                    items:
+                      description: ExternalProviderRef references an external provider
+                        image.
                       properties:
-                        key:
-                          description: Key is the key within the Secret.
+                        image:
+                          description: Image is the container image containing the
+                            provider implementation.
+                          minLength: 1
                           type: string
-                        name:
-                          description: Name is the name of the Secret.
+                        providerId:
+                          description: ProviderID is the unique provider identifier.
+                          minLength: 1
                           type: string
                       required:
-                      - key
-                      - name
+                      - image
+                      - providerId
                       type: object
-                    endpoint:
-                      description: Endpoint is the URL for remote providers.
-                      type: string
-                    id:
-                      description: ID is the unique identifier for this provider instance.
-                      type: string
-                    provider:
-                      description: Provider is the provider type (e.g. "remote::ollama").
-                      type: string
-                    settings:
-                      description: Settings holds provider-specific configuration.
-                      x-kubernetes-preserve-unknown-fields: true
-                  required:
-                  - id
-                  - provider
-                  type: object
-                type: array
+                    minItems: 1
+                    type: array
+                type: object
               network:
                 description: Network defines network access controls.
                 properties:
                   expose:
-                    description: Expose configures external access (e.g. Ingress).
-                      Polymorphic JSON for flexibility.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: Expose controls external service exposure via Ingress/Route.
+                    properties:
+                      hostname:
+                        description: |-
+                          Hostname sets a custom hostname for the Ingress/Route.
+                          When omitted, an auto-generated hostname is used.
+                        type: string
+                    type: object
+                    x-kubernetes-validations:
+                    - message: hostname must not be empty if specified
+                      rule: '!has(self.hostname) || self.hostname.size() > 0'
                   networkPolicy:
                     description: |-
                       NetworkPolicy configures the operator-managed NetworkPolicy.
@@ -519,12 +539,14 @@ spec:
                         type: array
                     type: object
                   port:
-                    description: Port overrides the default container and service
-                      port.
+                    default: 8321
+                    description: Port is the server listen port.
                     format: int32
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                   tls:
-                    description: TLS configures TLS termination.
+                    description: TLS configures TLS for the server.
                     properties:
                       caBundle:
                         description: CABundle defines the CA bundle configuration
@@ -541,6 +563,7 @@ spec:
                           configMapName:
                             description: ConfigMapName is the name of the ConfigMap
                               containing CA bundle certificates.
+                            minLength: 1
                             type: string
                           configMapNamespace:
                             description: ConfigMapNamespace is the namespace of the
@@ -559,118 +582,487 @@ spec:
                 type: object
               overrideConfig:
                 description: |-
-                  OverrideConfig references a user-provided ConfigMap that replaces all generated config.
+                  OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.
                   Mutually exclusive with providers, resources, storage, and disabled.
                 properties:
                   configMapName:
-                    description: ConfigMapName is the name of the ConfigMap containing
-                      the server configuration.
+                    description: |-
+                      ConfigMapName is the name of the ConfigMap containing config.yaml.
+                      Must be in the same namespace as the CR.
+                    minLength: 1
                     type: string
                 required:
                 - configMapName
                 type: object
               providers:
-                description: Providers configures inference, safety, and other provider
-                  backends.
+                description: |-
+                  Providers configures providers by API type.
+                  Mutually exclusive with overrideConfig.
                 properties:
                   inference:
-                    description: Inference providers.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: Inference configures inference providers (e.g., vLLM,
+                      TGI).
+                    items:
+                      description: ProviderConfig defines the configuration for a
+                        single provider instance.
+                      properties:
+                        endpoint:
+                          description: Endpoint is the provider endpoint URL. Maps
+                            to config.url in config.yaml.
+                          type: string
+                        id:
+                          description: |-
+                            ID is a unique provider identifier. Required when multiple providers are
+                            configured for the same API type. Auto-generated from provider when omitted
+                            for single-provider configurations.
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
+                            Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
+                          type: string
+                        secretRefs:
+                          additionalProperties:
+                            description: SecretKeyRef references a specific key in
+                              a Kubernetes Secret.
+                            properties:
+                              key:
+                                description: Key is the key within the Secret.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          description: |-
+                            SecretRefs is a map of named secret references for provider-specific
+                            connection fields (e.g., host, password). Each key becomes the env var
+                            field suffix and maps to config.<key> with env var substitution.
+                            Use this instead of embedding secretKeyRef inside settings.
+                          minProperties: 1
+                          type: object
+                        settings:
+                          description: |-
+                            Settings contains provider-specific settings merged into the provider's
+                            config section in config.yaml. Acts as an escape hatch for fields not
+                            directly exposed in the CRD schema. Passed through as-is without any
+                            secret resolution. Use secretRefs for secret values.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - provider
+                      type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id.size() > 0'
+                    minItems: 1
+                    type: array
+                    x-kubernetes-validations:
+                    - message: each provider must have an explicit id when multiple
+                        providers are specified
+                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   safety:
-                    description: Safety providers.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: Safety configures safety providers (e.g., llama-guard).
+                    items:
+                      description: ProviderConfig defines the configuration for a
+                        single provider instance.
+                      properties:
+                        endpoint:
+                          description: Endpoint is the provider endpoint URL. Maps
+                            to config.url in config.yaml.
+                          type: string
+                        id:
+                          description: |-
+                            ID is a unique provider identifier. Required when multiple providers are
+                            configured for the same API type. Auto-generated from provider when omitted
+                            for single-provider configurations.
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
+                            Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
+                          type: string
+                        secretRefs:
+                          additionalProperties:
+                            description: SecretKeyRef references a specific key in
+                              a Kubernetes Secret.
+                            properties:
+                              key:
+                                description: Key is the key within the Secret.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          description: |-
+                            SecretRefs is a map of named secret references for provider-specific
+                            connection fields (e.g., host, password). Each key becomes the env var
+                            field suffix and maps to config.<key> with env var substitution.
+                            Use this instead of embedding secretKeyRef inside settings.
+                          minProperties: 1
+                          type: object
+                        settings:
+                          description: |-
+                            Settings contains provider-specific settings merged into the provider's
+                            config section in config.yaml. Acts as an escape hatch for fields not
+                            directly exposed in the CRD schema. Passed through as-is without any
+                            secret resolution. Use secretRefs for secret values.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - provider
+                      type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id.size() > 0'
+                    minItems: 1
+                    type: array
+                    x-kubernetes-validations:
+                    - message: each provider must have an explicit id when multiple
+                        providers are specified
+                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   telemetry:
-                    description: Telemetry providers.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: Telemetry configures telemetry providers (e.g., opentelemetry).
+                    items:
+                      description: ProviderConfig defines the configuration for a
+                        single provider instance.
+                      properties:
+                        endpoint:
+                          description: Endpoint is the provider endpoint URL. Maps
+                            to config.url in config.yaml.
+                          type: string
+                        id:
+                          description: |-
+                            ID is a unique provider identifier. Required when multiple providers are
+                            configured for the same API type. Auto-generated from provider when omitted
+                            for single-provider configurations.
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
+                            Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
+                          type: string
+                        secretRefs:
+                          additionalProperties:
+                            description: SecretKeyRef references a specific key in
+                              a Kubernetes Secret.
+                            properties:
+                              key:
+                                description: Key is the key within the Secret.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          description: |-
+                            SecretRefs is a map of named secret references for provider-specific
+                            connection fields (e.g., host, password). Each key becomes the env var
+                            field suffix and maps to config.<key> with env var substitution.
+                            Use this instead of embedding secretKeyRef inside settings.
+                          minProperties: 1
+                          type: object
+                        settings:
+                          description: |-
+                            Settings contains provider-specific settings merged into the provider's
+                            config section in config.yaml. Acts as an escape hatch for fields not
+                            directly exposed in the CRD schema. Passed through as-is without any
+                            secret resolution. Use secretRefs for secret values.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - provider
+                      type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id.size() > 0'
+                    minItems: 1
+                    type: array
+                    x-kubernetes-validations:
+                    - message: each provider must have an explicit id when multiple
+                        providers are specified
+                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   toolRuntime:
-                    description: ToolRuntime providers.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: ToolRuntime configures tool runtime providers.
+                    items:
+                      description: ProviderConfig defines the configuration for a
+                        single provider instance.
+                      properties:
+                        endpoint:
+                          description: Endpoint is the provider endpoint URL. Maps
+                            to config.url in config.yaml.
+                          type: string
+                        id:
+                          description: |-
+                            ID is a unique provider identifier. Required when multiple providers are
+                            configured for the same API type. Auto-generated from provider when omitted
+                            for single-provider configurations.
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
+                            Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
+                          type: string
+                        secretRefs:
+                          additionalProperties:
+                            description: SecretKeyRef references a specific key in
+                              a Kubernetes Secret.
+                            properties:
+                              key:
+                                description: Key is the key within the Secret.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          description: |-
+                            SecretRefs is a map of named secret references for provider-specific
+                            connection fields (e.g., host, password). Each key becomes the env var
+                            field suffix and maps to config.<key> with env var substitution.
+                            Use this instead of embedding secretKeyRef inside settings.
+                          minProperties: 1
+                          type: object
+                        settings:
+                          description: |-
+                            Settings contains provider-specific settings merged into the provider's
+                            config section in config.yaml. Acts as an escape hatch for fields not
+                            directly exposed in the CRD schema. Passed through as-is without any
+                            secret resolution. Use secretRefs for secret values.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - provider
+                      type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id.size() > 0'
+                    minItems: 1
+                    type: array
+                    x-kubernetes-validations:
+                    - message: each provider must have an explicit id when multiple
+                        providers are specified
+                      rule: self.size() <= 1 || self.all(p, has(p.id))
                   vectorIo:
-                    description: VectorIO providers.
-                    x-kubernetes-preserve-unknown-fields: true
+                    description: VectorIo configures vector I/O providers (e.g., pgvector,
+                      chromadb).
+                    items:
+                      description: ProviderConfig defines the configuration for a
+                        single provider instance.
+                      properties:
+                        endpoint:
+                          description: Endpoint is the provider endpoint URL. Maps
+                            to config.url in config.yaml.
+                          type: string
+                        id:
+                          description: |-
+                            ID is a unique provider identifier. Required when multiple providers are
+                            configured for the same API type. Auto-generated from provider when omitted
+                            for single-provider configurations.
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the provider type (e.g., "vllm", "llama-guard", "pgvector").
+                            Maps to provider_type with "remote::" prefix in config.yaml.
+                          minLength: 1
+                          type: string
+                        secretRefs:
+                          additionalProperties:
+                            description: SecretKeyRef references a specific key in
+                              a Kubernetes Secret.
+                            properties:
+                              key:
+                                description: Key is the key within the Secret.
+                                minLength: 1
+                                type: string
+                              name:
+                                description: Name is the name of the Kubernetes Secret.
+                                minLength: 1
+                                type: string
+                            required:
+                            - key
+                            - name
+                            type: object
+                          description: |-
+                            SecretRefs is a map of named secret references for provider-specific
+                            connection fields (e.g., host, password). Each key becomes the env var
+                            field suffix and maps to config.<key> with env var substitution.
+                            Use this instead of embedding secretKeyRef inside settings.
+                          minProperties: 1
+                          type: object
+                        settings:
+                          description: |-
+                            Settings contains provider-specific settings merged into the provider's
+                            config section in config.yaml. Acts as an escape hatch for fields not
+                            directly exposed in the CRD schema. Passed through as-is without any
+                            secret resolution. Use secretRefs for secret values.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - provider
+                      type: object
+                      x-kubernetes-validations:
+                      - message: id must not be empty if specified
+                        rule: '!has(self.id) || self.id.size() > 0'
+                    minItems: 1
+                    type: array
+                    x-kubernetes-validations:
+                    - message: each provider must have an explicit id when multiple
+                        providers are specified
+                      rule: self.size() <= 1 || self.all(p, has(p.id))
                 type: object
               resources:
-                description: Resources defines models, tools, and shields to register.
+                description: |-
+                  Resources declares models, tools, and shields to register.
+                  Mutually exclusive with overrideConfig.
                 properties:
                   models:
-                    description: Models to register. Each element is a JSON object
-                      for polymorphic form.
+                    description: Models to register with inference providers.
                     items:
-                      x-kubernetes-preserve-unknown-fields: true
+                      description: ModelConfig defines a model registration with optional
+                        provider assignment and metadata.
+                      properties:
+                        contextLength:
+                          description: ContextLength is the model context window size.
+                          type: integer
+                        modelType:
+                          description: ModelType is the model type classification.
+                          type: string
+                        name:
+                          description: Name is the model identifier (e.g., "llama3.2-8b").
+                          minLength: 1
+                          type: string
+                        provider:
+                          description: |-
+                            Provider is the ID of the provider to register this model with.
+                            Defaults to the first inference provider when omitted.
+                          type: string
+                        quantization:
+                          description: Quantization is the quantization method.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: provider must not be empty if specified
+                        rule: '!has(self.provider) || self.provider.size() > 0'
+                      - message: modelType must not be empty if specified
+                        rule: '!has(self.modelType) || self.modelType.size() > 0'
+                      - message: quantization must not be empty if specified
+                        rule: '!has(self.quantization) || self.quantization.size()
+                          > 0'
+                    minItems: 1
                     type: array
                   shields:
                     description: Shields to register by name.
                     items:
+                      minLength: 1
                       type: string
+                    minItems: 1
                     type: array
                   tools:
-                    description: Tools to register.
+                    description: Tools are tool group names to register with the toolRuntime
+                      provider.
                     items:
-                      x-kubernetes-preserve-unknown-fields: true
+                      minLength: 1
+                      type: string
+                    minItems: 1
                     type: array
                 type: object
               storage:
-                description: Storage configures state storage backends (KV, SQL).
+                description: |-
+                  Storage configures state storage backends (KV and SQL).
+                  Mutually exclusive with overrideConfig.
                 properties:
                   kv:
                     description: KV configures key-value storage.
                     properties:
                       endpoint:
-                        description: Endpoint is the connection endpoint for remote
-                          backends.
+                        description: Endpoint is the Redis endpoint URL. Required
+                          when type is "redis".
                         type: string
                       password:
-                        description: Password references a Secret key holding the
-                          backend password.
+                        description: Password references a Secret for Redis authentication.
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            minLength: 1
                             type: string
                           name:
-                            description: Name is the name of the Secret.
+                            description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
                             type: string
                         required:
                         - key
                         - name
                         type: object
                       type:
-                        description: 'Type is the backend type: sqlite or redis.'
+                        default: sqlite
+                        description: Type is the KV storage backend type.
                         enum:
                         - sqlite
                         - redis
                         type: string
-                    required:
-                    - type
                     type: object
+                    x-kubernetes-validations:
+                    - message: endpoint is required when type is redis
+                      rule: self.type != 'redis' || has(self.endpoint)
+                    - message: endpoint is only valid when type is redis
+                      rule: '!has(self.endpoint) || self.type == ''redis'''
+                    - message: password is only valid when type is redis
+                      rule: '!has(self.password) || self.type == ''redis'''
                   sql:
                     description: SQL configures SQL storage.
                     properties:
                       connectionString:
-                        description: ConnectionString references a Secret key holding
-                          the full connection string.
+                        description: |-
+                          ConnectionString references a Secret containing the database connection string.
+                          Required when type is "postgres".
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            minLength: 1
                             type: string
                           name:
-                            description: Name is the name of the Secret.
+                            description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
                             type: string
                         required:
                         - key
                         - name
                         type: object
                       type:
-                        description: 'Type is the backend type: sqlite or postgres.'
+                        default: sqlite
+                        description: Type is the SQL storage backend type.
                         enum:
                         - sqlite
                         - postgres
                         type: string
-                    required:
-                    - type
                     type: object
+                    x-kubernetes-validations:
+                    - message: connectionString is required when type is postgres
+                      rule: self.type != 'postgres' || has(self.connectionString)
+                    - message: connectionString is only valid when type is postgres
+                      rule: '!has(self.connectionString) || self.type == ''postgres'''
                 type: object
               workload:
-                description: Workload defines deployment, scaling, and pod configuration.
+                description: Workload consolidates Kubernetes deployment settings.
                 properties:
                   autoscaling:
                     description: Autoscaling configures HPA for the server pods.
@@ -678,36 +1070,49 @@ spec:
                       maxReplicas:
                         description: MaxReplicas is the upper bound replica count.
                         format: int32
+                        minimum: 1
                         type: integer
                       minReplicas:
                         description: MinReplicas is the lower bound replica count.
                         format: int32
+                        minimum: 1
                         type: integer
                       targetCPUUtilizationPercentage:
-                        description: TargetCPUUtilizationPercentage configures CPU
-                          based scaling.
+                        description: TargetCPUUtilizationPercentage configures CPU-based
+                          scaling.
                         format: int32
+                        maximum: 100
+                        minimum: 1
                         type: integer
                       targetMemoryUtilizationPercentage:
                         description: TargetMemoryUtilizationPercentage configures
-                          memory based scaling.
+                          memory-based scaling.
                         format: int32
+                        maximum: 100
+                        minimum: 1
                         type: integer
                     required:
                     - maxReplicas
                     type: object
+                    x-kubernetes-validations:
+                    - message: maxReplicas must be greater than or equal to minReplicas
+                      rule: '!has(self.minReplicas) || self.maxReplicas >= self.minReplicas'
                   overrides:
                     description: Overrides allows pod-level customization.
                     properties:
                       args:
                         description: Args overrides the container arguments.
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                       command:
-                        description: Command overrides the container entrypoint.
+                        description: Command overrides the container command.
                         items:
+                          minLength: 1
                           type: string
+                        minItems: 1
                         type: array
                       env:
                         description: Env specifies additional environment variables.
@@ -866,13 +1271,14 @@ spec:
                           required:
                           - name
                           type: object
+                        minItems: 1
                         type: array
                       serviceAccountName:
-                        description: ServiceAccountName allows users to specify their
-                          own ServiceAccount.
+                        description: ServiceAccountName specifies a custom ServiceAccount.
                         type: string
                       volumeMounts:
-                        description: VolumeMounts specifies additional volume mounts.
+                        description: VolumeMounts adds additional volume mounts to
+                          the container.
                         items:
                           description: VolumeMount describes a mounting of a Volume
                             within a container.
@@ -934,9 +1340,10 @@ spec:
                           - mountPath
                           - name
                           type: object
+                        minItems: 1
                         type: array
                       volumes:
-                        description: Volumes specifies additional volumes.
+                        description: Volumes adds additional volumes to the Pod.
                         items:
                           description: Volume represents a named volume in a pod that
                             may be accessed by any container in the pod.
@@ -2835,8 +3242,13 @@ spec:
                           required:
                           - name
                           type: object
+                        minItems: 1
                         type: array
                     type: object
+                    x-kubernetes-validations:
+                    - message: serviceAccountName must not be empty if specified
+                      rule: '!has(self.serviceAccountName) || self.serviceAccountName.size()
+                        > 0'
                   podDisruptionBudget:
                     description: PodDisruptionBudget controls voluntary disruption
                       tolerance.
@@ -2856,10 +3268,17 @@ spec:
                           must remain available.
                         x-kubernetes-int-or-string: true
                     type: object
+                    x-kubernetes-validations:
+                    - message: at least one of minAvailable or maxUnavailable must
+                        be specified
+                      rule: has(self.minAvailable) || has(self.maxUnavailable)
+                    - message: minAvailable and maxUnavailable are mutually exclusive
+                      rule: '!(has(self.minAvailable) && has(self.maxUnavailable))'
                   replicas:
                     default: 1
-                    description: Replicas is the desired pod count.
+                    description: Replicas is the desired Pod replica count.
                     format: int32
+                    minimum: 0
                     type: integer
                   resources:
                     description: Resources defines CPU/memory requests and limits.
@@ -2924,20 +3343,23 @@ spec:
                     description: Storage defines PVC configuration.
                     properties:
                       mountPath:
-                        description: MountPath is the path where the PVC is mounted
-                          in the container.
+                        default: /.ogx
+                        description: MountPath is the container mount path for the
+                          PVC.
                         type: string
                       size:
                         anyOf:
                         - type: integer
                         - type: string
-                        description: Size is the PVC storage request.
+                        description: Size is the size of the PVC.
                         pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                         x-kubernetes-int-or-string: true
                     type: object
+                    x-kubernetes-validations:
+                    - message: mountPath must not be empty if specified
+                      rule: '!has(self.mountPath) || self.mountPath.size() > 0'
                   topologySpreadConstraints:
-                    description: TopologySpreadConstraints defines fine-grained spreading
-                      rules.
+                    description: TopologySpreadConstraints defines Pod spreading rules.
                     items:
                       description: TopologySpreadConstraint specifies how to spread
                         matching pods among the given topology.
@@ -3109,6 +3531,7 @@ spec:
                       - topologyKey
                       - whenUnsatisfiable
                       type: object
+                    minItems: 1
                     type: array
                   workers:
                     description: Workers configures the number of uvicorn worker processes.
@@ -3120,10 +3543,30 @@ spec:
             - distribution
             type: object
             x-kubernetes-validations:
-            - message: overrideConfig is mutually exclusive with providers, resources,
-                storage, and disabled
-              rule: '!(has(self.overrideConfig) && (has(self.providers) || has(self.resources)
-                || has(self.storage) || has(self.disabled)))'
+            - message: overrideConfig and providers are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.providers)'
+            - message: overrideConfig and resources are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.resources)'
+            - message: overrideConfig and storage are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.storage)'
+            - message: overrideConfig and disabled are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.disabled)'
+            - message: inference cannot be both in providers and disabled
+              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+                d == ''inference'') || !has(self.providers.inference) || self.providers.inference.size()
+                == 0'
+            - message: vector_io cannot be both in providers and disabled
+              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+                d == ''vector_io'') || !has(self.providers.vectorIo) || self.providers.vectorIo.size()
+                == 0'
+            - message: tool_runtime cannot be both in providers and disabled
+              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+                d == ''tool_runtime'') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size()
+                == 0'
+            - message: telemetry cannot be both in providers and disabled
+              rule: '!has(self.providers) || !has(self.disabled) || !self.disabled.exists(d,
+                d == ''telemetry'') || !has(self.providers.telemetry) || self.providers.telemetry.size()
+                == 0'
           status:
             description: OGXServerStatus defines the observed state of OGXServer.
             properties:
@@ -3190,15 +3633,28 @@ spec:
                   type: object
                 type: array
               configGeneration:
-                description: ConfigGeneration reports the state of config generation.
+                description: ConfigGeneration tracks config generation details.
                 properties:
                   configMapName:
                     description: ConfigMapName is the name of the generated ConfigMap.
+                    type: string
+                  configVersion:
+                    description: ConfigVersion is the config.yaml schema version.
+                    type: integer
+                  generatedAt:
+                    description: GeneratedAt is the timestamp of the last generation.
+                    format: date-time
                     type: string
                   observedGeneration:
                     description: ObservedGeneration is the spec generation that was
                       last processed.
                     format: int64
+                    type: integer
+                  providerCount:
+                    description: ProviderCount is the number of configured providers.
+                    type: integer
+                  resourceCount:
+                    description: ResourceCount is the number of registered resources.
                     type: integer
                 type: object
               distributionConfig:
@@ -3255,15 +3711,20 @@ spec:
                 - Terminating
                 type: string
               resolvedDistribution:
-                description: ResolvedDistribution reports the resolved distribution
-                  image.
+                description: ResolvedDistribution tracks the resolved image and config
+                  source.
                 properties:
-                  image:
-                    description: Image is the resolved container image reference.
+                  configHash:
+                    description: ConfigHash is the SHA256 hash of the base config
+                      used.
                     type: string
-                  source:
-                    description: Source indicates how the image was resolved (e.g.
-                      "name", "image").
+                  configSource:
+                    description: 'ConfigSource indicates the config origin: "embedded"
+                      or "oci-label".'
+                    type: string
+                  image:
+                    description: Image is the resolved container image reference (with
+                      digest when available).
                     type: string
                 type: object
               routeURL:
