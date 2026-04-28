@@ -10,6 +10,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    cert-manager.io/inject-ca-from: ogx-k8s-operator-system/ogx-k8s-operator-serving-cert
     controller-gen.kubebuilder.io/version: v0.17.2
   labels:
     app.kubernetes.io/name: ogx-k8s-operator
@@ -4158,6 +4159,22 @@ spec:
     app.kubernetes.io/name: ogx-k8s-operator
     control-plane: controller-manager
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: ogx-k8s-operator
+  name: ogx-k8s-operator-webhook-service
+  namespace: ogx-k8s-operator-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/name: ogx-k8s-operator
+    control-plane: controller-manager
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -4199,6 +4216,10 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 20
         name: manager
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
         readinessProbe:
           httpGet:
             path: /readyz
@@ -4217,6 +4238,10 @@ spec:
           capabilities:
             drop:
             - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
       securityContext:
         runAsNonRoot: true
       serviceAccountName: ogx-k8s-operator-controller-manager
@@ -4234,6 +4259,11 @@ spec:
         maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
+      volumes:
+      - name: cert
+        secret:
+          defaultMode: 420
+          secretName: ogx-k8s-operator-webhook-cert
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -4247,3 +4277,59 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: ogx-k8s-operator
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: ogx-k8s-operator
+  name: ogx-k8s-operator-serving-cert
+  namespace: ogx-k8s-operator-system
+spec:
+  dnsNames:
+  - ogx-k8s-operator-webhook-service.ogx-k8s-operator-system.svc
+  - ogx-k8s-operator-webhook-service.ogx-k8s-operator-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: ogx-k8s-operator-selfsigned-issuer
+  secretName: ogx-k8s-operator-webhook-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/name: ogx-k8s-operator
+  name: ogx-k8s-operator-selfsigned-issuer
+  namespace: ogx-k8s-operator-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: ogx-k8s-operator-system/ogx-k8s-operator-serving-cert
+  labels:
+    app.kubernetes.io/name: ogx-k8s-operator
+  name: ogx-k8s-operator-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: ogx-k8s-operator-webhook-service
+      namespace: ogx-k8s-operator-system
+      path: /validate-ogx-io-v1beta1-ogxserver
+  failurePolicy: Fail
+  name: vogxserver.kb.io
+  rules:
+  - apiGroups:
+    - ogx.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - ogxservers
+  sideEffects: None
