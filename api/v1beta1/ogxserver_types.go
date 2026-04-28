@@ -269,24 +269,35 @@ type TLSSpec struct {
 }
 
 // NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
-// When nil or enabled with no rules, the operator generates safe defaults:
-// ingress on the service port from same-namespace and operator-namespace; egress unrestricted.
-// When ingress or egress rules are explicitly provided, they are used verbatim.
-// When any egress rules are configured, a kube-dns egress rule is auto-injected.
+//
+// Ingress is always enforced unless explicitly omitted from policyTypes.
+// The operator always includes default ingress rules (allow from same-namespace
+// and operator-namespace on the service port), merging them with any
+// user-specified rules.
+//
+// Egress is unrestricted by default. It is only enforced when egress rules
+// are provided or "Egress" is explicitly included in policyTypes.
+// When any egress rules are configured, or when "Egress" is explicitly included in
+// policyTypes, a kube-dns egress rule is auto-injected to prevent DNS breakage.
 type NetworkPolicySpec struct {
 	// Enabled controls whether the operator manages a NetworkPolicy for this server.
 	// Defaults to true. Set to false to disable NetworkPolicy creation entirely.
 	// +optional
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
-	// Ingress rules. When nil, the operator generates default ingress rules
+	// PolicyTypes specifies which policy directions are enforced.
+	// Follows Kubernetes NetworkPolicy semantics: when omitted or empty,
+	// Ingress is always included and Egress is included only if egress
+	// rules are provided.
+	// +optional
+	// +kubebuilder:validation:items:Enum=Ingress;Egress
+	PolicyTypes []networkingv1.PolicyType `json:"policyTypes,omitempty"`
+	// Ingress defines additional ingress rules, merged with operator defaults
 	// (allow from same-namespace and operator-namespace on the service port).
-	// When explicitly set, these rules are used verbatim.
 	// +optional
 	Ingress []networkingv1.NetworkPolicyIngressRule `json:"ingress,omitempty"`
-	// Egress rules. When nil, egress is unrestricted (no Egress policyType set).
-	// When explicitly set, these rules are used and a kube-dns egress rule is
-	// auto-injected to prevent DNS breakage.
+	// Egress rules. When non-empty, a kube-dns egress rule is auto-injected
+	// to prevent DNS breakage.
 	// +optional
 	Egress []networkingv1.NetworkPolicyEgressRule `json:"egress,omitempty"`
 }
@@ -316,10 +327,10 @@ type NetworkSpec struct {
 	// Expose controls external service exposure via Ingress/Route.
 	// +optional
 	Expose *ExposeConfig `json:"expose,omitempty"`
-	// NetworkPolicy configures the operator-managed NetworkPolicy.
+	// Policy configures the operator-managed NetworkPolicy.
 	// When nil, the operator creates a default NetworkPolicy with safe ingress rules.
 	// +optional
-	NetworkPolicy *NetworkPolicySpec `json:"networkPolicy,omitempty"`
+	Policy *NetworkPolicySpec `json:"policy,omitempty"`
 }
 
 // PVCStorageSpec defines PVC storage for persistent data.

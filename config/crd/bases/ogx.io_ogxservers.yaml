@@ -166,16 +166,15 @@ spec:
                     x-kubernetes-validations:
                     - message: hostname must not be empty if specified
                       rule: '!has(self.hostname) || self.hostname.size() > 0'
-                  networkPolicy:
+                  policy:
                     description: |-
-                      NetworkPolicy configures the operator-managed NetworkPolicy.
+                      Policy configures the operator-managed NetworkPolicy.
                       When nil, the operator creates a default NetworkPolicy with safe ingress rules.
                     properties:
                       egress:
                         description: |-
-                          Egress rules. When nil, egress is unrestricted (no Egress policyType set).
-                          When explicitly set, these rules are used and a kube-dns egress rule is
-                          auto-injected to prevent DNS breakage.
+                          Egress rules. When non-empty, a kube-dns egress rule is auto-injected
+                          to prevent DNS breakage.
                         items:
                           description: |-
                             NetworkPolicyEgressRule describes a particular set of traffic that is allowed out of pods
@@ -372,9 +371,8 @@ spec:
                         type: boolean
                       ingress:
                         description: |-
-                          Ingress rules. When nil, the operator generates default ingress rules
+                          Ingress defines additional ingress rules, merged with operator defaults
                           (allow from same-namespace and operator-namespace on the service port).
-                          When explicitly set, these rules are used verbatim.
                         items:
                           description: |-
                             NetworkPolicyIngressRule describes a particular set of traffic that is allowed to the pods
@@ -561,6 +559,21 @@ spec:
                               type: array
                               x-kubernetes-list-type: atomic
                           type: object
+                        type: array
+                      policyTypes:
+                        description: |-
+                          PolicyTypes specifies which policy directions are enforced.
+                          Follows Kubernetes NetworkPolicy semantics: when omitted or empty,
+                          Ingress is always included and Egress is included only if egress
+                          rules are provided.
+                        items:
+                          description: |-
+                            PolicyType string describes the NetworkPolicy type
+                            This type is beta-level in 1.8
+                          enum:
+                          - Ingress
+                          - Egress
+                          type: string
                         type: array
                     type: object
                   port:

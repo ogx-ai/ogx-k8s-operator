@@ -237,6 +237,11 @@ func (in *NetworkPolicySpec) DeepCopyInto(out *NetworkPolicySpec) {
 		*out = new(bool)
 		**out = **in
 	}
+	if in.PolicyTypes != nil {
+		in, out := &in.PolicyTypes, &out.PolicyTypes
+		*out = make([]networkingv1.PolicyType, len(*in))
+		copy(*out, *in)
+	}
 	if in.Ingress != nil {
 		in, out := &in.Ingress, &out.Ingress
 		*out = make([]networkingv1.NetworkPolicyIngressRule, len(*in))
@@ -276,8 +281,8 @@ func (in *NetworkSpec) DeepCopyInto(out *NetworkSpec) {
 		*out = new(ExposeConfig)
 		**out = **in
 	}
-	if in.NetworkPolicy != nil {
-		in, out := &in.NetworkPolicy, &out.NetworkPolicy
+	if in.Policy != nil {
+		in, out := &in.Policy, &out.Policy
 		*out = new(NetworkPolicySpec)
 		(*in).DeepCopyInto(*out)
 	}
