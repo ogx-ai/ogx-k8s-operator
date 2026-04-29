@@ -100,8 +100,9 @@ type SecretKeyRef struct {
 
 // ProviderConfig defines the configuration for a single provider instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.id) || self.id.size() > 0",message="id must not be empty if specified"
-//nolint:lll // CEL validation rule
 // +kubebuilder:validation:XValidation:rule="self.provider.startsWith('remote::') || self.provider.startsWith('inline::')",message="provider must have a 'remote::' or 'inline::' prefix (e.g., 'remote::vllm', 'inline::builtin')"
+//
+//nolint:lll // CEL validation rule
 type ProviderConfig struct {
 	// ID is a unique provider identifier. Auto-generated from provider
 	// when omitted. Must be unique across all API types.

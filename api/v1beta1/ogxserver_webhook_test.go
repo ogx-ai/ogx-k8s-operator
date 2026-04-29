@@ -73,7 +73,7 @@ func TestValidateProviderIDUniqueness(t *testing.T) {
 			name: "no collision across slices",
 			providers: &ProvidersSpec{
 				Inference: []ProviderConfig{{Provider: "ollama"}},
-				VectorIo: []ProviderConfig{{Provider: "pgvector"}},
+				VectorIo:  []ProviderConfig{{Provider: "pgvector"}},
 			},
 			wantErrs: 0,
 		},
@@ -81,7 +81,7 @@ func TestValidateProviderIDUniqueness(t *testing.T) {
 			name: "collision across inference and vectorIo",
 			providers: &ProvidersSpec{
 				Inference: []ProviderConfig{{ID: "shared-id", Provider: "ollama"}},
-				VectorIo: []ProviderConfig{{ID: "shared-id", Provider: "pgvector"}},
+				VectorIo:  []ProviderConfig{{ID: "shared-id", Provider: "pgvector"}},
 			},
 			wantErrs: 1,
 		},
@@ -106,7 +106,7 @@ func TestValidateProviderIDUniqueness(t *testing.T) {
 			providers: &ProvidersSpec{
 				Inference: []ProviderConfig{{ID: "dup1", Provider: "a"}, {ID: "dup2", Provider: "b"}},
 				Safety:    []ProviderConfig{{ID: "dup1", Provider: "c"}},
-				VectorIo: []ProviderConfig{{ID: "dup2", Provider: "d"}},
+				VectorIo:  []ProviderConfig{{ID: "dup2", Provider: "d"}},
 			},
 			wantErrs: 2,
 		},
@@ -290,7 +290,7 @@ func TestCollectValidationErrors(t *testing.T) {
 					Distribution: DistributionSpec{Name: "unknown-dist"},
 					Providers: &ProvidersSpec{
 						Inference: []ProviderConfig{{ID: "dup", Provider: "ollama"}},
-						VectorIo: []ProviderConfig{{ID: "dup", Provider: "pgvector"}},
+						VectorIo:  []ProviderConfig{{ID: "dup", Provider: "pgvector"}},
 					},
 					Resources: &ResourcesSpec{
 						Models: []ModelConfig{{Name: "llama3", Provider: "nonexistent"}},
