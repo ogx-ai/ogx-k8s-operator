@@ -2,9 +2,9 @@
 
 **Feature Branch**: `003-ogx-rename`
 **Created**: 2026-04-16
-**Updated**: 2026-04-24
+**Updated**: 2026-04-29
 **Status**: Ready
-**Input**: Replace `LlamaStackDistribution` (`llamastack.io/v1alpha1`) with `OGXServer` (`ogx.io/v1beta1`). This is a breaking change — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS, expose, **`networkPolicy`** with native K8s ingress/egress types), workload, overrideConfig). The OGX controller handles the new CR. Provide annotation-driven migration for existing workloads to adopt legacy PVCs and networking.
+**Input**: Replace `LlamaStackDistribution` (`llamastack.io/v1alpha1`) with `OGXServer` (`ogx.io/v1beta1`). This is a breaking change — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS, externalAccess, **`policy`** with native K8s ingress/egress types and policyTypes), **`spec.caBundle`** (top-level), workload, overrideConfig). The OGX controller handles the new CR. Provide annotation-driven migration for existing workloads to adopt legacy PVCs and networking.
 
 **Scope note**: Spec 002 (operator-generated config) API types are folded into this CRD. The `api/v1alpha2/` package is deleted; there is no separate v1alpha2 (those types live under `ogx.io/v1beta1`). Config generation logic itself (provider expansion, resource registration, secret resolution) is deferred to a follow-up PR.
 
@@ -132,7 +132,7 @@ A cautious administrator wants visibility into what the migration did and the ab
 ### Key Entities
 
 - **Operator**: The controller running in the cluster. After migration, the operator is identified by the new naming throughout (namespace, image labels, leader-election identifier, managed-by label).
-- **Custom Resource (new kind)**: The renamed custom resource that represents a running instance of the server, including server configuration, **`spec.network`** (expose, TLS, **`networkPolicy`** with per-CR enable/disable and native K8s `NetworkPolicyIngressRule`/`NetworkPolicyEgressRule` types), storage, autoscaling, and workload settings. Always created manually by administrators, both for fresh installs and upgrades. The legacy ConfigMap-based `enableNetworkPolicy` feature flag is replaced by `spec.network.networkPolicy.enabled` on each CR.
+- **Custom Resource (new kind)**: The renamed custom resource that represents a running instance of the server, including server configuration, **`spec.network`** (externalAccess, TLS with presence semantics, **`policy`** with per-CR enable/disable, `policyTypes`, and native K8s `NetworkPolicyIngressRule`/`NetworkPolicyEgressRule` types), **`spec.caBundle`** (top-level, independent of TLS), storage, autoscaling, and workload settings. Always created manually by administrators, both for fresh installs and upgrades. The legacy ConfigMap-based `enableNetworkPolicy` feature flag is replaced by `spec.network.policy.enabled` on each CR.
 - **Custom Resource (legacy kind)**: The old-kind custom resource from the legacy operator. After the legacy operator is removed, these resources may still exist on the cluster. Administrators clean them up manually (using `--cascade=orphan` to preserve child resources).
 - **Adoption annotations**: Annotations on the OGXServer CR (`ogx.io/adopt-storage`, `ogx.io/adopt-networking`) that instruct the operator to adopt legacy child resources (PVC, Ingress) by name. These annotations persist on the CR and make the adopted state reproducible.
 - **Persistent volume claim**: The most important piece of stateful data in the system (holds cached models and user files). Preservation of persistent volume claims and their contents is the primary migration requirement. Adopted via the `ogx.io/adopt-storage` annotation.

@@ -1,10 +1,10 @@
 # Implementation Plan: OGX (Open GenAI Stack) Operator
 
-**Branch**: `003-ogx-rename` | **Date**: 2026-04-24 | **Spec**: `specs/003-ogx-rename/spec.md`
+**Branch**: `003-ogx-rename` | **Date**: 2026-04-29 | **Spec**: `specs/003-ogx-rename/spec.md`
 
 ## Summary
 
-Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1beta1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS, expose, **`networkPolicy`** with native K8s ingress/egress types), workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation. The legacy `AllowedFromSpec` and ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.networkPolicy` with per-CR `enabled` toggle and native `NetworkPolicyIngressRule`/`NetworkPolicyEgressRule` types.
+Replace the `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) with a new `OGXServer` CRD (`ogx.io/v1beta1`). This is a **breaking change** — no conversion webhooks, no coexistence period. The new CRD incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`** (port, TLS with presence semantics, externalAccess with explicit enabled field, **`policy`** with native K8s ingress/egress types and policyTypes), **`spec.caBundle`** (top-level, independent of network/TLS), workload, overrideConfig). The OGX controller handles the new CR and will later handle config generation. The legacy `AllowedFromSpec` and ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.policy` with per-CR `enabled` toggle, `policyTypes`, and native `NetworkPolicyIngressRule`/`NetworkPolicyEgressRule` types.
 
 Upstream runtime contracts (`LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, etc.) are being updated upstream and are out of scope for the initial PRs.
 
@@ -58,7 +58,7 @@ controllers/
 ├── kubebuilder_rbac.go            # MODIFY: ogx.io markers
 ├── status.go                      # MODIFY: OGXServer types, new conditions
 ├── resource_helper.go             # MODIFY: new spec shape
-├── network_resources.go           # MODIFY: new `spec.network.networkPolicy` shape (native K8s types, per-CR enable, auto kube-dns egress)
+├── network_resources.go           # MODIFY: new `spec.network.policy` shape (native K8s types, policyTypes, per-CR enable, auto kube-dns egress)
 └── manifests/base/*.yaml          # MODIFY: app: ogx labels
 
 config/
@@ -77,18 +77,29 @@ Phases map 1:1 to the task list in `tasks.md`. See that file for the complete ta
 ### Phase 1: API Changes (PR 1)
 
 New `OGXServer` types under `ogx.io/v1beta1` with the expanded spec from 002:
-- `OGXServerSpec` with `distribution`, `providers`, `resources`, `storage`, `disabled`, **`network`**, `workload`, `externalProviders`, `overrideConfig`
-- **`spec.network.networkPolicy`**: `NetworkPolicySpec` with `enabled` (default true), `ingress` (`[]networkingv1.NetworkPolicyIngressRule`), `egress` (`[]networkingv1.NetworkPolicyEgressRule`). Uses native Kubernetes NetworkPolicy types for zero-conversion, full-power policy configuration. When nil/default, operator generates safe defaults (ingress on service port from same-namespace + operator-namespace; egress unrestricted). Replaces the legacy `AllowedFromSpec` and the ConfigMap-based `enableNetworkPolicy` feature flag.
-- CEL validation: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`; `distribution.name` mutually exclusive with `distribution.image`
-- Status types: `OGXServerStatus` with `ResolvedDistribution`, `ConfigGeneration`, `ServerVersion`
+- `OGXServerSpec` with `distribution`, `providers`, `resources`, `storage`, `disabledAPIs`, **`network`**, **`caBundle`** (top-level), `workload`, `overrideConfig`
+- **`spec.caBundle`**: Top-level `CABundleConfig` with `configMapName` and optional `configMapKeys`. Configures outbound trust (CA certificates for provider/backend connections), independent of inbound TLS termination. Moved out of `spec.network.tls` because CA trust is a server-wide concern.
+- **`spec.network.policy`**: `NetworkPolicySpec` with `enabled` (default true), `policyTypes` (`[]networkingv1.PolicyType`, following K8s NetworkPolicy semantics), `ingress` (`[]networkingv1.NetworkPolicyIngressRule`), `egress` (`[]networkingv1.NetworkPolicyEgressRule`). Uses native Kubernetes NetworkPolicy types for zero-conversion, full-power policy configuration. When nil/default, operator generates safe defaults (ingress on service port from same-namespace + operator-namespace; egress unrestricted). Replaces the legacy `AllowedFromSpec` and the ConfigMap-based `enableNetworkPolicy` feature flag.
+- **`spec.network.tls`**: `TLSSpec` with required `secretName`. Uses presence semantics (TLS enabled when the `tls` field is present, disabled when omitted). No explicit `enabled` bool — avoids contradicting states.
+- **`spec.network.externalAccess`**: `ExternalAccessConfig` with explicit `enabled` (default false) and optional `hostname`. Replaces the polymorphic `expose` field. Named for mechanism-neutrality (supports both Ingress and Route).
+- **`spec.providers`**: Typed `[]ProviderConfig` slices per API type (`inference`, `safety`, `vectorIo`, `toolRuntime`). No `telemetry` provider (it doesn't exist). `ProviderConfig.Provider` requires explicit `remote::` or `inline::` prefix (CEL-enforced). `ProviderConfig.apiKey` replaced with flexible `secretRefs` map.
+- **`spec.disabledAPIs`**: Renamed from `disabled` for clarity — explicitly states the field controls which API types are excluded from config generation.
+- CEL validation: `providers`/`resources`/`storage`/`disabledAPIs` mutually exclusive with `overrideConfig`; `distribution.name` mutually exclusive with `distribution.image`; disabled+providers cross-field conflict validation; provider prefix requirement
+- Validating webhook: distribution name validation against embedded registry, cross-slice provider ID uniqueness (global, not per-slice), model provider reference validation
+- Status types: `OGXServerStatus` with `ResolvedDistribution`, `ConfigGeneration`, `ServerVersion`, `ExternalURL` (renamed from `RouteURL`)
 - Adoption annotation helpers (`GetAdoptStorageSource`, `GetEffectivePVCName`)
 - Generated CRD YAML, deepcopy, config scaffolding, samples, CI updates
+- All ConfigMap/Secret references require `ogx.io/watch: "true"` label for operator cache detection
+- `ExternalProviders` removed — design not yet finalized
+- `DefaultMountPath` updated to `/.ogx`
 
 ### Phase 2: Controller Foundation (PR 2)
 
 Rename controller files and adapt the reconciler to the new spec structure:
-- Map `spec.distribution` → image, `spec.workload` → Deployment, **`spec.network`** → Service/Ingress/NetworkPolicy
-- **NetworkPolicy reconciliation**: read `spec.network.networkPolicy.enabled` (default true); when disabled, delete existing NP. When enabled with no custom rules, generate default ingress (same-namespace + operator-namespace on service port, egress unrestricted). When custom `ingress`/`egress` provided, use verbatim. Auto-inject kube-dns egress rule (UDP/TCP 53) when any egress rules are configured. Remove the ConfigMap-based `enableNetworkPolicy` feature flag and `pkg/featureflags/` package.
+- Map `spec.distribution` → image, `spec.workload` → Deployment, **`spec.network`** → Service/Ingress/NetworkPolicy, **`spec.caBundle`** → CA trust volume mounts
+- **NetworkPolicy reconciliation**: read `spec.network.policy.enabled` (default true); when disabled, delete existing NP. When enabled with no custom rules, generate default ingress (same-namespace + operator-namespace on service port, egress unrestricted). When custom `ingress`/`egress` provided, merge with defaults. Respect `policyTypes` following K8s NetworkPolicy semantics. Auto-inject kube-dns egress rule (UDP/TCP 53) when any egress rules are configured or when "Egress" is in policyTypes. Remove the ConfigMap-based `enableNetworkPolicy` feature flag and `pkg/featureflags/` package.
+- **TLS handling**: `spec.network.tls` uses presence semantics — TLS enabled when the field is present (with required `secretName`), disabled when omitted
+- **External access**: `spec.network.externalAccess.enabled` controls Ingress/Route creation (default false)
 - `overrideConfig` path: mount user-provided ConfigMap
 - Default path: deploy with distribution's embedded config (no ConfigMap mount)
 - Update all packages (`pkg/deploy`, `pkg/cluster`), `main.go`, manifests

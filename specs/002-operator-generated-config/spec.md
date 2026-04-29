@@ -135,13 +135,13 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
   - What: `secretKeyRef` points to a secret that doesn't exist
   - Expected: Reconciliation fails with clear error, status shows "Secret not found: {name}"
 
-- **Expose with empty object**:
-  - What: User specifies `expose: {}`
-  - Expected: Treated as expose enabled with defaults (auto-generated hostname)
+- **~~Expose with empty object~~** *(v1beta1: `expose` renamed to `externalAccess` with explicit `enabled` default false — see D-030. An empty `externalAccess: {}` means disabled.)*:
+  - What: User specifies `externalAccess: {}`
+  - Expected: External access is disabled (default `enabled: false`)
 
 - **Disabled APIs conflict with providers**:
-  - What: User configures `providers.inference` but also `disabled: [inference]`
-  - Expected: Validation fails with error: "spec.providers.inference conflicts with spec.disabled: inference API is disabled but has providers configured. Remove the provider configuration or remove 'inference' from the disabled list." Accepting contradictory config and silently ignoring part of it leads to user confusion. Failing fast is more Kubernetes-idiomatic.
+  - What: User configures `providers.inference` but also `disabledAPIs: [inference]` *(v1beta1: renamed from `disabled` — see D-031)*
+  - Expected: Validation fails with error: "inference cannot be both in providers and disabledAPIs". Accepting contradictory config and silently ignoring part of it leads to user confusion. Failing fast is more Kubernetes-idiomatic.
 
 - **Model references non-existent provider**:
   - What: `resources.models[].provider` references an ID not in `providers`
@@ -165,7 +165,7 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 
 - **Secret references via settings vs secretRefs**:
   - What: User puts a secretKeyRef inside `settings` instead of using the `secretRefs` field
-  - Expected: The `settings` map is passed through to config.yaml as-is without any secret resolution. Only the explicit `apiKey` and `secretRefs` fields trigger secret-to-env-var resolution. This is a clear, unambiguous boundary (no heuristic matching of map shapes).
+  - Expected: The `settings` map is passed through to config.yaml as-is without any secret resolution. Only the explicit `secretRefs` field triggers secret-to-env-var resolution *(v1beta1: `apiKey` removed — see D-035)*. This is a clear, unambiguous boundary (no heuristic matching of map shapes).
 
 - **Tools specified without toolRuntime provider**:
   - What: User specifies `resources.tools: [websearch]` but does not configure `providers.toolRuntime`
@@ -183,18 +183,18 @@ As a platform operator, I want to update the LLSD CR (e.g., add a provider, chan
 
 - **FR-001**: The CRD MUST define a new API version `v1alpha2` with the redesigned schema
 - **FR-002**: The `spec.distribution` field MUST support both `name` (mapped) and `image` (direct) forms, mutually exclusive
-- **FR-003**: The `spec.providers` section MUST support provider types: `inference`, `safety`, `vectorIo`, `toolRuntime`, `telemetry`
+- **FR-003**: The `spec.providers` section MUST support provider types: `inference`, `safety`, `vectorIo`, `toolRuntime` ~~, `telemetry`~~ *(telemetry removed in v1beta1 — see D-033)*
 - **FR-004**: Each provider field MUST be a list of `ProviderConfig` objects (`[]ProviderConfig`). A single provider is expressed as a one-element list. This ensures kubebuilder validation markers apply to all provider fields and CEL rules can inspect provider IDs for uniqueness.
-- **FR-005**: Each `ProviderConfig` MUST support fields: `id` (unique provider identifier), `provider` (type, required), `endpoint`, `apiKey` (secretKeyRef), `secretRefs` (named secret references map), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretRefs` entries rather than embedding `secretKeyRef` inside `settings`. The `secretRefs` field is a `map[string]SecretKeyRef` where each key becomes the env var field suffix. The `settings` map is passed through to config.yaml as-is without secret resolution.
+- **FR-005**: Each `ProviderConfig` MUST support fields: `id` (unique provider identifier), `provider` (type, required — *v1beta1: must have `remote::` or `inline::` prefix, see D-034*), `endpoint`, ~~`apiKey` (secretKeyRef),~~ `secretRefs` (named secret references map — *v1beta1: replaces `apiKey`, see D-035*), `settings` (escape hatch). Provider-specific connection fields (e.g., `host` for vectorIo) MUST use `secretRefs` entries rather than embedding `secretKeyRef` inside `settings`. The `secretRefs` field is a `map[string]SecretKeyRef` where each key becomes the env var field suffix. The `settings` map is passed through to config.yaml as-is without secret resolution.
 - **FR-006**: The `spec.resources` section MUST support: `models`, `tools`, `shields`
 - **FR-007**: `resources.models` MUST be a list of `ModelConfig` objects (`[]ModelConfig`), where only the `name` field is required. Simple model references use `ModelConfig` with just `name` set. `resources.tools` and `resources.shields` MUST be lists of strings.
 - **FR-008**: The `spec.storage` section MUST have subsections: `kv` (key-value) and `sql` (relational)
-- **FR-009**: The `spec.disabled` field MUST be a list of API names to disable
+- **FR-009**: The `spec.disabled` field MUST be a list of API names to disable *(v1beta1: renamed to `spec.disabledAPIs`, enum restricted to `agents`, `inference`, `tool_runtime`, `vector_io` — see D-031)*
 - **FR-010**: The `spec.networking` section MUST consolidate: `port`, `tls`, `expose`, `allowedFrom`
 - **FR-011**: The `networking.expose` field MUST be an object with optional `enabled` (bool) and `hostname` (string) fields. When `enabled` is true (or when the object is present with defaults), an Ingress/Route is created. When `hostname` is specified, it is used for the Ingress/Route hostname.
 - **FR-012**: The `spec.workload` section MUST contain K8s deployment settings: `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
 - **FR-013**: The `spec.overrideConfig` field MUST be mutually exclusive with `providers`, `resources`, `storage`, `disabled`. The referenced ConfigMap MUST reside in the same namespace as the LLSD CR (consistent with namespace-scoped RBAC, constitution section 1.1)
-- **FR-014**: The `spec.externalProviders` field MUST remain for integration with spec 001
+- ~~**FR-014**: The `spec.externalProviders` field MUST remain for integration with spec 001~~ *(removed in v1beta1 — design not yet finalized, see D-032)*
 
 #### Configuration Generation
 
@@ -238,16 +238,16 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 
 #### Provider Configuration
 
-- **FR-030**: Provider `provider` field MUST map to `provider_type` with `remote::` prefix (e.g., `vllm` becomes `remote::vllm`)
+- **FR-030**: Provider `provider` field MUST map to `provider_type` ~~with `remote::` prefix (e.g., `vllm` becomes `remote::vllm`)~~ *(v1beta1: explicit `remote::` or `inline::` prefix required on the field value itself — no implicit normalization, see D-034)*
 - **FR-031**: Provider `endpoint` field MUST map to `config.url` in config.yaml
 - **FR-032**: Provider `apiKey.secretKeyRef` and `secretRefs` entries MUST be resolved to environment variables and referenced as `${env.LLSD_<PROVIDER_ID>_<FIELD>}`, where `<PROVIDER_ID>` is the provider's unique `id` (explicit or auto-generated per FR-035), uppercased with hyphens replaced by underscores. For `apiKey`, the field suffix is `API_KEY`. For `secretRefs`, the map key is uppercased with hyphens replaced by underscores. Example: provider ID `vllm-primary` with `apiKey` produces `LLSD_VLLM_PRIMARY_API_KEY`; `secretRefs.host` produces `LLSD_VLLM_PRIMARY_HOST`.
 - **FR-033**: Provider `settings` MUST be merged into the provider's `config` section in config.yaml
 - **FR-034**: When multiple providers are specified for the same API type, each MUST have an explicit `id` field. CEL validation enforces this at admission time.
 - **FR-035**: A single provider (one-element list) without `id` MUST auto-generate `provider_id` from the `provider` field value
 
-#### Telemetry Provider
+#### ~~Telemetry Provider~~ *(removed in v1beta1 — see D-033)*
 
-- **FR-036**: Telemetry providers follow the same schema as other provider types (FR-004, FR-005). The `provider` field maps to the telemetry backend (e.g., `opentelemetry`). The `endpoint` and `settings` fields configure the telemetry destination. No telemetry-specific fields are defined beyond the standard provider schema.
+- ~~**FR-036**: Telemetry providers follow the same schema as other provider types (FR-004, FR-005). The `provider` field maps to the telemetry backend (e.g., `opentelemetry`). The `endpoint` and `settings` fields configure the telemetry destination. No telemetry-specific fields are defined beyond the standard provider schema.~~ *(removed in v1beta1 — telemetry provider type doesn't exist upstream)*
 
 #### Resource Registration
 
@@ -280,7 +280,7 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 #### Validation
 
 - **FR-070**: CEL validation MUST enforce mutual exclusivity between `overrideConfig` and each of `providers`, `resources`, `storage`, and `disabled`
-- **FR-071**: CEL validation MUST require explicit `id` on each `ProviderConfig` when a provider list has more than one element. Rule applied per provider type field (e.g., `self.providers.inference.size() <= 1 || self.providers.inference.all(p, has(p.id))`)
+- ~~**FR-071**: CEL validation MUST require explicit `id` on each `ProviderConfig` when a provider list has more than one element. Rule applied per provider type field (e.g., `self.providers.inference.size() <= 1 || self.providers.inference.all(p, has(p.id))`)~~ *(v1beta1: replaced by validating webhook for global provider ID uniqueness — see D-036)*
 - **FR-072**: CEL validation MUST enforce unique provider IDs across all provider types. Since providers are typed slices, CEL can inspect IDs directly (e.g., check that the union of all provider IDs has no duplicates)
 - **FR-073**: Controller validation MUST verify referenced Secrets exist before generating config
 - **FR-074**: Controller validation MUST verify referenced ConfigMaps exist for `overrideConfig` and `caBundle`
@@ -288,7 +288,7 @@ The base config extraction follows a phased approach. Phase 1 provides an implem
 - **FR-076**: A validating admission webhook MUST validate CR creation and update operations for constraints that cannot be expressed in CEL (e.g., Secret existence checks, ConfigMap existence for `overrideConfig`, cross-field semantic validation such as provider ID references in resources)
 - **FR-077**: The validating webhook MUST return structured error responses with field paths and actionable messages following Kubernetes API conventions
 - **FR-078**: The validating webhook MUST be deployed as part of the operator installation and configured via the operator's kustomize manifests with appropriate certificate management
-- **FR-079**: CEL validation MUST enforce that `networking.tls.secretName` is required when `networking.tls.enabled` is true: `!self.tls.enabled || has(self.tls.secretName)`
+- ~~**FR-079**: CEL validation MUST enforce that `networking.tls.secretName` is required when `networking.tls.enabled` is true: `!self.tls.enabled || has(self.tls.secretName)`~~ *(v1beta1: TLS uses presence semantics — `secretName` is always required when `tls` is present, no `enabled` bool — see D-028)*
 - **FR-079a**: CEL validation MUST enforce that `storage.kv.endpoint` is required when `storage.kv.type` is `redis`: `self.storage.kv.type != 'redis' || has(self.storage.kv.endpoint)`
 - **FR-079b**: CEL validation MUST enforce that `storage.sql.connectionString` is required when `storage.sql.type` is `postgres`: `self.storage.sql.type != 'postgres' || has(self.storage.sql.connectionString)`
 - **FR-079c**: CEL validation SHOULD warn when `storage.kv.endpoint` or `storage.kv.password` are specified with `storage.kv.type: sqlite` (unused fields)
@@ -672,6 +672,134 @@ status:
 - ~~**OQ-002**~~: Resolved. Disabled API + provider config conflict produces a **validation error** (not a warning). Accepting contradictory config and silently ignoring part of it leads to user confusion. The webhook rejects CRs where a provider type appears in both `providers` and `disabled`. (Originally resolved as warning in PR #242 review, changed to error after PR #253 review feedback from eoinfennessy)
 - ~~**OQ-003**~~: Resolved. Environment variable naming uses the **provider ID** (not provider type or API type): `LLSD_<PROVIDER_ID>_<FIELD>`. The provider ID is unique across all providers (enforced by FR-072), ensuring no collisions. For single providers without explicit `id`, the auto-generated ID from FR-035 is used. Examples: `LLSD_VLLM_PRIMARY_API_KEY`, `LLSD_PGVECTOR_HOST`. Characters not valid in env var names (hyphens) are replaced with underscores and uppercased. (From PR #242 review)
 - **OQ-004**: Should the operator create a default LlamaStackDistribution instance when installed? This is uncommon for Kubernetes operators but could improve the getting-started experience. If adopted, it should be opt-in via operator configuration (e.g., a Helm value or OLM parameter). (From team discussion, 2026-02-10)
+
+## v1beta1 Folding Divergences (2026-04-29)
+
+When the v1alpha2 types were folded into the `OGXServer` CRD (`ogx.io/v1beta1`) in [PR #289](https://github.com/ogx-ai/ogx-k8s-operator/pull/289), the following changes diverged from this spec. These reflect review feedback and improved API design decisions. See `specs/003-ogx-rename/research.md` (D-027 through D-038) for detailed rationale.
+
+| This spec (v1alpha2) | v1beta1 OGXServer (actual) | Rationale |
+|-----------------------|---------------------------|-----------|
+| `spec.networking` | `spec.network` | Shorter, avoids conflation (D-026) |
+| `spec.networking.tls.caBundle` nested under TLS | `spec.caBundle` top-level on OGXServerSpec | CA trust is a server-wide concern, not TLS-specific (D-027) |
+| `spec.networking.tls.enabled` + `secretName` | `spec.network.tls` with presence semantics, `secretName` required | Avoids contradicting `enabled: false` + required `secretName` (D-028) |
+| `spec.networking.allowedFrom` | `spec.network.policy` with native K8s types + `policyTypes` | Full NetworkPolicy power, avoids `network.networkPolicy` stutter (D-029) |
+| `spec.networking.expose` (polymorphic, object or bool) | `spec.network.externalAccess` with explicit `enabled` (default false) | Clearer UX, mechanism-neutral naming (D-030) |
+| `spec.disabled` | `spec.disabledAPIs` | Makes field purpose explicit (D-031) |
+| `spec.externalProviders` | Removed | Design not yet finalized (D-032) |
+| `providers.telemetry` | Removed | Provider type doesn't exist upstream (D-033) |
+| `ProviderConfig.provider` — implicit `remote::` prefix | Must start with `remote::` or `inline::` (CEL-enforced) | Better UX, removes normalization (D-034) |
+| `ProviderConfig.apiKey` (`*SecretKeyRef`) | `ProviderConfig.secretRefs` (`map[string]SecretKeyRef`) | Flexible named secret refs (D-035) |
+| Per-slice CEL for provider ID uniqueness (FR-071) | Validating webhook for global ID uniqueness | Global uniqueness across all API types (D-036) |
+| `CABundleConfig.configMapNamespace` | Removed | Same-namespace requirement for multi-tenancy (D-027) |
+| `DefaultMountPath = "/.llama"` | `DefaultMountPath = "/.ogx"` | Consistent with OGX branding (D-038) |
+| No label requirement on referenced ConfigMaps/Secrets | `ogx.io/watch: "true"` label required | Filtered informer cache (D-037) |
+| FR-030: implicit `remote::` prefix normalization | Explicit prefix required, no normalization | Better UX (D-034) |
+| FR-036: Telemetry provider | Removed | Doesn't exist (D-033) |
+
+### Updated CRD Schema (v1beta1)
+
+```yaml
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: my-server
+spec:
+  distribution:
+    name: starter              # OR image: "registry/image:tag"
+
+  providers:
+    inference:
+      - id: vllm-primary
+        provider: "remote::vllm"    # explicit prefix required
+        endpoint: "http://vllm:8000"
+        secretRefs:                  # replaces apiKey
+          api-key:
+            name: vllm-creds
+            key: token
+        settings:
+          max_tokens: 8192
+    safety:
+      - provider: "remote::llama-guard"
+    vectorIo:
+      - provider: "remote::pgvector"
+        secretRefs:
+          host:
+            name: pg-creds
+            key: host
+    # No telemetry provider (removed)
+
+  resources:
+    models:                          # typed []ModelConfig
+      - name: "llama3.2-8b"
+      - name: "llama3.2-70b"
+        provider: vllm-primary
+        contextLength: 128000
+    tools:
+      - websearch
+      - rag
+    shields:
+      - llama-guard
+
+  storage:
+    kv:
+      type: sqlite
+    sql:
+      type: postgres
+      connectionString:
+        name: pg-creds
+        key: url
+
+  disabledAPIs:                      # renamed from disabled; enum: agents, inference, tool_runtime, vector_io
+    - agents
+
+  caBundle:                          # top-level, not under tls
+    configMapName: custom-ca
+    # no configMapNamespace (same namespace required)
+
+  network:                           # not networking
+    port: 8321
+    tls:                             # presence = enabled, no enabled bool
+      secretName: my-tls-secret
+    externalAccess:                  # not expose
+      enabled: true
+      hostname: "ogx.example.com"
+    policy:                          # not networkPolicy
+      enabled: true
+      policyTypes:                   # follows K8s semantics
+        - Ingress
+        - Egress
+      ingress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  app: frontend
+      egress:
+        - to:
+            - namespaceSelector: {}
+
+  workload:
+    replicas: 1
+    workers: 2
+    resources:
+      requests: {cpu: "500m", memory: "1Gi"}
+      limits: {cpu: "2", memory: "4Gi"}
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 80
+    storage:
+      size: "10Gi"
+      mountPath: "/.ogx"            # not /.llama
+    podDisruptionBudget:
+      maxUnavailable: 1
+    overrides:
+      serviceAccountName: "custom-sa"
+
+  # No externalProviders (removed - design not finalized)
+
+  # overrideConfig:
+  #   configMapName: my-full-config
+```
 
 ## References
 
