@@ -1,4 +1,4 @@
-module github.com/llamastack/llama-stack-k8s-operator
+module github.com/ogx-ai/ogx-k8s-operator
 
 go 1.25.8
 

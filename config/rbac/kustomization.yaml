@@ -19,5 +19,5 @@ resources:
 - auth_proxy_role.yaml
 - auth_proxy_role_binding.yaml
 - auth_proxy_client_clusterrole.yaml
-- llsd_viewer_role.yaml
-- llsd_editor_role.yaml
+- ogxs_viewer_role.yaml
+- ogxs_editor_role.yaml

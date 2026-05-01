@@ -1,13 +1,13 @@
 # Tasks: OGX (Open GenAI Stack) Operator
 
 **Branch**: `003-ogx-rename`
-**Date**: 2026-04-24
+**Date**: 2026-04-29
 **Plan**: `specs/003-ogx-rename/plan.md`
 **Spec**: `specs/003-ogx-rename/spec.md`
 
 ## Overview
 
-This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1beta1`) that incorporates both the rename and the expanded API surface from spec 002 (providers, resources, state storage, **`spec.network`**, workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation. **`v1beta1`** is required for downstream consumers that only integrate non-alpha API versions.
+This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack.io/v1alpha1`) is replaced by a new `OGXServer` CRD (`ogx.io/v1beta1`) that incorporates both the rename and the expanded API surface from spec 002 (providers with typed slices and explicit `remote::`/`inline::` prefix, resources with typed `ModelConfig`, state storage, **`spec.network`** (port, TLS with presence semantics, externalAccess with explicit enabled field, **`policy`** with native K8s ingress/egress types, policyTypes, replacing `AllowedFromSpec` and ConfigMap feature flag), **`spec.caBundle`** (top-level, independent of TLS), `disabledAPIs`, workload, overrideConfig). No conversion webhooks. The OGX controller handles the new CR and will later handle config generation. **`v1beta1`** is required for downstream consumers that only integrate non-alpha API versions.
 
 **NOTE**: Upstream runtime contracts (`llama_stack.core.server.server`, `LLAMA_STACK_CONFIG`, `/etc/llama-stack/config.yaml`, `/.llama`, etc.) are currently being updated upstream and may change. Preserving or renaming these is out of scope for the initial PRs — handle in a follow-up once upstream stabilizes.
 
@@ -23,7 +23,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 1: API Changes (PR 1)
 
-**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1beta1` with the full expanded spec (distribution, providers, resources, state storage, **`network`**, workload, overrideConfig). Generate CRD YAML and deepcopy. No controller changes yet.
+**Goal**: Introduce the new `OGXServer` CRD under `ogx.io/v1beta1` with the full expanded spec (distribution, providers with typed slices and explicit prefix requirement, resources with typed `ModelConfig`, state storage, **`network`** (port, TLS with presence semantics, externalAccess with explicit enabled, **`policy`** with native K8s types and policyTypes), **`caBundle`** (top-level), `disabledAPIs`, workload, overrideConfig). Generate CRD YAML and deepcopy. Add validating webhook for constraints CEL cannot express. No controller changes yet.
 
 ### Go module and API group
 
@@ -33,30 +33,33 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 ### OGXServer types
 
 - [ ] T003 Create `api/v1beta1/ogxserver_types.go` with the new CRD types incorporating the expanded API surface:
-  - Constants: `DefaultContainerName = "ogx"`, `DefaultLabelValue = "ogx"`, `DefaultServerPort = 8321`, `DefaultMountPath = "/.llama"`, `OGXServerKind = "OGXServer"`
+  - Constants: `DefaultContainerName = "ogx"`, `DefaultLabelValue = "ogx"`, `DefaultServerPort = 8321`, `DefaultMountPath = "/.ogx"`, `OGXServerKind = "OGXServer"`
   - `DistributionSpec` — exactly one of `name` or `image` (CEL: mutual exclusivity)
-  - `ProviderConfig` — `id`, `provider`, `endpoint`, `apiKey` (`*SecretKeyRef`), `settings` (`*apiextensionsv1.JSON`)
-  - `ProvidersSpec` — `inference`, `safety`, `vectorIo`, `toolRuntime`, `telemetry` (each `*apiextensionsv1.JSON` for polymorphic form)
-  - `ModelConfig` — `name`, `provider`, `contextLength`, `modelType`, `quantization`
-  - `ResourcesSpec` — `models` (`[]apiextensionsv1.JSON`), `tools`, `shields` (`[]string`)
-  - `KVStorageSpec` — `type` (sqlite/redis), `endpoint`, `password` (`*SecretKeyRef`)
-  - `SQLStorageSpec` — `type` (sqlite/postgres), `connectionString` (`*SecretKeyRef`)
+  - `SecretKeyRef` — `name`, `key` (both required, MinLength=1). Docstring states Secret must have `ogx.io/watch: "true"` label.
+  - `ProviderConfig` — `id`, `provider` (required, CEL: must start with `remote::` or `inline::`), `endpoint`, `secretRefs` (`map[string]SecretKeyRef`, replaces `apiKey`), `settings` (`*apiextensionsv1.JSON`)
+  - `ProvidersSpec` — typed `[]ProviderConfig` slices: `inference`, `safety`, `vectorIo`, `toolRuntime`. No `telemetry` provider (it doesn't exist).
+  - `ModelConfig` — `name` (required), `provider`, `contextLength` (`*int`), `modelType`, `quantization`
+  - `ResourcesSpec` — `models` (`[]ModelConfig`), `tools`, `shields` (`[]string`)
+  - `KVStorageSpec` — `type` (sqlite/redis, default sqlite), `endpoint`, `password` (`*SecretKeyRef`). CEL: endpoint required for redis, endpoint/password only valid for redis.
+  - `SQLStorageSpec` — `type` (sqlite/postgres, default sqlite), `connectionString` (`*SecretKeyRef`). CEL: connectionString required for postgres, only valid for postgres.
   - `StateStorageSpec` — `kv`, `sql`
-  - `CABundleConfig` — `configMapName`
-  - `TLSSpec` — `enabled`, `secretName`, `caBundle`
-  - `AllowedFromSpec` — `namespaces`, `labels`
-  - `NetworkSpec` (JSON field **`network`**) — `port`, `tls`, `expose` (`*apiextensionsv1.JSON`), `allowedFrom`
-  - `PVCStorageSpec` — `size`, `mountPath`
-  - `PodDisruptionBudgetSpec` — `minAvailable`, `maxUnavailable`
-  - `AutoscalingSpec` — `minReplicas`, `maxReplicas`, `targetCPUUtilizationPercentage`, `targetMemoryUtilizationPercentage`
-  - `WorkloadOverrides` — `serviceAccountName`, `env`, `command`, `args`, `volumes`, `volumeMounts`
-  - `WorkloadSpec` — `replicas`, `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
-  - `OverrideConfigSpec` — `configMapName`
-  - `OGXServerSpec` — `distribution`, `providers`, `resources`, `storage`, `disabled`, **`network`**, `workload`, `externalProviders`, `overrideConfig` (CEL: `providers`/`resources`/`storage`/`disabled` mutually exclusive with `overrideConfig`)
+  - `CABundleConfig` — `configMapName` (required), `configMapKeys` (optional). **Top-level on OGXServerSpec** (not nested under TLS). Docstring states ConfigMap must have `ogx.io/watch: "true"` label. No `configMapNamespace` — same namespace required.
+  - `TLSSpec` — `secretName` (required). **Presence semantics**: TLS enabled when the `tls` field is present, disabled when omitted. No `enabled` bool. No `caBundle` (moved to top-level). Docstring states Secret must have `ogx.io/watch: "true"` label.
+  - `NetworkPolicySpec` — `enabled` (`*bool`, default true), `policyTypes` (`[]networkingv1.PolicyType`, Enum: Ingress/Egress, follows K8s semantics), `ingress` (`[]networkingv1.NetworkPolicyIngressRule`), `egress` (`[]networkingv1.NetworkPolicyEgressRule`) — native K8s types, replaces legacy `AllowedFromSpec` and ConfigMap feature flag
+  - `ExternalAccessConfig` — `enabled` (bool, default false), `hostname` (optional). Replaces polymorphic `expose`. CEL: hostname must not be empty if specified.
+  - `NetworkSpec` (JSON field **`network`**) — `port`, `tls` (`*TLSSpec`), `externalAccess` (`*ExternalAccessConfig`), `policy` (`*NetworkPolicySpec`). Note: field is `policy` not `networkPolicy` to avoid stutter.
+  - `PVCStorageSpec` — `size` (`*resource.Quantity`), `mountPath` (default `/.ogx`). CEL: size must be positive.
+  - `PodDisruptionBudgetSpec` — `minAvailable`, `maxUnavailable` (CEL: at least one required, mutually exclusive)
+  - `AutoscalingSpec` — `minReplicas`, `maxReplicas` (required), `targetCPUUtilizationPercentage`, `targetMemoryUtilizationPercentage`. CEL: maxReplicas >= minReplicas.
+  - `WorkloadOverrides` — `serviceAccountName`, `env`, `command`, `args`, `volumes`, `volumeMounts`. CEL: serviceAccountName must not be empty if specified.
+  - `WorkloadSpec` — `replicas` (default 1), `workers`, `resources`, `autoscaling`, `storage`, `podDisruptionBudget`, `topologySpreadConstraints`, `overrides`
+  - `OverrideConfigSpec` — `configMapName` (required). Docstring states ConfigMap must have `ogx.io/watch: "true"` label.
+  - `OGXServerSpec` — `distribution`, `providers`, `resources`, `storage`, `disabledAPIs` (renamed from `disabled`, Enum: agents/inference/tool_runtime/vector_io), **`network`**, **`caBundle`** (top-level), `workload`, `overrideConfig` (CEL: `providers`/`resources`/`storage`/`disabledAPIs` mutually exclusive with `overrideConfig`; cross-field disabled+providers conflict validation)
   - `OGXServerPhase` — `Pending`, `Initializing`, `Ready`, `Failed`, `Terminating`
-  - Status types: `ProviderHealthStatus`, `ProviderInfo`, `DistributionConfig`, `VersionInfo` (with `ServerVersion` not `LlamaStackServerVersion`), `ResolvedDistributionStatus`, `ConfigGenerationStatus`, `OGXServerStatus`
-  - Root: `OGXServer`, `OGXServerList` with kubebuilder markers (`shortName=ogxs`, printer columns, subresource:status)
+  - Status types: `ProviderHealthStatus`, `ProviderInfo`, `DistributionConfig`, `VersionInfo` (with `ServerVersion` not `LlamaStackServerVersion`), `ResolvedDistributionStatus` (`Image`, `ConfigSource`, `ConfigHash`), `ConfigGenerationStatus` (`ObservedGeneration`, `ConfigMapName`, `GeneratedAt`, `ProviderCount`, `ResourceCount`, `ConfigVersion`), `OGXServerStatus` (with `ExternalURL` replacing `RouteURL`, pointer `*ResolvedDistributionStatus`, pointer `*ConfigGenerationStatus`)
+  - Root: `OGXServer`, `OGXServerList` with kubebuilder markers (`shortName=ogxs`, printer columns including Distribution/Config/Providers at priority=1, subresource:status)
   - `init()` registering types with SchemeBuilder
+- [ ] T003a Add validating admission webhook for OGXServer that enforces constraints CEL markers cannot express: distribution name validation against embedded registry, cross-slice provider ID uniqueness (global, not per-slice), and model provider reference validation
 - [ ] T004 Add adoption annotation constants and helpers to `api/v1beta1/ogxserver_types.go`:
   - `AdoptStorageAnnotation = "ogx.io/adopt-storage"`
   - `AdoptNetworkingAnnotation = "ogx.io/adopt-networking"`
@@ -114,7 +117,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 ## Phase 2: Controller Foundation (PR 2)
 
-**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, **`spec.network`** (Service, Ingress, NetworkPolicy), and workload (Deployment, HPA, PDB).
+**Goal**: Rename and restructure the controller to reconcile the new `OGXServer` CR. Support basic reconciliation: distribution image resolution, user-provided ConfigMap, PVC storage, **`spec.caBundle`** (top-level CA trust), **`spec.network`** (Service, Ingress/Route via `externalAccess.enabled`, TLS via presence semantics, NetworkPolicy via `policy` with native K8s types, per-CR enable/disable, policyTypes, and auto-injected kube-dns egress), and workload (Deployment, HPA, PDB). Remove ConfigMap-based `enableNetworkPolicy` feature flag.
 
 ### Controller rename
 
@@ -127,9 +130,9 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 ### Controller adaptation to new spec
 
 - [ ] T038 Update reconciler to work with new `OGXServerSpec` structure: map `spec.distribution` to container image, `spec.workload.replicas` to deployment replicas, **`spec.network.port`** to container/service port, etc.
-- [ ] T039 Update `controllers/resource_helper.go`: adapt to new spec shape (distribution, workload.storage, workload.resources, workload.overrides, **`spec.network.tls`**). Preserve all upstream runtime contract strings per FR-002.
+- [ ] T039 Update `controllers/resource_helper.go`: adapt to new spec shape (distribution, workload.storage, workload.resources, workload.overrides, **`spec.network.tls`** with presence semantics, **`spec.caBundle`** as top-level CA trust). Preserve all upstream runtime contract strings per FR-002.
 - [ ] T040 Update `controllers/status.go`: rename all `LlamaStackDistribution*` type references to `OGXServer*`, add new status fields (`ResolvedDistribution`, `ConfigGeneration`)
-- [ ] T041 Update `controllers/network_resources.go`: adapt to **`spec.network`** shape (expose, allowedFrom, tls), rename type references, update managed-by label to `"ogx-operator"`
+- [ ] T041 Update `controllers/network_resources.go`: adapt to **`spec.network`** shape (`externalAccess` with explicit `enabled` field, `policy` with native K8s types and `policyTypes`, `tls` with presence semantics), rename type references, update managed-by label to `"ogx-operator"`. Implement NetworkPolicy reconciliation: when `policy.enabled` is false, delete existing NP; when enabled with no custom rules, generate safe defaults; when custom `ingress`/`egress` provided, merge with defaults; respect `policyTypes` per K8s NetworkPolicy semantics; auto-inject kube-dns egress rule (UDP/TCP 53 to kube-system) when any egress rules are configured or when "Egress" is in policyTypes. Remove ConfigMap-based `enableNetworkPolicy` feature flag.
 - [ ] T042 Update `controllers/kubebuilder_rbac.go`: change RBAC markers from `llamastack.io` to `ogx.io`, `llamastackdistributions` to `ogxservers`
 - [ ] T043 Update `controllers/suite_test.go`: rename scheme registration
 - [ ] T044 Update `controllers/testing_support_test.go`: rename builder and reconciler references, adapt to new spec structure
@@ -143,7 +146,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 - [ ] T047 Update `controllers/manifests/base/kustomization.yaml`: labels to `app.kubernetes.io/managed-by: ogx-operator`, `app.kubernetes.io/part-of: ogx`, `ogx.io/watch: "true"`
 - [ ] T048 Update `controllers/manifests/base/deployment.yaml`: `app: llama-stack` → `app: ogx`
-- [ ] T049 Update `controllers/manifests/base/service.yaml`, `networkpolicy.yaml`, `hpa.yaml`, `pdb.yaml`: `app: llama-stack` → `app: ogx`
+- [ ] T049 Update `controllers/manifests/base/service.yaml`, `networkpolicy.yaml`, `hpa.yaml`, `pdb.yaml`: `app: llama-stack` → `app: ogx`. Note: `networkpolicy.yaml` base template now serves as the skeleton for operator-managed NP; the controller populates `ingress`/`egress` rules and `policyTypes` from `spec.network.policy` at reconcile time.
 
 ### Package updates
 
@@ -193,7 +196,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 ### Controller tests
 
 - [ ] T072 Update `controllers/resource_helper_test.go`: adapt to new spec structure
-- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new **`spec.network`** schema
+- [ ] T073 Update `controllers/network_resources_test.go`: adapt to new **`spec.network.policy`** schema (test default NP generation, custom ingress/egress merging with defaults, policyTypes handling, kube-dns auto-injection, `enabled: false` deletion, TLS presence semantics, externalAccess.enabled)
 - [ ] T074 Update all test files in `pkg/deploy/`: `kustomizer_test.go`, `deploy_test.go`, `suite_test.go`, `plugins/networkpolicy_transformer_test.go`, `plugins/field_mutator_test.go`
 
 ### Adoption tests
@@ -256,7 +259,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 - [ ] T094 Update `specs/constitution.md`: rename examples/references from LlamaStack to OGX
 - [ ] T095 Update `specs/001-deploy-time-providers-l1/*.md`: rename operator references
-- [ ] T096 Update `specs/002-operator-generated-config/*.md`: rename operator references, note that v1alpha2 is now folded into OGXServer `ogx.io/v1beta1`, and that the folded network block is **`spec.network`** on OGXServer (not `spec.networking`)
+- [ ] T096 Update `specs/002-operator-generated-config/*.md`: rename operator references, note that v1alpha2 is now folded into OGXServer `ogx.io/v1beta1`, and that the folded network block is **`spec.network`** on OGXServer (not `spec.networking`). Document divergences from original 002 spec: `caBundle` moved to top-level, TLS uses presence semantics (no `enabled` bool), `expose` renamed to `externalAccess` with explicit `enabled`, `networkPolicy` renamed to `policy` with `policyTypes`, `disabled` renamed to `disabledAPIs`, `apiKey` replaced by `secretRefs`, `telemetry` provider removed, `externalProviders` removed, provider prefix required, `DefaultMountPath` changed to `/.ogx`, `configMapNamespace` removed from `CABundleConfig`
 
 ---
 
@@ -274,9 +277,40 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 This is a **breaking change**. Only the OGX operator will be available after the upgrade — there is no period where both operators coexist in the same workload. Users must manually create new OGXServer CRs and migrate configuration.
 
-### Key label change: NetworkPolicy impact
+### Key changes: API surface
 
-The rename changes `DefaultLabelValue` from `llama-stack` to `ogx`. This affects every resource that uses `podSelector` or `selector` with the `app` label:
+Multiple changes affect the API surface:
+
+**1. Label change**: `DefaultLabelValue` changes from `llama-stack` to `ogx`, affecting `podSelector` on all resources.
+
+**2. NetworkPolicy API redesign**: The legacy `AllowedFromSpec` (namespace names and labels) and the ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.policy`:
+
+- **`enabled`** (default `true`): per-CR toggle replacing the global ConfigMap feature flag. Set to `false` to disable NP creation entirely.
+- **`policyTypes`** (`[]networkingv1.PolicyType`): follows K8s NetworkPolicy semantics. When omitted, Ingress is always included and Egress is included only if egress rules are provided.
+- **`ingress`** (`[]networkingv1.NetworkPolicyIngressRule`): native K8s types. When nil, operator generates safe defaults (same-namespace + operator-namespace on service port). When set, merged with operator defaults.
+- **`egress`** (`[]networkingv1.NetworkPolicyEgressRule`): native K8s types. When nil, egress is unrestricted. When set (or when "Egress" is in policyTypes), operator auto-injects a kube-dns egress rule (UDP/TCP 53 to kube-system) to prevent DNS breakage.
+
+**3. TLS uses presence semantics**: `spec.network.tls` has only a required `secretName`. TLS is enabled when the `tls` field is present, disabled when omitted. No `enabled` bool.
+
+**4. CA bundle is top-level**: `spec.caBundle` (not `spec.network.tls.caBundle`) configures outbound trust for provider/backend connections, independent of inbound TLS termination. No `configMapNamespace` — ConfigMap must be in the same namespace as the OGXServer.
+
+**5. External access renamed**: `spec.network.externalAccess` (not `spec.network.expose`) with explicit `enabled` field (default false) and optional `hostname`. Named for mechanism-neutrality.
+
+**6. Providers require explicit prefix**: `ProviderConfig.Provider` must start with `remote::` or `inline::` (e.g., `remote::vllm`, `inline::builtin`). No implicit normalization.
+
+**7. DisabledAPIs renamed**: `spec.disabledAPIs` (not `spec.disabled`) for clarity.
+
+**8. Provider apiKey replaced by secretRefs**: `ProviderConfig.apiKey` is replaced by `secretRefs` (`map[string]SecretKeyRef`) for flexible named secret references.
+
+**9. Telemetry provider removed**: No `telemetry` field in `ProvidersSpec` — it doesn't exist.
+
+**10. ExternalProviders removed**: Design not yet finalized. Removed to avoid premature commitment.
+
+**11. DefaultMountPath changed**: `/.llama` → `/.ogx`.
+
+**12. ogx.io/watch label required**: All ConfigMaps and Secrets referenced in the CRD must have the `ogx.io/watch: "true"` label to be detected by the operator's cache.
+
+**13. Validating webhook**: Enforces constraints CEL cannot express — distribution name validation, global provider ID uniqueness, model provider reference validation.
 
 **Before (old operator)**:
 ```yaml
@@ -295,7 +329,7 @@ spec:
         - { protocol: TCP, port: 8321 }
 ```
 
-**After (new operator)**:
+**After (new operator, default behavior — no custom rules)**:
 ```yaml
 spec:
   podSelector:
@@ -311,6 +345,8 @@ spec:
       ports:
         - { protocol: TCP, port: 8321 }
 ```
+
+**Migration from old `allowedFrom`**: Translate `allowedFrom.namespaces` and `allowedFrom.labels` to equivalent `spec.network.policy.ingress[].from` entries using `namespaceSelector`. Translate ConfigMap `enableNetworkPolicy: false` to `spec.network.policy.enabled: false` on the CR.
 
 ### Upgrade Path (with PVC data preservation)
 
@@ -398,8 +434,8 @@ T097–T099 must run last
 
 ## Summary
 
-- **Total tasks**: 104
-- **Phase 1 (API — PR 1)**: 32 tasks (T001–T032)
+- **Total tasks**: 105
+- **Phase 1 (API — PR 1)**: 33 tasks (T001–T032, T003a)
 - **Phase 2 (Controller — PR 2)**: 29 tasks (T033–T061)
 - **Phase 3 (Adoption — PR 2)**: 11 tasks (T062–T071a)
 - **Phase 4 (Tests — PR 2)**: 18 tasks (T072–T086, including T080a, T080b, T080c)

@@ -31,8 +31,8 @@ BUNDLE_METADATA_OPTS ?= $(BUNDLE_CHANNELS) $(BUNDLE_DEFAULT_CHANNEL)
 # This variable is used to construct full image tags for bundle and catalog images.
 #
 # For example, running 'make bundle-build bundle-push catalog-build catalog-push' will build and push both
-# llamastack.io/llama-stack-k8s-operator-bundle:$VERSION and llamastack.io/llama-stack-k8s-operator-catalog:$VERSION.
-IMAGE_TAG_BASE ?= quay.io/llamastack/llama-stack-k8s-operator
+# ogx.io/ogx-k8s-operator-bundle:$VERSION and ogx.io/ogx-k8s-operator-catalog:$VERSION.
+IMAGE_TAG_BASE ?= quay.io/ogx-ai/ogx-k8s-operator
 
 # BUNDLE_IMG defines the image:tag used for the bundle.
 # You can use it as an arg. (E.g make bundle-build BUNDLE_IMG=<some-registry>/<project-name-bundle>:<tag>)
@@ -504,7 +504,7 @@ release: yq kustomize yamlfmt ## Prepare release files with VERSION and LLAMASTA
 	$(call json-fmt,'to_entries | map(.value |= sub(":latest"; ":$(LLAMASTACK_VERSION)")) | from_entries',distributions.json)
 
 	# Update kustomization files using Kustomize
-	cd config/manager && $(KUSTOMIZE) edit set image controller=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION)
+	cd config/manager && $(KUSTOMIZE) edit set image controller=quay.io/ogx-ai/ogx-k8s-operator:v$(VERSION)
 
 	# Update environment variables in manager.yaml and format with our preferred YAML style
 	# using YQ because Kustomize doesn't support setting environment variables
@@ -512,4 +512,4 @@ release: yq kustomize yamlfmt ## Prepare release files with VERSION and LLAMASTA
 
 	# Generate manifests and build installer
 	$(MAKE) manifests generate
-	$(MAKE) -e IMG=quay.io/llamastack/llama-stack-k8s-operator:v$(VERSION) build-installer
+	$(MAKE) -e IMG=quay.io/ogx-ai/ogx-k8s-operator:v$(VERSION) build-installer

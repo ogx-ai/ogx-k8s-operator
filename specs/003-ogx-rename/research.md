@@ -1,7 +1,7 @@
 # Research: Rename to OGX (Open GenAI Stack) Operator
 
 **Branch**: `003-ogx-rename`
-**Date**: 2026-04-16 (updated 2026-04-24)
+**Date**: 2026-04-16 (updated 2026-04-29)
 **Spec**: `specs/003-ogx-rename/spec.md`
 
 ## Naming Decisions
@@ -51,7 +51,7 @@
 | `app.kubernetes.io/name: llama-stack-k8s-operator` | `app.kubernetes.io/name: ogx-k8s-operator` | Kustomize default label. |
 | `llamastack.io/watch: "true"` | `ogx.io/watch: "true"` | Watch label key for ConfigMap cache filter. During transition, accept both. |
 
-> **Future work (out of scope for this spec)**: All ConfigMaps referenced by an OGXServer CR (e.g., for overrideConfig) MUST carry the `ogx.io/watch: "true"` label so the operator's informer cache can discover them without polling or using an uncached client. The operator should fail reconciliation and set a status condition if a referenced ConfigMap is missing this label. This requirement should be formalized in a dedicated FR in a follow-up spec, as it is a general operator correctness concern rather than a rename-specific change.
+> **Resolved in PR #289**: The `ogx.io/watch: "true"` label requirement is now part of the v1beta1 API (see D-037). All ConfigMap and Secret references in the CRD include docstrings stating the label is required. This is no longer deferred — it was implemented directly in the types.
 
 ### D-007: Leader Election ID
 
@@ -95,7 +95,7 @@ These are contracts with the upstream server container image. They are currently
 | Version check | `version('llama_stack')` | `controllers/resource_helper.go` |
 | Config env var | `LLAMA_STACK_CONFIG` | `controllers/resource_helper.go` |
 | Config mount path | `/etc/llama-stack/config.yaml` | `controllers/resource_helper.go` |
-| Default storage mount | `/.llama` | `api/v1beta1/ogxserver_types.go` |
+| Default storage mount | `/.ogx` (operator PVC mount), `/.llama` (upstream server default) | `api/v1beta1/ogxserver_types.go` |
 | HuggingFace home | `HF_HOME` → `/.llama` | `controllers/resource_helper.go` |
 
 ## Migration Approach
@@ -149,9 +149,71 @@ These are contracts with the upstream server container image. They are currently
 
 ### D-026: `spec.network` (not `spec.networking`)
 
-- **Decision**: The OGXServer CRD uses the JSON field **`network`** (`spec.network`) for port, TLS, expose, and allowed-from policy. The Go type is named **`NetworkSpec`** (kubebuilder/json: `network`).
+- **Decision**: The OGXServer CRD uses the JSON field **`network`** (`spec.network`) for port, TLS, externalAccess, and network policy. The Go type is named **`NetworkSpec`** (kubebuilder/json: `network`).
 - **Rationale**: Shorter, conventional name; avoids conflating the spec block with the English word “networking” everywhere and with the transitional annotation `ogx.io/adopt-networking` (which remains unchanged).
 - **Note**: Spec 002 and v1alpha2 drafts used `spec.networking`; when folding types into `OGXServer`, rename the field and update any CEL rules that referenced `self.networking` to **`self.network`**.
+
+### D-027: `spec.caBundle` promoted to top-level
+
+- **Decision**: CA bundle configuration is at `spec.caBundle` (not `spec.network.tls.caBundle`).
+- **Rationale**: CABundle configures outbound trust (which CAs the server trusts when connecting to providers/backends), not inbound TLS termination. Nesting it under TLSSpec forced users to enter the `tls` block even when not enabling server TLS. Moving it to the spec root reflects that CA trust is a server-wide concern independent of network configuration.
+- **Impact**: `CABundleConfig` has `configMapName` (required) and optional `configMapKeys`. No `configMapNamespace` — ConfigMaps must be in the same namespace as the OGXServer for multi-tenant deployments.
+
+### D-028: TLS presence semantics (no `enabled` bool)
+
+- **Decision**: `spec.network.tls` uses presence semantics. TLS is enabled when the `tls` field is present (with required `secretName`), disabled when omitted. No explicit `enabled` bool.
+- **Rationale**: `spec.network.tls` only has one field (`secretName`), which is required. A TLS spec with explicit `enabled: false` plus a required secret ref is contradicting and useless state that should be unrepresentable.
+
+### D-029: `spec.network.policy` (not `spec.network.networkPolicy`)
+
+- **Decision**: The NetworkPolicy configuration field is `spec.network.policy` (not `spec.network.networkPolicy`).
+- **Rationale**: Avoid redundant stutter — `network.networkPolicy` repeats "network".
+- **Additional**: `policyTypes` field added following Kubernetes NetworkPolicy spec and semantics. Docstrings clearly describe the ingress-always/egress-opt-in behavior and default rule merging.
+
+### D-030: `spec.network.externalAccess` (not `spec.network.expose`)
+
+- **Decision**: External service exposure is configured via `spec.network.externalAccess` with an explicit `enabled` field (default false) and optional `hostname`.
+- **Rationale**: The verb "expose" only made sense in the original polymorphic plan where it could be a boolean. The explicit `enabled` bool is clearer than presence semantics of adding an empty object, which was unusual and didn't make clear what the behavior of an empty object was. Named `externalAccess` for mechanism-neutrality (supports both Ingress and Route).
+
+### D-031: `spec.disabledAPIs` (not `spec.disabled`)
+
+- **Decision**: The disabled APIs field is `spec.disabledAPIs`.
+- **Rationale**: Makes it explicit that the field controls which API types are excluded from config generation, rather than the ambiguous `disabled`.
+
+### D-032: No `ExternalProviders`
+
+- **Decision**: Remove `ExternalProviderRef`, `ExternalProvidersSpec`, and the `ExternalProviders` field from `OGXServerSpec`.
+- **Rationale**: The design for external providers is not yet finalized, and adding these prematurely forces the API into a corner.
+
+### D-033: No `telemetry` provider
+
+- **Decision**: Remove `Telemetry` from `ProvidersSpec`.
+- **Rationale**: The telemetry provider type doesn't exist in the upstream llama-stack.
+
+### D-034: Explicit `remote::`/`inline::` prefix on provider type
+
+- **Decision**: `ProviderConfig.Provider` must start with `remote::` or `inline::` (e.g., `remote::vllm`, `inline::builtin`). CEL validation enforces this.
+- **Rationale**: Previously, `remote::` was added implicitly to all providers that did not specify a prefix (e.g., `vllm` became `remote::vllm`). This could lead to UX issues — "When should I add a prefix?", "Why doesn't the builtin responses provider work?", etc. Explicitly requiring it is a better UX and removes the need for custom normalization logic.
+
+### D-035: `secretRefs` replaces `apiKey`
+
+- **Decision**: `ProviderConfig.apiKey` (`*SecretKeyRef`) is replaced by `secretRefs` (`map[string]SecretKeyRef`).
+- **Rationale**: A single `apiKey` field was too narrow. The `secretRefs` map supports multiple named secret references per provider (e.g., `host`, `password`, `api-key`). Each key becomes the env var field suffix.
+
+### D-036: Provider ID uniqueness validated by webhook (not per-slice CEL)
+
+- **Decision**: Remove the per-slice CEL rule ensuring ID is specified if more than one provider of the same API type is present. Provider ID uniqueness is validated globally by the validating webhook.
+- **Rationale**: What needs to be ensured is that provider IDs (derived or explicit) are globally unique — all providers have unique IDs, regardless of API type. The webhook now does this. The per-slice CEL rule was redundant.
+
+### D-037: `ogx.io/watch: "true"` label required on all referenced ConfigMaps and Secrets
+
+- **Decision**: All user-provided ConfigMaps and Secrets referenced in the CRD must have the `ogx.io/watch: "true"` label.
+- **Rationale**: This allows the operator to use a filtered informer cache that watches only labeled resources, avoiding the need to poll or use an uncached client. Documenting this requirement from the beginning avoids cache issues.
+
+### D-038: `DefaultMountPath` changed to `/.ogx`
+
+- **Decision**: `DefaultMountPath = "/.ogx"` (not `"/.llama"`).
+- **Rationale**: Consistent with the OGX branding rename. The upstream `/.llama` path may still be used internally by the server image, but the operator's default PVC mount path reflects the new naming.
 
 ## Codebase Rename Inventory
 

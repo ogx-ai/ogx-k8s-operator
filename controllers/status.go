@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

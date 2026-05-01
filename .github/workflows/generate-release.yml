@@ -118,12 +118,12 @@ jobs:
         continue-on-error: true
         id: precommit
         env:
-          IMG: quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+          IMG: quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
 
       - name: Handle pre-commit changes
         shell: bash
         env:
-          IMG: quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+          IMG: quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
         run: |
           # Check if there are any modified files after pre-commit
           if [ "${{ steps.precommit.outcome }}" = "failure" ]; then
@@ -183,7 +183,7 @@ jobs:
       - name: Validate release image build
         shell: bash
         run: |
-          make image-build IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+          make image-build IMG=quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
 
       - name: Commit and push changes
         shell: bash
@@ -242,7 +242,7 @@ jobs:
           make image-build-push-single \
             CONTAINER_TOOL=docker \
             PLATFORM=${{ matrix.platform }} \
-            IMG=quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}-${{ matrix.arch }}
+            IMG=quay.io/ogx-ai/ogx-k8s-operator:v${{ env.operator_version }}-${{ matrix.arch }}
 
   finalize-release:
     needs: [generate-release, build-release-arch]
@@ -251,7 +251,7 @@ jobs:
       operator_version: ${{ needs.generate-release.outputs.operator_version }}
       llamastack_version: ${{ needs.generate-release.outputs.llamastack_version }}
       release_branch: ${{ needs.generate-release.outputs.release_branch }}
-      IMG: quay.io/llamastack/llama-stack-k8s-operator
+      IMG: quay.io/ogx-ai/ogx-k8s-operator
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -293,12 +293,12 @@ jobs:
             Install the operator using kubectl:
 
             \`\`\`bash
-            kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v${{ env.operator_version }}/release/operator.yaml
+            kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/v${{ env.operator_version }}/release/operator.yaml
             \`\`\`
 
             ## Container Images
 
-            - Operator: \`quay.io/llamastack/llama-stack-k8s-operator:v${{ env.operator_version }}\`
+            - Operator: \`quay.io/ogx-ai/ogx-k8s-operator:v${{ env.operator_version }}\`
             - LlamaStack distributions: \`docker.io/llamastack/distribution-*:${{ env.llamastack_version }}\`"
 
             gh release create "v${{ env.operator_version }}" \
@@ -335,5 +335,5 @@ jobs:
           echo "🚀 Release v${{ env.operator_version }} completed successfully!"
           echo "📦 Container image: ${{ env.IMG }}:v${{ env.operator_version }}"
           echo "📝 Release notes: https://github.com/${{ github.repository }}/releases/tag/v${{ env.operator_version }}"
-          echo "🔧 Install with: kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v${{ env.operator_version }}/release/operator.yaml"
+          echo "🔧 Install with: kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/v${{ env.operator_version }}/release/operator.yaml"
           echo "🌿 Release branch: ${{ env.release_branch }}"

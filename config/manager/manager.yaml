@@ -39,13 +39,13 @@ spec:
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
           matchLabels:
-            app.kubernetes.io/name: llama-stack-k8s-operator
+            app.kubernetes.io/name: ogx-k8s-operator
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
           matchLabels:
-            app.kubernetes.io/name: llama-stack-k8s-operator
+            app.kubernetes.io/name: ogx-k8s-operator
       containers:
       - command:
         - /manager

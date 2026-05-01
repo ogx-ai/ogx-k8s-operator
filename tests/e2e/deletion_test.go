@@ -4,7 +4,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"

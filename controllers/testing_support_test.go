@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	controllers "github.com/llamastack/llama-stack-k8s-operator/controllers"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	controllers "github.com/ogx-ai/ogx-k8s-operator/controllers"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"

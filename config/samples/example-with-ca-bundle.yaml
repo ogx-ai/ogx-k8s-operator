@@ -45,36 +45,28 @@ data:
           backend: kv_default
           namespace: prompts
 ---
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: llamastack-with-config
+  name: ogxserver-with-config
 spec:
-  replicas: 1
-  server:
-    distribution:
-      name: starter
-    containerSpec:
-      port: 8321
+  distribution:
+    name: starter
+  overrideConfig:
+    configMapName: llama-stack-config
+  caBundle:
+    configMapName: custom-ca-bundle
+    # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
+    # configMapKeys not specified - defaults to ["ca-bundle.crt"]
+    # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
+    #   - ca-bundle1.crt
+    #   - ca-bundle2.crt
+  network:
+    port: 8321
+  workload:
+    overrides:
       env:
       - name: INFERENCE_MODEL
         value: "llama3.2:1b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
-    userConfig:
-      configMapName: llama-stack-config
-      # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
-    tlsConfig:
-      caBundle:
-        configMapName: custom-ca-bundle
-        # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
-        # configMapKeys not specified - defaults to ["ca-bundle.crt"]
-        # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
-        #   - ca-bundle1.crt
-        #   - ca-bundle2.crt
-        # Note: The operator will automatically:
-        #   1. Validate and extract valid certificates from all specified ConfigMap keys
-        #   2. Concatenate them into a single PEM file
-        #   3. Create a managed ConfigMap named {instance-name}-ca-bundle
-        #   4. Mount the bundle at /etc/ssl/certs/ca-bundle/ca-bundle.crt
-        #   5. Set SSL_CERT_FILE environment variable automatically

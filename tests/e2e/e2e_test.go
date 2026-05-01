@@ -4,7 +4,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	"github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
 )
 
 func TestE2E(t *testing.T) {

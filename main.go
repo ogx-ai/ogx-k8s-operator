@@ -22,9 +22,10 @@ import (
 	"fmt"
 	"os"
 
-	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/llamastack/llama-stack-k8s-operator/controllers"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	llamaxk8siov1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxv1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"github.com/ogx-ai/ogx-k8s-operator/controllers"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -62,7 +63,16 @@ func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ogxv1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+func setupWebhook(mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
+	distNames := make([]string, 0, len(clusterInfo.DistributionImages))
+	for name := range clusterInfo.DistributionImages {
+		distNames = append(distNames, name)
+	}
+	return ogxv1beta1.SetupWebhookWithManager(mgr, distNames)
 }
 
 func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo, directClient client.Reader) error {
@@ -182,6 +192,11 @@ func main() {
 	// Perform one-time upgrade cleanup operations
 	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
 		setupLog.Error(err, "failed to perform upgrade cleanup")
+		os.Exit(1)
+	}
+
+	if err := setupWebhook(mgr, clusterInfo); err != nil {
+		setupLog.Error(err, "failed to set up webhook")
 		os.Exit(1)
 	}
 

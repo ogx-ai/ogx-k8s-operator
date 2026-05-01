@@ -73,9 +73,9 @@ spec:
         configMapName: string
         configMapNamespace: string  # Optional, defaults to CR namespace
         configMapKeys: [string]     # Optional, defaults to ca-bundle.crt
-    expose:
+    externalAccess:
       enabled: bool       # Enable external access (default: false)
-      hostname: string    # Custom hostname for Ingress/Route (optional)
+      hostname: string    # Custom hostname for external endpoint (optional)
     allowedFrom:
       namespaces: [string]
       labels: [string]    # Namespace label keys for NetworkPolicy

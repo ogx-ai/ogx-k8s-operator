@@ -75,29 +75,29 @@ jobs:
       - name: Build operator image
         run: |
           # Build the image with run-based tag for uniqueness
-          docker build -t kind-registry:5000/llama-stack-k8s-operator:run-${{ github.run_id }} -f Dockerfile .
+          docker build -t kind-registry:5000/ogx-k8s-operator:run-${{ github.run_id }} -f Dockerfile .
 
           # Tag the image for local registry
-          docker tag kind-registry:5000/llama-stack-k8s-operator:run-${{ github.run_id }} kind-registry:5000/llama-stack-k8s-operator:latest
+          docker tag kind-registry:5000/ogx-k8s-operator:run-${{ github.run_id }} kind-registry:5000/ogx-k8s-operator:latest
 
       - name: Push operator image to local registry
         run: |
           echo '{"insecure-registries": ["kind-registry:5000"]}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
           until docker exec kind-registry true 2>/dev/null; do sleep 1; done
-          docker push kind-registry:5000/llama-stack-k8s-operator:latest
+          docker push kind-registry:5000/ogx-k8s-operator:latest
 
       - name: Deploy operator
         run: |
           # Deploy the operator
-          make deploy IMG=kind-registry:5000/llama-stack-k8s-operator:latest
+          make deploy IMG=kind-registry:5000/ogx-k8s-operator:latest
 
           # Wait for operator deployment to be ready
-          if ! kubectl wait --for=condition=available --timeout=300s deployment/llama-stack-k8s-operator-controller-manager -n llama-stack-k8s-operator-system; then
+          if ! kubectl wait --for=condition=available --timeout=300s deployment/ogx-k8s-operator-controller-manager -n ogx-k8s-operator-system; then
             echo "Deployment failed to become ready. Debugging information:"
-            kubectl describe deployment llama-stack-k8s-operator-controller-manager -n llama-stack-k8s-operator-system
-            kubectl logs -l control-plane=controller-manager -n llama-stack-k8s-operator-system --tail=100
-            kubectl get events -n llama-stack-k8s-operator-system --sort-by='.lastTimestamp'
+            kubectl describe deployment ogx-k8s-operator-controller-manager -n ogx-k8s-operator-system
+            kubectl logs -l control-plane=controller-manager -n ogx-k8s-operator-system --tail=100
+            kubectl get events -n ogx-k8s-operator-system --sort-by='.lastTimestamp'
             exit 1
           fi
 
@@ -120,11 +120,11 @@ jobs:
       - name: Get logs
         if: ${{ always() }}
         run: |
-          kubectl -n llama-stack-test get all -o yaml > all.log
-          kubectl -n llama-stack-k8s-operator-system logs deployment.apps/llama-stack-k8s-operator-controller-manager > controller-manager.log
-          kubectl -n llama-stack-test describe all > all-describe.log
-          kubectl -n llama-stack-test describe events > events.log
-          kubectl get llamastackdistributions --all-namespaces -o yaml > llamastackdistributions.log
+          kubectl -n ogx-test get all -o yaml > all.log
+          kubectl -n ogx-k8s-operator-system logs deployment.apps/ogx-k8s-operator-controller-manager > controller-manager.log
+          kubectl -n ogx-test describe all > all-describe.log
+          kubectl -n ogx-test describe events > events.log
+          kubectl get ogxservers --all-namespaces -o yaml > ogxservers.log
 
       - name: Upload all logs to artifacts
         if: ${{ always() }}

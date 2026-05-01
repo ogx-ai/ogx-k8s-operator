@@ -1,9 +1,9 @@
 package controllers
 
-// LlamaStackDistribution CRD permissions
-//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=llamastack.io,resources=llamastackdistributions/finalizers,verbs=update
+// OGXServer CRD permissions
+//+kubebuilder:rbac:groups=ogx.io,resources=ogxservers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=ogx.io,resources=ogxservers/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=ogx.io,resources=ogxservers/finalizers,verbs=update
 
 // Deployment permissions - controller creates and manages deployments
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
