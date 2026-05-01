@@ -323,6 +323,84 @@ _Appears in:_
 | `targetCPUUtilizationPercentage` _integer_ | TargetCPUUtilizationPercentage configures CPU-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
 | `targetMemoryUtilizationPercentage` _integer_ | TargetMemoryUtilizationPercentage configures memory-based scaling. |  | Maximum: 100 <br />Minimum: 1 <br /> |
 
+#### AzureProvider
+
+AzureProvider configures a remote::azure inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `endpoint` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+| `apiVersion` _string_ |  |  |  |
+
+#### BatchesInlineProviders
+
+BatchesInlineProviders groups inline batches providers.
+
+_Appears in:_
+- [BatchesProvidersSpec](#batchesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `reference` _[InlineReferenceProvider](#inlinereferenceprovider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### BatchesProvidersSpec
+
+BatchesProvidersSpec configures batches providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[BatchesRemoteProviders](#batchesremoteproviders)_ |  |  |  |
+| `inline` _[BatchesInlineProviders](#batchesinlineproviders)_ |  |  |  |
+
+#### BatchesRemoteProviders
+
+BatchesRemoteProviders groups remote batches providers.
+
+_Appears in:_
+- [BatchesProvidersSpec](#batchesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### BedrockProvider
+
+BedrockProvider configures a remote::bedrock inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `region` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `awsSessionToken` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `awsRoleArn` _string_ |  |  |  |
+
+#### BraveSearchProvider
+
+BraveSearchProvider configures a remote::brave-search tool runtime provider.
+
+_Appears in:_
+- [ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+| `maxResults` _integer_ |  |  | Minimum: 1 <br /> |
+
 #### CABundleConfig
 
 CABundleConfig defines the CA bundle configuration for custom certificates.
@@ -350,6 +428,33 @@ _Appears in:_
 | `providerCount` _integer_ | ProviderCount is the number of configured providers. |  |  |
 | `resourceCount` _integer_ | ResourceCount is the number of registered resources. |  |  |
 | `configVersion` _integer_ | ConfigVersion is the config.yaml schema version. |  |  |
+
+#### CustomProvider
+
+CustomProvider defines the configuration for a custom provider instance.
+
+_Appears in:_
+- [BatchesInlineProviders](#batchesinlineproviders)
+- [BatchesRemoteProviders](#batchesremoteproviders)
+- [FilesInlineProviders](#filesinlineproviders)
+- [FilesRemoteProviders](#filesremoteproviders)
+- [InferenceInlineProviders](#inferenceinlineproviders)
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+- [ResponsesInlineProviders](#responsesinlineproviders)
+- [ResponsesRemoteProviders](#responsesremoteproviders)
+- [SafetyInlineProviders](#safetyinlineproviders)
+- [SafetyRemoteProviders](#safetyremoteproviders)
+- [ToolRuntimeInlineProviders](#toolruntimeinlineproviders)
+- [ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)
+- [VectorIOInlineProviders](#vectorioinlineproviders)
+- [VectorIORemoteProviders](#vectorioremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `type` _string_ | Type is the provider type, specified with a "remote::" or "inline::"<br />prefix (e.g., "remote::llama-guard", "inline::my-provider"). |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution. |  | MinProperties: 1 <br /> |
+| `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific configuration merged into the<br />provider's config section in config.yaml. Passed through as-is<br />without any secret resolution. Use secretRefs for secret values. |  |  |
 
 #### DistributionConfig
 
@@ -389,6 +494,131 @@ _Appears in:_
 | `enabled` _boolean_ | Enabled controls whether external access is created. | false |  |
 | `hostname` _string_ | Hostname sets a custom hostname for the external endpoint.<br />When omitted, an auto-generated hostname is used. |  |  |
 
+#### FilesInlineProviders
+
+FilesInlineProviders groups inline files providers.
+
+_Appears in:_
+- [FilesProvidersSpec](#filesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `localfs` _[InlineLocalFSProvider](#inlinelocalfsprovider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### FilesProvidersSpec
+
+FilesProvidersSpec configures files providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[FilesRemoteProviders](#filesremoteproviders)_ |  |  |  |
+| `inline` _[FilesInlineProviders](#filesinlineproviders)_ |  |  |  |
+
+#### FilesRemoteProviders
+
+FilesRemoteProviders groups remote files providers.
+
+_Appears in:_
+- [FilesProvidersSpec](#filesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `s3` _[S3Provider](#s3provider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### InferenceInlineProviders
+
+InferenceInlineProviders groups inline inference providers.
+
+_Appears in:_
+- [InferenceProvidersSpec](#inferenceprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `sentenceTransformers` _[InlineSentenceTransformersProvider](#inlinesentencetransformersprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### InferenceProvidersSpec
+
+InferenceProvidersSpec configures inference providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[InferenceRemoteProviders](#inferenceremoteproviders)_ |  |  |  |
+| `inline` _[InferenceInlineProviders](#inferenceinlineproviders)_ |  |  |  |
+
+#### InferenceRemoteProviders
+
+InferenceRemoteProviders groups remote inference providers.
+
+_Appears in:_
+- [InferenceProvidersSpec](#inferenceprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `vllm` _[VLLMProvider](#vllmprovider) array_ |  |  |  |
+| `openai` _[OpenAIProvider](#openaiprovider) array_ |  |  |  |
+| `azure` _[AzureProvider](#azureprovider) array_ |  |  |  |
+| `bedrock` _[BedrockProvider](#bedrockprovider) array_ |  |  |  |
+| `vertexai` _[VertexAIProvider](#vertexaiprovider) array_ |  |  |  |
+| `watsonx` _[WatsonxProvider](#watsonxprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### InlineBuiltinResponsesProvider
+
+InlineBuiltinResponsesProvider configures inline::builtin for responses.
+
+_Appears in:_
+- [ResponsesInlineProviders](#responsesinlineproviders)
+
+#### InlineFileSearchProvider
+
+InlineFileSearchProvider configures inline::file-search.
+
+_Appears in:_
+- [ToolRuntimeInlineProviders](#toolruntimeinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+
+#### InlineLocalFSProvider
+
+InlineLocalFSProvider configures inline::localfs.
+
+_Appears in:_
+- [FilesInlineProviders](#filesinlineproviders)
+
+#### InlineReferenceProvider
+
+InlineReferenceProvider configures inline::reference for batches.
+
+_Appears in:_
+- [BatchesInlineProviders](#batchesinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `maxConcurrentBatches` _integer_ |  |  | Minimum: 1 <br /> |
+| `maxConcurrentRequestsPerBatch` _integer_ |  |  | Minimum: 1 <br /> |
+
+#### InlineSentenceTransformersProvider
+
+InlineSentenceTransformersProvider enables inline::sentence-transformers.
+
+_Appears in:_
+- [InferenceInlineProviders](#inferenceinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+
 #### KVStorageSpec
 
 KVStorageSpec configures the key-value storage backend.
@@ -401,6 +631,19 @@ _Appears in:_
 | `type` _string_ | Type is the KV storage backend type. | sqlite | Enum: [sqlite redis] <br /> |
 | `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
 | `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication. |  |  |
+
+#### MilvusProvider
+
+MilvusProvider configures a remote::milvus vector I/O provider instance.
+
+_Appears in:_
+- [VectorIORemoteProviders](#vectorioremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `uri` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `token` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
 
 #### ModelConfig
 
@@ -416,6 +659,17 @@ _Appears in:_
 | `contextLength` _integer_ | ContextLength is the model context window size. |  |  |
 | `modelType` _string_ | ModelType is the model type classification. |  |  |
 | `quantization` _string_ | Quantization is the quantization method. |  |  |
+
+#### ModelContextProtocolProvider
+
+ModelContextProtocolProvider configures remote::model-context-protocol.
+
+_Appears in:_
+- [ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
 
 #### NetworkPolicySpec
 
@@ -518,7 +772,7 @@ _Appears in:_
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
 | `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models, tools, and shields to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MinItems: 1 <br />items:Enum: [agents inference tool_runtime vector_io] <br /> |
+| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 8 <br />MinItems: 1 <br />items:Enum: [agents batches inference responses safety tool_runtime vector_io files] <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
 | `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates<br />used to verify outbound TLS connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
@@ -542,6 +796,19 @@ _Appears in:_
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas. |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL. |  |  |
 | `externalURL` _string_ | ExternalURL is the external URL when external access is configured. |  |  |
+
+#### OpenAIProvider
+
+OpenAIProvider configures a remote::openai inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `endpoint` _string_ |  |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
 
 #### OverrideConfigSpec
 
@@ -567,6 +834,22 @@ _Appears in:_
 | `size` _[Quantity](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#quantity-resource-api)_ | Size is the size of the PVC. |  |  |
 | `mountPath` _string_ | MountPath is the container mount path for the PVC. | /.ogx |  |
 
+#### PgvectorProvider
+
+PgvectorProvider configures a remote::pgvector vector I/O provider instance.
+
+_Appears in:_
+- [VectorIORemoteProviders](#vectorioremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `host` _string_ |  | localhost |  |
+| `port` _integer_ |  | 5432 | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `db` _string_ |  | postgres |  |
+| `user` _string_ |  | postgres |  |
+| `password` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+
 #### PodDisruptionBudgetSpec
 
 PodDisruptionBudgetSpec defines voluntary disruption controls.
@@ -578,21 +861,6 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `minAvailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MinAvailable is the minimum number of pods that must remain available. |  |  |
 | `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MaxUnavailable is the maximum number of pods that can be disrupted simultaneously. |  |  |
-
-#### ProviderConfig
-
-ProviderConfig defines the configuration for a single provider instance.
-
-_Appears in:_
-- [ProvidersSpec](#providersspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `id` _string_ | ID is a unique provider identifier. Auto-generated from provider<br />when omitted. Must be unique across all API types. |  |  |
-| `provider` _string_ | Provider is the provider type, specified with a "remote::" or "inline::"<br />prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin"). |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `endpoint` _string_ | Endpoint is the provider endpoint URL. Maps to config.url in config.yaml. |  |  |
-| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution.<br />Use this instead of embedding secretKeyRef inside settings. |  | MinProperties: 1 <br /> |
-| `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific settings merged into the provider's<br />config section in config.yaml. Acts as an escape hatch for fields not<br />directly exposed in the CRD schema. Passed through as-is without any<br />secret resolution. Use secretRefs for secret values. |  |  |
 
 #### ProviderHealthStatus
 
@@ -623,17 +891,35 @@ _Appears in:_
 
 #### ProvidersSpec
 
-ProvidersSpec contains typed provider slices for each API type.
+ProvidersSpec configures providers by API type.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `inference` _[ProviderConfig](#providerconfig) array_ | Inference configures inference providers (e.g., vLLM, TGI). |  | MinItems: 1 <br /> |
-| `safety` _[ProviderConfig](#providerconfig) array_ | Safety configures safety providers (e.g., llama-guard). |  | MinItems: 1 <br /> |
-| `vectorIo` _[ProviderConfig](#providerconfig) array_ | VectorIo configures vector I/O providers (e.g., pgvector, chromadb). |  | MinItems: 1 <br /> |
-| `toolRuntime` _[ProviderConfig](#providerconfig) array_ | ToolRuntime configures tool runtime providers. |  | MinItems: 1 <br /> |
+| `inference` _[InferenceProvidersSpec](#inferenceprovidersspec)_ |  |  |  |
+| `safety` _[SafetyProvidersSpec](#safetyprovidersspec)_ |  |  |  |
+| `vectorIo` _[VectorIOProvidersSpec](#vectorioprovidersspec)_ |  |  |  |
+| `toolRuntime` _[ToolRuntimeProvidersSpec](#toolruntimeprovidersspec)_ |  |  |  |
+| `files` _[FilesProvidersSpec](#filesprovidersspec)_ |  |  |  |
+| `batches` _[BatchesProvidersSpec](#batchesprovidersspec)_ |  |  |  |
+| `responses` _[ResponsesProvidersSpec](#responsesprovidersspec)_ |  |  |  |
+
+#### QdrantProvider
+
+QdrantProvider configures a remote::qdrant vector I/O provider instance.
+
+_Appears in:_
+- [VectorIORemoteProviders](#vectorioremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `url` _string_ |  |  |  |
+| `host` _string_ |  |  |  |
+| `port` _integer_ |  |  | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
 
 #### ResolvedDistributionStatus
 
@@ -661,6 +947,81 @@ _Appears in:_
 | `tools` _string array_ | Tools are tool group names to register with the toolRuntime provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 | `shields` _string array_ | Shields to register by name. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
+#### ResponsesInlineProviders
+
+ResponsesInlineProviders groups inline responses providers.
+
+_Appears in:_
+- [ResponsesProvidersSpec](#responsesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `builtin` _[InlineBuiltinResponsesProvider](#inlinebuiltinresponsesprovider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### ResponsesProvidersSpec
+
+ResponsesProvidersSpec configures responses providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[ResponsesRemoteProviders](#responsesremoteproviders)_ |  |  |  |
+| `inline` _[ResponsesInlineProviders](#responsesinlineproviders)_ |  |  |  |
+
+#### ResponsesRemoteProviders
+
+ResponsesRemoteProviders groups remote responses providers.
+
+_Appears in:_
+- [ResponsesProvidersSpec](#responsesprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### RoutedProviderBase
+
+RoutedProviderBase contains fields common to all routed (non-singleton) provider instances.
+
+_Appears in:_
+- [AzureProvider](#azureprovider)
+- [BedrockProvider](#bedrockprovider)
+- [BraveSearchProvider](#bravesearchprovider)
+- [CustomProvider](#customprovider)
+- [InlineFileSearchProvider](#inlinefilesearchprovider)
+- [InlineSentenceTransformersProvider](#inlinesentencetransformersprovider)
+- [MilvusProvider](#milvusprovider)
+- [ModelContextProtocolProvider](#modelcontextprotocolprovider)
+- [OpenAIProvider](#openaiprovider)
+- [PgvectorProvider](#pgvectorprovider)
+- [QdrantProvider](#qdrantprovider)
+- [TavilySearchProvider](#tavilysearchprovider)
+- [VLLMProvider](#vllmprovider)
+- [VertexAIProvider](#vertexaiprovider)
+- [WatsonxProvider](#watsonxprovider)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+
+#### S3Provider
+
+S3Provider configures a remote::s3 files provider instance.
+
+_Appears in:_
+- [FilesRemoteProviders](#filesremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `bucketName` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `region` _string_ |  | us-east-1 |  |
+| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `endpointUrl` _string_ |  |  |  |
+
 #### SQLStorageSpec
 
 SQLStorageSpec configures the relational storage backend.
@@ -673,6 +1034,40 @@ _Appears in:_
 | `type` _string_ | Type is the SQL storage backend type. | sqlite | Enum: [sqlite postgres] <br /> |
 | `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres". |  |  |
 
+#### SafetyInlineProviders
+
+SafetyInlineProviders groups inline safety providers.
+
+_Appears in:_
+- [SafetyProvidersSpec](#safetyprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### SafetyProvidersSpec
+
+SafetyProvidersSpec configures safety providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[SafetyRemoteProviders](#safetyremoteproviders)_ |  |  |  |
+| `inline` _[SafetyInlineProviders](#safetyinlineproviders)_ |  |  |  |
+
+#### SafetyRemoteProviders
+
+SafetyRemoteProviders groups remote safety providers.
+
+_Appears in:_
+- [SafetyProvidersSpec](#safetyprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
 #### SecretKeyRef
 
 SecretKeyRef references a specific key in a Kubernetes Secret.
@@ -680,9 +1075,20 @@ The Secret must be in the same namespace as the OGXServer and must have
 the label ogx.io/watch: "true" to be detected by the operator's cache.
 
 _Appears in:_
+- [AzureProvider](#azureprovider)
+- [BedrockProvider](#bedrockprovider)
+- [BraveSearchProvider](#bravesearchprovider)
+- [CustomProvider](#customprovider)
 - [KVStorageSpec](#kvstoragespec)
-- [ProviderConfig](#providerconfig)
+- [MilvusProvider](#milvusprovider)
+- [OpenAIProvider](#openaiprovider)
+- [PgvectorProvider](#pgvectorprovider)
+- [QdrantProvider](#qdrantprovider)
+- [S3Provider](#s3provider)
 - [SQLStorageSpec](#sqlstoragespec)
+- [TavilySearchProvider](#tavilysearchprovider)
+- [VLLMProvider](#vllmprovider)
+- [WatsonxProvider](#watsonxprovider)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
@@ -712,6 +1118,108 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `secretName` _string_ | SecretName references a Kubernetes TLS Secret containing a valid TLS certificate<br />for server TLS termination. The Secret must be in the same namespace as the<br />OGXServer and must have the label ogx.io/watch: "true" to be detected by the<br />operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
+#### TavilySearchProvider
+
+TavilySearchProvider configures a remote::tavily-search tool runtime provider.
+
+_Appears in:_
+- [ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+| `maxResults` _integer_ |  |  | Minimum: 1 <br /> |
+
+#### ToolRuntimeInlineProviders
+
+ToolRuntimeInlineProviders groups inline tool runtime providers.
+
+_Appears in:_
+- [ToolRuntimeProvidersSpec](#toolruntimeprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `fileSearch` _[InlineFileSearchProvider](#inlinefilesearchprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### ToolRuntimeProvidersSpec
+
+ToolRuntimeProvidersSpec configures tool runtime providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)_ |  |  |  |
+| `inline` _[ToolRuntimeInlineProviders](#toolruntimeinlineproviders)_ |  |  |  |
+
+#### ToolRuntimeRemoteProviders
+
+ToolRuntimeRemoteProviders groups remote tool runtime providers.
+
+_Appears in:_
+- [ToolRuntimeProvidersSpec](#toolruntimeprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `braveSearch` _[BraveSearchProvider](#bravesearchprovider) array_ |  |  |  |
+| `tavilySearch` _[TavilySearchProvider](#tavilysearchprovider) array_ |  |  |  |
+| `modelContextProtocol` _[ModelContextProtocolProvider](#modelcontextprotocolprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### VLLMProvider
+
+VLLMProvider configures a remote::vllm inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `endpoint` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiToken` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `maxTokens` _integer_ |  |  | Minimum: 1 <br /> |
+
+#### VectorIOInlineProviders
+
+VectorIOInlineProviders groups inline vector I/O providers.
+
+_Appears in:_
+- [VectorIOProvidersSpec](#vectorioprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
+#### VectorIOProvidersSpec
+
+VectorIOProvidersSpec configures vector I/O providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[VectorIORemoteProviders](#vectorioremoteproviders)_ |  |  |  |
+| `inline` _[VectorIOInlineProviders](#vectorioinlineproviders)_ |  |  |  |
+
+#### VectorIORemoteProviders
+
+VectorIORemoteProviders groups remote vector I/O providers.
+
+_Appears in:_
+- [VectorIOProvidersSpec](#vectorioprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `pgvector` _[PgvectorProvider](#pgvectorprovider) array_ |  |  |  |
+| `milvus` _[MilvusProvider](#milvusprovider) array_ |  |  |  |
+| `qdrant` _[QdrantProvider](#qdrantprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+
 #### VersionInfo
 
 VersionInfo contains version-related information.
@@ -724,6 +1232,33 @@ _Appears in:_
 | `operatorVersion` _string_ |  |  |  |
 | `serverVersion` _string_ |  |  |  |
 | `lastUpdated` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#time-v1-meta)_ |  |  |  |
+
+#### VertexAIProvider
+
+VertexAIProvider configures a remote::vertexai inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `project` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `location` _string_ |  | global |  |
+
+#### WatsonxProvider
+
+WatsonxProvider configures a remote::watsonx inference provider instance.
+
+_Appears in:_
+- [InferenceRemoteProviders](#inferenceremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `endpoint` _string_ |  |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+| `projectId` _string_ |  |  |  |
 
 #### WorkloadOverrides
 

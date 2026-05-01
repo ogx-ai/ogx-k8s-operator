@@ -110,10 +110,15 @@ spec:
                 items:
                   enum:
                   - agents
+                  - batches
                   - inference
+                  - responses
+                  - safety
                   - tool_runtime
                   - vector_io
+                  - files
                   type: string
+                maxItems: 8
                 minItems: 1
                 type: array
               distribution:
@@ -606,268 +611,1503 @@ spec:
                   Providers configures providers by API type.
                   Mutually exclusive with overrideConfig.
                 properties:
+                  batches:
+                    description: BatchesProvidersSpec configures batches providers.
+                    properties:
+                      inline:
+                        description: BatchesInlineProviders groups inline batches
+                          providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          reference:
+                            description: InlineReferenceProvider configures inline::reference
+                              for batches.
+                            properties:
+                              maxConcurrentBatches:
+                                minimum: 1
+                                type: integer
+                              maxConcurrentRequestsPerBatch:
+                                minimum: 1
+                                type: integer
+                            type: object
+                        type: object
+                      remote:
+                        description: BatchesRemoteProviders groups remote batches
+                          providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
+                  files:
+                    description: FilesProvidersSpec configures files providers.
+                    properties:
+                      inline:
+                        description: FilesInlineProviders groups inline files providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          localfs:
+                            description: InlineLocalFSProvider configures inline::localfs.
+                            type: object
+                        type: object
+                      remote:
+                        description: FilesRemoteProviders groups remote files providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          s3:
+                            description: S3Provider configures a remote::s3 files
+                              provider instance.
+                            properties:
+                              awsAccessKeyId:
+                                description: |-
+                                  SecretKeyRef references a specific key in a Kubernetes Secret.
+                                  The Secret must be in the same namespace as the OGXServer and must have
+                                  the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                properties:
+                                  key:
+                                    description: Key is the key within the Secret.
+                                    minLength: 1
+                                    type: string
+                                  name:
+                                    description: Name is the name of the Kubernetes
+                                      Secret.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              awsSecretAccessKey:
+                                description: |-
+                                  SecretKeyRef references a specific key in a Kubernetes Secret.
+                                  The Secret must be in the same namespace as the OGXServer and must have
+                                  the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                properties:
+                                  key:
+                                    description: Key is the key within the Secret.
+                                    minLength: 1
+                                    type: string
+                                  name:
+                                    description: Name is the name of the Kubernetes
+                                      Secret.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              bucketName:
+                                minLength: 1
+                                type: string
+                              endpointUrl:
+                                type: string
+                              region:
+                                default: us-east-1
+                                type: string
+                            required:
+                            - bucketName
+                            type: object
+                        type: object
+                    type: object
                   inference:
-                    description: Inference configures inference providers (e.g., vLLM,
-                      TGI).
-                    items:
-                      description: ProviderConfig defines the configuration for a
-                        single provider instance.
-                      properties:
-                        endpoint:
-                          description: Endpoint is the provider endpoint URL. Maps
-                            to config.url in config.yaml.
-                          type: string
-                        id:
-                          description: |-
-                            ID is a unique provider identifier. Auto-generated from provider
-                            when omitted. Must be unique across all API types.
-                          type: string
-                        provider:
-                          description: |-
-                            Provider is the provider type, specified with a "remote::" or "inline::"
-                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
-                          minLength: 1
-                          type: string
-                        secretRefs:
-                          additionalProperties:
-                            description: |-
-                              SecretKeyRef references a specific key in a Kubernetes Secret.
-                              The Secret must be in the same namespace as the OGXServer and must have
-                              the label ogx.io/watch: "true" to be detected by the operator's cache.
-                            properties:
-                              key:
-                                description: Key is the key within the Secret.
-                                minLength: 1
-                                type: string
-                              name:
-                                description: Name is the name of the Kubernetes Secret.
-                                minLength: 1
-                                type: string
-                            required:
-                            - key
-                            - name
+                    description: InferenceProvidersSpec configures inference providers.
+                    properties:
+                      inline:
+                        description: InferenceInlineProviders groups inline inference
+                          providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          sentenceTransformers:
+                            items:
+                              description: InlineSentenceTransformersProvider enables
+                                inline::sentence-transformers.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                      remote:
+                        description: InferenceRemoteProviders groups remote inference
+                          providers.
+                        properties:
+                          azure:
+                            items:
+                              description: AzureProvider configures a remote::azure
+                                inference provider instance.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                apiVersion:
+                                  type: string
+                                endpoint:
+                                  minLength: 1
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                              required:
+                              - apiKey
+                              - endpoint
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          bedrock:
+                            items:
+                              description: BedrockProvider configures a remote::bedrock
+                                inference provider instance.
+                              properties:
+                                awsAccessKeyId:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                awsRoleArn:
+                                  type: string
+                                awsSecretAccessKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                awsSessionToken:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                region:
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - region
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          openai:
+                            items:
+                              description: OpenAIProvider configures a remote::openai
+                                inference provider instance.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                endpoint:
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                              required:
+                              - apiKey
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          vertexai:
+                            items:
+                              description: VertexAIProvider configures a remote::vertexai
+                                inference provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                location:
+                                  default: global
+                                  type: string
+                                project:
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - project
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          vllm:
+                            items:
+                              description: VLLMProvider configures a remote::vllm
+                                inference provider instance.
+                              properties:
+                                apiToken:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                endpoint:
+                                  minLength: 1
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                maxTokens:
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - endpoint
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          watsonx:
+                            items:
+                              description: WatsonxProvider configures a remote::watsonx
+                                inference provider instance.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                endpoint:
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                projectId:
+                                  type: string
+                              required:
+                              - apiKey
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
+                  responses:
+                    description: ResponsesProvidersSpec configures responses providers.
+                    properties:
+                      inline:
+                        description: ResponsesInlineProviders groups inline responses
+                          providers.
+                        properties:
+                          builtin:
+                            description: InlineBuiltinResponsesProvider configures
+                              inline::builtin for responses.
                             type: object
-                          description: |-
-                            SecretRefs is a map of named secret references for provider-specific
-                            connection fields (e.g., host, password). Each key becomes the env var
-                            field suffix and maps to config.<key> with env var substitution.
-                            Use this instead of embedding secretKeyRef inside settings.
-                          minProperties: 1
-                          type: object
-                        settings:
-                          description: |-
-                            Settings contains provider-specific settings merged into the provider's
-                            config section in config.yaml. Acts as an escape hatch for fields not
-                            directly exposed in the CRD schema. Passed through as-is without any
-                            secret resolution. Use secretRefs for secret values.
-                          x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - provider
-                      type: object
-                      x-kubernetes-validations:
-                      - message: id must not be empty if specified
-                        rule: '!has(self.id) || self.id.size() > 0'
-                      - message: provider must have a 'remote::' or 'inline::' prefix
-                          (e.g., 'remote::vllm', 'inline::builtin')
-                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
-                    minItems: 1
-                    type: array
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                      remote:
+                        description: ResponsesRemoteProviders groups remote responses
+                          providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
                   safety:
-                    description: Safety configures safety providers (e.g., llama-guard).
-                    items:
-                      description: ProviderConfig defines the configuration for a
-                        single provider instance.
-                      properties:
-                        endpoint:
-                          description: Endpoint is the provider endpoint URL. Maps
-                            to config.url in config.yaml.
-                          type: string
-                        id:
-                          description: |-
-                            ID is a unique provider identifier. Auto-generated from provider
-                            when omitted. Must be unique across all API types.
-                          type: string
-                        provider:
-                          description: |-
-                            Provider is the provider type, specified with a "remote::" or "inline::"
-                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
-                          minLength: 1
-                          type: string
-                        secretRefs:
-                          additionalProperties:
-                            description: |-
-                              SecretKeyRef references a specific key in a Kubernetes Secret.
-                              The Secret must be in the same namespace as the OGXServer and must have
-                              the label ogx.io/watch: "true" to be detected by the operator's cache.
-                            properties:
-                              key:
-                                description: Key is the key within the Secret.
-                                minLength: 1
-                                type: string
-                              name:
-                                description: Name is the name of the Kubernetes Secret.
-                                minLength: 1
-                                type: string
-                            required:
-                            - key
-                            - name
-                            type: object
-                          description: |-
-                            SecretRefs is a map of named secret references for provider-specific
-                            connection fields (e.g., host, password). Each key becomes the env var
-                            field suffix and maps to config.<key> with env var substitution.
-                            Use this instead of embedding secretKeyRef inside settings.
-                          minProperties: 1
-                          type: object
-                        settings:
-                          description: |-
-                            Settings contains provider-specific settings merged into the provider's
-                            config section in config.yaml. Acts as an escape hatch for fields not
-                            directly exposed in the CRD schema. Passed through as-is without any
-                            secret resolution. Use secretRefs for secret values.
-                          x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - provider
-                      type: object
-                      x-kubernetes-validations:
-                      - message: id must not be empty if specified
-                        rule: '!has(self.id) || self.id.size() > 0'
-                      - message: provider must have a 'remote::' or 'inline::' prefix
-                          (e.g., 'remote::vllm', 'inline::builtin')
-                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
-                    minItems: 1
-                    type: array
+                    description: SafetyProvidersSpec configures safety providers.
+                    properties:
+                      inline:
+                        description: SafetyInlineProviders groups inline safety providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                      remote:
+                        description: SafetyRemoteProviders groups remote safety providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
                   toolRuntime:
-                    description: ToolRuntime configures tool runtime providers.
-                    items:
-                      description: ProviderConfig defines the configuration for a
-                        single provider instance.
-                      properties:
-                        endpoint:
-                          description: Endpoint is the provider endpoint URL. Maps
-                            to config.url in config.yaml.
-                          type: string
-                        id:
-                          description: |-
-                            ID is a unique provider identifier. Auto-generated from provider
-                            when omitted. Must be unique across all API types.
-                          type: string
-                        provider:
-                          description: |-
-                            Provider is the provider type, specified with a "remote::" or "inline::"
-                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
-                          minLength: 1
-                          type: string
-                        secretRefs:
-                          additionalProperties:
-                            description: |-
-                              SecretKeyRef references a specific key in a Kubernetes Secret.
-                              The Secret must be in the same namespace as the OGXServer and must have
-                              the label ogx.io/watch: "true" to be detected by the operator's cache.
-                            properties:
-                              key:
-                                description: Key is the key within the Secret.
-                                minLength: 1
-                                type: string
-                              name:
-                                description: Name is the name of the Kubernetes Secret.
-                                minLength: 1
-                                type: string
-                            required:
-                            - key
-                            - name
-                            type: object
-                          description: |-
-                            SecretRefs is a map of named secret references for provider-specific
-                            connection fields (e.g., host, password). Each key becomes the env var
-                            field suffix and maps to config.<key> with env var substitution.
-                            Use this instead of embedding secretKeyRef inside settings.
-                          minProperties: 1
-                          type: object
-                        settings:
-                          description: |-
-                            Settings contains provider-specific settings merged into the provider's
-                            config section in config.yaml. Acts as an escape hatch for fields not
-                            directly exposed in the CRD schema. Passed through as-is without any
-                            secret resolution. Use secretRefs for secret values.
-                          x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - provider
-                      type: object
-                      x-kubernetes-validations:
-                      - message: id must not be empty if specified
-                        rule: '!has(self.id) || self.id.size() > 0'
-                      - message: provider must have a 'remote::' or 'inline::' prefix
-                          (e.g., 'remote::vllm', 'inline::builtin')
-                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
-                    minItems: 1
-                    type: array
+                    description: ToolRuntimeProvidersSpec configures tool runtime
+                      providers.
+                    properties:
+                      inline:
+                        description: ToolRuntimeInlineProviders groups inline tool
+                          runtime providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          fileSearch:
+                            items:
+                              description: InlineFileSearchProvider configures inline::file-search.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                      remote:
+                        description: ToolRuntimeRemoteProviders groups remote tool
+                          runtime providers.
+                        properties:
+                          braveSearch:
+                            items:
+                              description: BraveSearchProvider configures a remote::brave-search
+                                tool runtime provider.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                maxResults:
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - apiKey
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          modelContextProtocol:
+                            items:
+                              description: ModelContextProtocolProvider configures
+                                remote::model-context-protocol.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          tavilySearch:
+                            items:
+                              description: TavilySearchProvider configures a remote::tavily-search
+                                tool runtime provider.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                maxResults:
+                                  minimum: 1
+                                  type: integer
+                              required:
+                              - apiKey
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
                   vectorIo:
-                    description: VectorIo configures vector I/O providers (e.g., pgvector,
-                      chromadb).
-                    items:
-                      description: ProviderConfig defines the configuration for a
-                        single provider instance.
-                      properties:
-                        endpoint:
-                          description: Endpoint is the provider endpoint URL. Maps
-                            to config.url in config.yaml.
-                          type: string
-                        id:
-                          description: |-
-                            ID is a unique provider identifier. Auto-generated from provider
-                            when omitted. Must be unique across all API types.
-                          type: string
-                        provider:
-                          description: |-
-                            Provider is the provider type, specified with a "remote::" or "inline::"
-                            prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
-                          minLength: 1
-                          type: string
-                        secretRefs:
-                          additionalProperties:
-                            description: |-
-                              SecretKeyRef references a specific key in a Kubernetes Secret.
-                              The Secret must be in the same namespace as the OGXServer and must have
-                              the label ogx.io/watch: "true" to be detected by the operator's cache.
-                            properties:
-                              key:
-                                description: Key is the key within the Secret.
-                                minLength: 1
-                                type: string
-                              name:
-                                description: Name is the name of the Kubernetes Secret.
-                                minLength: 1
-                                type: string
-                            required:
-                            - key
-                            - name
-                            type: object
-                          description: |-
-                            SecretRefs is a map of named secret references for provider-specific
-                            connection fields (e.g., host, password). Each key becomes the env var
-                            field suffix and maps to config.<key> with env var substitution.
-                            Use this instead of embedding secretKeyRef inside settings.
-                          minProperties: 1
-                          type: object
-                        settings:
-                          description: |-
-                            Settings contains provider-specific settings merged into the provider's
-                            config section in config.yaml. Acts as an escape hatch for fields not
-                            directly exposed in the CRD schema. Passed through as-is without any
-                            secret resolution. Use secretRefs for secret values.
-                          x-kubernetes-preserve-unknown-fields: true
-                      required:
-                      - provider
-                      type: object
-                      x-kubernetes-validations:
-                      - message: id must not be empty if specified
-                        rule: '!has(self.id) || self.id.size() > 0'
-                      - message: provider must have a 'remote::' or 'inline::' prefix
-                          (e.g., 'remote::vllm', 'inline::builtin')
-                        rule: self.provider.startsWith('remote::') || self.provider.startsWith('inline::')
-                    minItems: 1
-                    type: array
+                    description: VectorIOProvidersSpec configures vector I/O providers.
+                    properties:
+                      inline:
+                        description: VectorIOInlineProviders groups inline vector
+                          I/O providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                      remote:
+                        description: VectorIORemoteProviders groups remote vector
+                          I/O providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        minLength: 1
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          milvus:
+                            items:
+                              description: MilvusProvider configures a remote::milvus
+                                vector I/O provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                token:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                uri:
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - uri
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          pgvector:
+                            items:
+                              description: PgvectorProvider configures a remote::pgvector
+                                vector I/O provider instance.
+                              properties:
+                                db:
+                                  default: postgres
+                                  type: string
+                                host:
+                                  default: localhost
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                password:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                port:
+                                  default: 5432
+                                  maximum: 65535
+                                  minimum: 1
+                                  type: integer
+                                user:
+                                  default: postgres
+                                  type: string
+                              required:
+                              - password
+                              type: object
+                              x-kubernetes-validations:
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                          qdrant:
+                            items:
+                              description: QdrantProvider configures a remote::qdrant
+                                vector I/O provider instance.
+                              properties:
+                                apiKey:
+                                  description: |-
+                                    SecretKeyRef references a specific key in a Kubernetes Secret.
+                                    The Secret must be in the same namespace as the OGXServer and must have
+                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      minLength: 1
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                host:
+                                  type: string
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                port:
+                                  maximum: 65535
+                                  minimum: 1
+                                  type: integer
+                                url:
+                                  type: string
+                              type: object
+                              x-kubernetes-validations:
+                              - message: at least one of url or host must be specified
+                                rule: has(self.url) || has(self.host)
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            type: array
+                        type: object
+                    type: object
                 type: object
               resources:
                 description: |-
@@ -3497,16 +4737,25 @@ spec:
               rule: '!has(self.overrideConfig) || !has(self.disabledAPIs)'
             - message: inference cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
-                d == ''inference'') || !has(self.providers.inference) || self.providers.inference.size()
-                == 0'
+                d == ''inference'') || !has(self.providers.inference)'
             - message: vector_io cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
-                d == ''vector_io'') || !has(self.providers.vectorIo) || self.providers.vectorIo.size()
-                == 0'
+                d == ''vector_io'') || !has(self.providers.vectorIo)'
             - message: tool_runtime cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
-                d == ''tool_runtime'') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size()
-                == 0'
+                d == ''tool_runtime'') || !has(self.providers.toolRuntime)'
+            - message: files cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
+                d == ''files'') || !has(self.providers.files)'
+            - message: batches cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
+                d == ''batches'') || !has(self.providers.batches)'
+            - message: responses cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
+                d == ''responses'') || !has(self.providers.responses)'
+            - message: safety cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
+                d == ''safety'') || !has(self.providers.safety)'
           status:
             description: OGXServerStatus defines the observed state of OGXServer.
             properties:

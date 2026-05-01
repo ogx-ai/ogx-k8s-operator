@@ -96,7 +96,7 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 	}
 
 	if r.Spec.Providers != nil {
-		allErrs = append(allErrs, validateProviderIDUniqueness(r.Spec.Providers)...)
+		allErrs = append(allErrs, validateProviderIDs(r.Spec.Providers)...)
 	}
 
 	if r.Spec.Resources != nil && r.Spec.Providers != nil {
@@ -106,39 +106,31 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 	return allErrs
 }
 
-// validateProviderIDUniqueness ensures provider IDs are unique across all API types.
-// Per-slice uniqueness is handled by CEL; this validates cross-slice uniqueness.
-func validateProviderIDUniqueness(spec *ProvidersSpec) field.ErrorList {
+// collectAllProviderIDs returns all provider IDs and any duplicate ID errors.
+func collectAllProviderIDs(spec *ProvidersSpec) (map[string]bool, field.ErrorList) {
+	if spec == nil {
+		return nil, nil
+	}
+
+	all := spec.IDs()
+	seen := make(map[string]bool, len(all))
 	var errs field.ErrorList
-	seenIDs := make(map[string]string)
-
-	fields := []struct {
-		name    string
-		configs []ProviderConfig
-	}{
-		{"inference", spec.Inference},
-		{"safety", spec.Safety},
-		{"vectorIo", spec.VectorIo},
-		{"toolRuntime", spec.ToolRuntime},
-	}
-
-	for _, f := range fields {
-		for _, pc := range f.configs {
-			id := pc.ID
-			if id == "" {
-				id = deriveProviderID(pc.Provider)
-			}
-			if existingAPI, exists := seenIDs[id]; exists {
-				errs = append(errs, field.Invalid(
-					field.NewPath("spec", "providers", f.name),
-					id,
-					fmt.Sprintf("provider ID %q conflicts with provider in %q; all provider IDs must be unique across all API types", id, existingAPI),
-				))
-			}
-			seenIDs[id] = f.name
+	for _, id := range all {
+		if seen[id] {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec", "providers"), id,
+				fmt.Sprintf("duplicate provider ID %q", id),
+			))
 		}
+		seen[id] = true
 	}
+	return seen, errs
+}
 
+// validateProviderIDs validates provider ID uniqueness and that all
+// multi-instance provider slices have explicit IDs.
+func validateProviderIDs(spec *ProvidersSpec) field.ErrorList {
+	_, errs := collectAllProviderIDs(spec)
 	return errs
 }
 
@@ -146,11 +138,11 @@ func validateProviderIDUniqueness(spec *ProvidersSpec) field.ErrorList {
 func validateProviderReferences(resources *ResourcesSpec, providers *ProvidersSpec) field.ErrorList {
 	var errs field.ErrorList
 
-	providerIDs := collectAllProviderIDs(providers)
+	providerIDs, _ := collectAllProviderIDs(providers)
 
 	for i, mc := range resources.Models {
 		if mc.Provider != "" {
-			if _, ok := providerIDs[mc.Provider]; !ok {
+			if !providerIDs[mc.Provider] {
 				errs = append(errs, field.Invalid(
 					field.NewPath("spec", "resources", "models").Index(i).Child("provider"),
 					mc.Provider,
@@ -187,34 +179,6 @@ func validateDistributionName(name string, knownNames []string) field.ErrorList 
 		fmt.Sprintf("unknown distribution %q; available distributions: %s", name, strings.Join(sorted, ", ")),
 	))
 	return errs
-}
-
-// deriveProviderID strips a "remote::" or similar prefix from a provider type
-// to produce the same ID that the config pipeline generates.
-func deriveProviderID(providerType string) string {
-	if idx := strings.LastIndex(providerType, "::"); idx >= 0 {
-		return providerType[idx+2:]
-	}
-	return providerType
-}
-
-func collectAllProviderIDs(spec *ProvidersSpec) map[string]bool {
-	ids := make(map[string]bool)
-	for _, slice := range [][]ProviderConfig{
-		spec.Inference,
-		spec.Safety,
-		spec.VectorIo,
-		spec.ToolRuntime,
-	} {
-		for _, pc := range slice {
-			id := pc.ID
-			if id == "" {
-				id = deriveProviderID(pc.Provider)
-			}
-			ids[id] = true
-		}
-	}
-	return ids
 }
 
 func sortedMapKeys(m map[string]bool) []string {

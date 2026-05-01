@@ -75,7 +75,7 @@ func TestCEL_DistributionSpec(t *testing.T) {
 	}
 }
 
-func TestCEL_ProviderConfig(t *testing.T) {
+func TestCEL_CustomProvider(t *testing.T) {
 	ns := createCELTestNamespace(t, "cel-prov")
 
 	tests := []struct {
@@ -87,7 +87,11 @@ func TestCEL_ProviderConfig(t *testing.T) {
 			name: "remote prefix is valid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "remote::my-provider"}},
+						},
+					},
 				}
 			},
 		},
@@ -95,7 +99,11 @@ func TestCEL_ProviderConfig(t *testing.T) {
 			name: "inline prefix is valid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "inline::builtin"}},
+					Inference: &InferenceProvidersSpec{
+						Inline: &InferenceInlineProviders{
+							Custom: []CustomProvider{{Type: "inline::builtin"}},
+						},
+					},
 				}
 			},
 		},
@@ -103,43 +111,66 @@ func TestCEL_ProviderConfig(t *testing.T) {
 			name: "no prefix is invalid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "vllm"}},
+						},
+					},
 				}
 			},
-			wantError: "provider must have a 'remote::' or 'inline::' prefix",
+			wantError: "type must have a 'remote::' or 'inline::' prefix",
 		},
 		{
 			name: "single colon prefix is invalid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote:vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "remote:vllm"}},
+						},
+					},
 				}
 			},
-			wantError: "provider must have a 'remote::' or 'inline::' prefix",
+			wantError: "type must have a 'remote::' or 'inline::' prefix",
 		},
 		{
 			name: "wrong case prefix is invalid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "Remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "Remote::vllm"}},
+						},
+					},
 				}
 			},
-			wantError: "provider must have a 'remote::' or 'inline::' prefix",
+			wantError: "type must have a 'remote::' or 'inline::' prefix",
 		},
 		{
 			name: "bare double colon prefix is invalid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "::vllm"}},
+						},
+					},
 				}
 			},
-			wantError: "provider must have a 'remote::' or 'inline::' prefix",
+			wantError: "type must have a 'remote::' or 'inline::' prefix",
 		},
 		{
 			name: "explicit non-empty id is valid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{ID: "my-vllm", Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{
+								RoutedProviderBase: RoutedProviderBase{ID: "my-vllm"},
+								Type:               "remote::vllm",
+							}},
+						},
+					},
 				}
 			},
 		},
@@ -147,7 +178,11 @@ func TestCEL_ProviderConfig(t *testing.T) {
 			name: "id omitted is valid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							Custom: []CustomProvider{{Type: "remote::vllm"}},
+						},
+					},
 				}
 			},
 		},
@@ -590,7 +625,11 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							VLLM: []VLLMProvider{{Endpoint: "https://vllm:8000"}},
+						},
+					},
 				}
 			},
 			wantError: "overrideConfig and providers are mutually exclusive",
@@ -655,7 +694,11 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.DisabledAPIs = []string{"agents"}
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							VLLM: []VLLMProvider{{Endpoint: "https://vllm:8000"}},
+						},
+					},
 				}
 			},
 		},
@@ -664,7 +707,11 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.DisabledAPIs = []string{"agents"}
 				o.Spec.Providers = &ProvidersSpec{
-					Safety: []ProviderConfig{{Provider: "remote::llama-guard"}},
+					Safety: &SafetyProvidersSpec{
+						Remote: &SafetyRemoteProviders{
+							Custom: []CustomProvider{{Type: "remote::llama-guard"}},
+						},
+					},
 				}
 			},
 		},
@@ -673,7 +720,11 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.DisabledAPIs = []string{"inference"}
 				o.Spec.Providers = &ProvidersSpec{
-					Inference: []ProviderConfig{{Provider: "remote::vllm"}},
+					Inference: &InferenceProvidersSpec{
+						Remote: &InferenceRemoteProviders{
+							VLLM: []VLLMProvider{{Endpoint: "https://vllm:8000"}},
+						},
+					},
 				}
 			},
 			wantError: "inference cannot be both in providers and disabledAPIs",
@@ -683,7 +734,11 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.DisabledAPIs = []string{"vector_io"}
 				o.Spec.Providers = &ProvidersSpec{
-					VectorIo: []ProviderConfig{{Provider: "remote::pgvector"}},
+					VectorIo: &VectorIOProvidersSpec{
+						Remote: &VectorIORemoteProviders{
+							Pgvector: []PgvectorProvider{{Password: SecretKeyRef{Name: "s", Key: "k"}}},
+						},
+					},
 				}
 			},
 			wantError: "vector_io cannot be both in providers and disabledAPIs",
@@ -693,10 +748,42 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			mutate: func(o *OGXServer) {
 				o.Spec.DisabledAPIs = []string{"tool_runtime"}
 				o.Spec.Providers = &ProvidersSpec{
-					ToolRuntime: []ProviderConfig{{Provider: "remote::brave-search"}},
+					ToolRuntime: &ToolRuntimeProvidersSpec{
+						Remote: &ToolRuntimeRemoteProviders{
+							BraveSearch: []BraveSearchProvider{{APIKey: SecretKeyRef{Name: "s", Key: "k"}}},
+						},
+					},
 				}
 			},
 			wantError: "tool_runtime cannot be both in providers and disabledAPIs",
+		},
+		{
+			name: "files in both disabledAPIs and providers is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.DisabledAPIs = []string{"files"}
+				o.Spec.Providers = &ProvidersSpec{
+					Files: &FilesProvidersSpec{
+						Inline: &FilesInlineProviders{
+							LocalFS: &InlineLocalFSProvider{},
+						},
+					},
+				}
+			},
+			wantError: "files cannot be both in providers and disabledAPIs",
+		},
+		{
+			name: "safety in both disabledAPIs and providers is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.DisabledAPIs = []string{"safety"}
+				o.Spec.Providers = &ProvidersSpec{
+					Safety: &SafetyProvidersSpec{
+						Remote: &SafetyRemoteProviders{
+							Custom: []CustomProvider{{Type: "remote::llama-guard"}},
+						},
+					},
+				}
+			},
+			wantError: "safety cannot be both in providers and disabledAPIs",
 		},
 	}
 
@@ -820,11 +907,11 @@ func TestCEL_EmptyStringViaUnstructured(t *testing.T) {
 		wantError string
 	}{
 		{
-			name: "provider config with empty id is invalid",
+			name: "custom provider with empty id is invalid",
 			mutate: func(raw map[string]any) {
 				setNestedField(raw, []any{
-					map[string]any{"id": "", "provider": "remote::vllm"},
-				}, "spec", "providers", "inference")
+					map[string]any{"id": "", "type": "remote::my-provider"},
+				}, "spec", "providers", "inference", "remote", "custom")
 			},
 			wantError: "id must not be empty if specified",
 		},

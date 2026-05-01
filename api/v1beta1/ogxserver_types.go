@@ -98,59 +98,6 @@ type SecretKeyRef struct {
 	Key string `json:"key"`
 }
 
-// ProviderConfig defines the configuration for a single provider instance.
-// +kubebuilder:validation:XValidation:rule="!has(self.id) || self.id.size() > 0",message="id must not be empty if specified"
-// +kubebuilder:validation:XValidation:rule="self.provider.startsWith('remote::') || self.provider.startsWith('inline::')",message="provider must have a 'remote::' or 'inline::' prefix (e.g., 'remote::vllm', 'inline::builtin')"
-//
-//nolint:lll // CEL validation rule
-type ProviderConfig struct {
-	// ID is a unique provider identifier. Auto-generated from provider
-	// when omitted. Must be unique across all API types.
-	// +optional
-	ID string `json:"id,omitempty"`
-	// Provider is the provider type, specified with a "remote::" or "inline::"
-	// prefix (e.g., "remote::vllm", "remote::pgvector", "inline::builtin").
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Provider string `json:"provider"`
-	// Endpoint is the provider endpoint URL. Maps to config.url in config.yaml.
-	// +optional
-	Endpoint string `json:"endpoint,omitempty"`
-	// SecretRefs is a map of named secret references for provider-specific
-	// connection fields (e.g., host, password). Each key becomes the env var
-	// field suffix and maps to config.<key> with env var substitution.
-	// Use this instead of embedding secretKeyRef inside settings.
-	// +optional
-	// +kubebuilder:validation:MinProperties=1
-	SecretRefs map[string]SecretKeyRef `json:"secretRefs,omitempty"`
-	// Settings contains provider-specific settings merged into the provider's
-	// config section in config.yaml. Acts as an escape hatch for fields not
-	// directly exposed in the CRD schema. Passed through as-is without any
-	// secret resolution. Use secretRefs for secret values.
-	// +optional
-	Settings *apiextensionsv1.JSON `json:"settings,omitempty"`
-}
-
-// ProvidersSpec contains typed provider slices for each API type.
-type ProvidersSpec struct {
-	// Inference configures inference providers (e.g., vLLM, TGI).
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	Inference []ProviderConfig `json:"inference,omitempty"`
-	// Safety configures safety providers (e.g., llama-guard).
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	Safety []ProviderConfig `json:"safety,omitempty"`
-	// VectorIo configures vector I/O providers (e.g., pgvector, chromadb).
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	VectorIo []ProviderConfig `json:"vectorIo,omitempty"`
-	// ToolRuntime configures tool runtime providers.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	ToolRuntime []ProviderConfig `json:"toolRuntime,omitempty"`
-}
-
 // ModelConfig defines a model registration with optional provider assignment and metadata.
 // +kubebuilder:validation:XValidation:rule="!has(self.provider) || self.provider.size() > 0",message="provider must not be empty if specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.modelType) || self.modelType.size() > 0",message="modelType must not be empty if specified"
@@ -458,9 +405,13 @@ type OverrideConfigSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabledAPIs)",message="overrideConfig and disabledAPIs are mutually exclusive"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference) || self.providers.inference.size() == 0",message="inference cannot be both in providers and disabledAPIs"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo) || self.providers.vectorIo.size() == 0",message="vector_io cannot be both in providers and disabledAPIs"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime) || self.providers.toolRuntime.size() == 0",message="tool_runtime cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference)",message="inference cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo)",message="vector_io cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime)",message="tool_runtime cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'files') || !has(self.providers.files)",message="files cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'batches') || !has(self.providers.batches)",message="batches cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'responses') || !has(self.providers.responses)",message="responses cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'safety') || !has(self.providers.safety)",message="safety cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -483,7 +434,8 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:Enum=agents;inference;tool_runtime;vector_io
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:Enum=agents;batches;inference;responses;safety;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// Network defines network access controls.
 	// +optional
