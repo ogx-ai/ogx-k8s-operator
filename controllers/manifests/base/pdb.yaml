@@ -3,11 +3,11 @@ kind: PodDisruptionBudget
 metadata:
   name: pdb
   labels:
-    app: llama-stack
+    app: ogx
     app.kubernetes.io/instance: ""
 spec:
   maxUnavailable: 1
   selector:
     matchLabels:
-      app: llama-stack
+      app: ogx
       app.kubernetes.io/instance: ""

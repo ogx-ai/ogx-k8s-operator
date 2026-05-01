@@ -89,7 +89,7 @@ func cleanupLegacyClusterRoleBindings(ctx context.Context, client client.Client,
 // shouldDeleteLegacyClusterRoleBinding determines if a ClusterRoleBinding should be deleted.
 func shouldDeleteLegacyClusterRoleBinding(crb *rbacv1.ClusterRoleBinding) bool {
 	// Only delete ClusterRoleBindings that were created by our operator
-	if managedBy, exists := crb.Labels["app.kubernetes.io/managed-by"]; !exists || managedBy != "llama-stack-operator" {
+	if managedBy, exists := crb.Labels["app.kubernetes.io/managed-by"]; !exists || managedBy != "ogx-operator" {
 		return false
 	}
 

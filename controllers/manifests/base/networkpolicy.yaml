@@ -5,10 +5,10 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: llama-stack
+      app: ogx
       app.kubernetes.io/instance: ""
   policyTypes:
   - Ingress
   ingress: []
   # Ingress rules are populated dynamically by the NetworkPolicy transformer plugin
-  # based on spec.network.allowedFrom configuration
+  # based on spec.network.networkPolicy configuration

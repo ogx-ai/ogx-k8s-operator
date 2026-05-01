@@ -11,6 +11,10 @@ package controllers
 // Service permissions - controller creates and manages services
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
+// TRANSITIONAL: Legacy resource access for annotation-driven adoption.
+// These permissions will be removed when adoption support is deprecated.
+//+kubebuilder:rbac:groups="",resources=pods,verbs=list
+
 // ServiceAccount permissions - controller creates and manages service accounts for PVC permissions
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 
@@ -23,7 +27,7 @@ package controllers
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=anyuid,verbs=use
 
-//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update
 
 // ConfigMap permissions - controller reads user configmaps and manages operator config configmaps
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch

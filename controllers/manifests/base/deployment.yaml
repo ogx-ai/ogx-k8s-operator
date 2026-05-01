@@ -6,12 +6,12 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: llama-stack
+      app: ogx
       app.kubernetes.io/instance: ""
   template:
     metadata:
       labels:
-        app: llama-stack
+        app: ogx
         app.kubernetes.io/instance: ""
       annotations: {}
     spec:

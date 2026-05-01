@@ -19,9 +19,13 @@ package plugins
 import (
 	"testing"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/kustomize/api/resmap"
 	"sigs.k8s.io/kustomize/api/resource"
 )
@@ -34,7 +38,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: llama-stack
+      app: ogx
   policyTypes:
   - Ingress
   ingress: []
@@ -76,7 +80,8 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 	assert.Contains(t, yamlStr, "port: 8321")
 }
 
-func TestNetworkPolicyTransformer_AllNamespaces(t *testing.T) {
+// TestNetworkPolicyTransformer_ExplicitIngressFromCR uses v1beta1 NetworkPolicySpec.Ingress verbatim.
+func TestNetworkPolicyTransformer_ExplicitIngressFromCR(t *testing.T) {
 	rf := resource.NewFactory(nil)
 	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
 	require.NoError(t, err)
@@ -84,13 +89,28 @@ func TestNetworkPolicyTransformer_AllNamespaces(t *testing.T) {
 	rm := resmap.New()
 	require.NoError(t, rm.Append(res))
 
+	proto := corev1.ProtocolTCP
+	ingress := []networkingv1.NetworkPolicyIngressRule{
+		{
+			From: []networkingv1.NetworkPolicyPeer{
+				{NamespaceSelector: &metav1.LabelSelector{}},
+			},
+			Ports: []networkingv1.NetworkPolicyPort{
+				{
+					Protocol: &proto,
+					Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 8321},
+				},
+			},
+		},
+	}
+
 	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
-		NetworkSpec: &llamav1alpha1.NetworkSpec{
-			AllowedFrom: &llamav1alpha1.AllowedFromSpec{
-				Namespaces: []string{"*"},
+		NetworkSpec: &ogxiov1beta1.NetworkSpec{
+			Policy: &ogxiov1beta1.NetworkPolicySpec{
+				Ingress: ingress,
 			},
 		},
 	})
@@ -101,84 +121,9 @@ func TestNetworkPolicyTransformer_AllNamespaces(t *testing.T) {
 	transformedRes := rm.Resources()[0]
 	yamlBytes, err := transformedRes.AsYAML()
 	require.NoError(t, err)
-
 	yamlStr := string(yamlBytes)
 
-	// Should have empty namespace selector (all namespaces)
 	assert.Contains(t, yamlStr, "namespaceSelector: {}")
-
-	// Should NOT have the operator namespace selector (since all are allowed)
-	assert.NotContains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
-}
-
-func TestNetworkPolicyTransformer_ExplicitNamespaces(t *testing.T) {
-	rf := resource.NewFactory(nil)
-	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
-	require.NoError(t, err)
-
-	rm := resmap.New()
-	require.NoError(t, rm.Append(res))
-
-	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
-		InstanceName:      "test-instance",
-		ServicePort:       8321,
-		OperatorNamespace: "operator-ns",
-		NetworkSpec: &llamav1alpha1.NetworkSpec{
-			AllowedFrom: &llamav1alpha1.AllowedFromSpec{
-				Namespaces: []string{"ns-a", "ns-b"},
-			},
-		},
-	})
-
-	err = transformer.Transform(rm)
-	require.NoError(t, err)
-
-	transformedRes := rm.Resources()[0]
-	yamlBytes, err := transformedRes.AsYAML()
-	require.NoError(t, err)
-
-	yamlStr := string(yamlBytes)
-
-	// Should have explicit namespace selectors
-	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: ns-a")
-	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: ns-b")
-
-	// Should also have operator namespace
-	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
-}
-
-func TestNetworkPolicyTransformer_LabelSelectors(t *testing.T) {
-	rf := resource.NewFactory(nil)
-	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
-	require.NoError(t, err)
-
-	rm := resmap.New()
-	require.NoError(t, rm.Append(res))
-
-	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
-		InstanceName:      "test-instance",
-		ServicePort:       8321,
-		OperatorNamespace: "operator-ns",
-		NetworkSpec: &llamav1alpha1.NetworkSpec{
-			AllowedFrom: &llamav1alpha1.AllowedFromSpec{
-				Labels: []string{"myproject/lls-allowed", "team/authorized"},
-			},
-		},
-	})
-
-	err = transformer.Transform(rm)
-	require.NoError(t, err)
-
-	transformedRes := rm.Resources()[0]
-	yamlBytes, err := transformedRes.AsYAML()
-	require.NoError(t, err)
-
-	yamlStr := string(yamlBytes)
-
-	// Should have label selectors with Exists operator
-	assert.Contains(t, yamlStr, "key: myproject/lls-allowed")
-	assert.Contains(t, yamlStr, "key: team/authorized")
-	assert.Contains(t, yamlStr, "operator: Exists")
 }
 
 func TestNetworkPolicyTransformer_CustomPort(t *testing.T) {
@@ -221,9 +166,7 @@ func TestNetworkPolicyTransformer_RouterPeersWhenNetworkSpecProvided(t *testing.
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
-		NetworkSpec: &llamav1alpha1.NetworkSpec{
-			ExposeRoute: true,
-		},
+		NetworkSpec:       &ogxiov1beta1.NetworkSpec{},
 	})
 
 	err = transformer.Transform(rm)

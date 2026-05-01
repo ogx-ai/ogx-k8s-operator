@@ -3,7 +3,7 @@ package deploy
 import (
 	"testing"
 
-	llamav1alpha1 "github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,11 +16,14 @@ func TestApplyDeploymentPreservesSelector(t *testing.T) {
 	ctx := t.Context()
 	logger := logf.Log.WithName("test-apply-deployment")
 
-	instance := &llamav1alpha1.LlamaStackDistribution{
+	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-instance",
 			Namespace: "default",
 			UID:       "test-uid",
+		},
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "test"},
 		},
 	}
 
@@ -109,16 +112,18 @@ func TestApplyDeploymentDoesNotOverrideHPAScale(t *testing.T) {
 	logger := logf.Log.WithName("test-apply-deployment-hpa")
 
 	minReplicas := int32(1)
-	instance := &llamav1alpha1.LlamaStackDistribution{
+	replicas := int32(1)
+	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-instance-hpa",
 			Namespace: "default",
 			UID:       "test-uid-hpa",
 		},
-		Spec: llamav1alpha1.LlamaStackDistributionSpec{
-			Replicas: 1,
-			Server: llamav1alpha1.ServerSpec{
-				Autoscaling: &llamav1alpha1.AutoscalingSpec{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "test"},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Replicas: &replicas,
+				Autoscaling: &ogxiov1beta1.AutoscalingSpec{
 					MinReplicas: &minReplicas,
 					MaxReplicas: 5,
 				},
