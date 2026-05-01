@@ -213,7 +213,7 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 		existing,
 		client.RawPatch(k8stypes.ApplyPatchType, data),
 		client.ForceOwnership,
-		client.FieldOwner(ownerInstance.GetName()),
+		client.FieldOwner("ogx-operator"),
 	)
 }
 
@@ -261,7 +261,7 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) 
 func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
 	operatorNS, err := GetOperatorNamespace()
 	if err != nil {
-		operatorNS = "llama-stack-k8s-operator-system"
+		operatorNS = "ogx-k8s-operator-system"
 	}
 
 	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
