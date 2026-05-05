@@ -874,7 +874,7 @@ func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// Create operator namespace
-	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	operatorNamespace := createTestNamespace(t, "ogx-k8s-operator-system")
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
 
 	// Create test ConfigMap with image overrides
@@ -917,7 +917,7 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 
 	// Create test namespace
 	namespace := createTestNamespace(t, "test-configmap-update")
-	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	operatorNamespace := createTestNamespace(t, "ogx-k8s-operator-system")
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
 
 	// Create initial ConfigMap
@@ -1000,7 +1000,7 @@ func TestReconcileRequeuesAfterSuccess(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	namespace := createTestNamespace(t, "test-requeue")
-	operatorNamespace := createTestNamespace(t, "llama-stack-k8s-operator-system")
+	operatorNamespace := createTestNamespace(t, "ogx-k8s-operator-system")
 	t.Setenv("OPERATOR_NAMESPACE", operatorNamespace.Name)
 
 	configMap := &corev1.ConfigMap{

@@ -266,7 +266,7 @@ func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1
 
 	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
 		InstanceName:      ownerInstance.GetName(),
-		ServicePort:       getKustomizeServicePortInt32(ownerInstance),
+		ServicePort:       GetServicePort(ownerInstance),
 		OperatorNamespace: operatorNS,
 		NetworkSpec:       ownerInstance.Spec.Network,
 	})
@@ -315,7 +315,7 @@ func getFieldMappings(ownerInstance *ogxiov1beta1.OGXServer) []plugins.FieldMapp
 	storageSize := getStorageSize(ownerInstance)
 	instanceLabelPath := "/app.kubernetes.io~1instance"
 
-	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, getOGXEffectiveReplicas(ownerInstance))
+	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, GetEffectiveReplicas(ownerInstance))
 
 	// When persistent storage is configured, use Recreate strategy to avoid
 	// RWO PVC multi-attach deadlock during rolling updates
@@ -420,14 +420,6 @@ func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName stri
 	}
 }
 
-// getOGXEffectiveReplicas returns the desired replica count, defaulting to 1.
-func getOGXEffectiveReplicas(instance *ogxiov1beta1.OGXServer) int32 {
-	if instance.Spec.Workload != nil && instance.Spec.Workload.Replicas != nil {
-		return *instance.Spec.Workload.Replicas
-	}
-	return 1
-}
-
 // getStorageSize extracts the storage size from the CR spec.
 func getStorageSize(instance *ogxiov1beta1.OGXServer) string {
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Storage != nil && instance.Spec.Workload.Storage.Size != nil {
@@ -444,11 +436,6 @@ func getServicePort(instance *ogxiov1beta1.OGXServer) any {
 	}
 	// Returning nil signals the field transformer to use the default value.
 	return nil
-}
-
-// getKustomizeServicePortInt32 returns the effective service port for kustomize transforms.
-func getKustomizeServicePortInt32(instance *ogxiov1beta1.OGXServer) int32 {
-	return GetServicePort(instance)
 }
 
 func isAutoscalingEnabled(instance *ogxiov1beta1.OGXServer) bool {
@@ -754,7 +741,7 @@ func hasLegacyCABundleVolumes(ctx context.Context, deployment *unstructured.Unst
 
 // hasStaleUserConfigVolume returns true when the existing Deployment has a "user-config"
 // volume that is absent from the desired Deployment spec. This happens when
-// spec.server.userConfig is removed from the LLSD resource: the volume persists because
+// spec.overrideConfig is removed from the OGXServer resource: the volume persists because
 // it was applied via cli.Create (no SSA field manager tracking), so a subsequent SSA patch
 // cannot remove it. Using cli.Update instead performs a full spec replacement.
 func hasStaleUserConfigVolume(desired, existing *appsv1.Deployment) bool {

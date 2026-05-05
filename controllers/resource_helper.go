@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -248,14 +249,6 @@ func getEffectiveWorkers(instance *ogxiov1beta1.OGXServer) (int32, bool) {
 		return *instance.Spec.Workload.Workers, true
 	}
 	return 1, false
-}
-
-// getEffectiveReplicas returns the desired replica count, defaulting to 1.
-func getEffectiveReplicas(instance *ogxiov1beta1.OGXServer) int32 {
-	if instance.Spec.Workload != nil && instance.Spec.Workload.Replicas != nil {
-		return *instance.Spec.Workload.Replicas
-	}
-	return 1
 }
 
 // configureContainerEnvironment sets up environment variables for the container.
@@ -534,11 +527,11 @@ func configurePodOverrides(instance *ogxiov1beta1.OGXServer, podSpec *corev1.Pod
 func configurePodScheduling(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	if instance.Spec.Workload != nil && len(instance.Spec.Workload.TopologySpreadConstraints) > 0 {
 		podSpec.TopologySpreadConstraints = deepCopyTopologySpreadConstraints(instance.Spec.Workload.TopologySpreadConstraints)
-	} else if getEffectiveReplicas(instance) > 1 {
+	} else if deploy.GetEffectiveReplicas(instance) > 1 {
 		podSpec.TopologySpreadConstraints = defaultTopologySpreadConstraints(instance)
 	}
 
-	if getEffectiveReplicas(instance) > 1 {
+	if deploy.GetEffectiveReplicas(instance) > 1 {
 		ensureDefaultPodAntiAffinity(instance, podSpec)
 	}
 }
@@ -667,7 +660,7 @@ func buildHPASpec(instance *ogxiov1beta1.OGXServer) *autoscalingv2.HorizontalPod
 		return nil
 	}
 	auto := instance.Spec.Workload.Autoscaling
-	minReplicas := resolveMinReplicas(auto.MinReplicas, getEffectiveReplicas(instance))
+	minReplicas := resolveMinReplicas(auto.MinReplicas, deploy.GetEffectiveReplicas(instance))
 	spec := &autoscalingv2.HorizontalPodAutoscalerSpec{
 		ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
 			APIVersion: "apps/v1",
@@ -741,7 +734,7 @@ func needsPodDisruptionBudget(instance *ogxiov1beta1.OGXServer) bool {
 	if instance.Spec.Workload != nil && instance.Spec.Workload.PodDisruptionBudget != nil {
 		return true
 	}
-	return getEffectiveReplicas(instance) > 1
+	return deploy.GetEffectiveReplicas(instance) > 1
 }
 
 func copyIntOrString(value *intstr.IntOrString) *intstr.IntOrString {

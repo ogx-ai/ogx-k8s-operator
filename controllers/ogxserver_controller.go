@@ -867,13 +867,13 @@ func (r *OGXServerReconciler) updateDeploymentStatus(ctx context.Context, instan
 	case deployment.Status.ReadyReplicas == 0:
 		instance.Status.Phase = ogxiov1beta1.OGXServerPhaseInitializing
 		SetDeploymentReadyCondition(&instance.Status, false, MessageDeploymentPending)
-	case deployment.Status.ReadyReplicas < getEffectiveReplicas(instance):
+	case deployment.Status.ReadyReplicas < deploy.GetEffectiveReplicas(instance):
 		instance.Status.Phase = ogxiov1beta1.OGXServerPhaseInitializing
-		deploymentMessage := fmt.Sprintf("Deployment is scaling: %d/%d replicas ready", deployment.Status.ReadyReplicas, getEffectiveReplicas(instance))
+		deploymentMessage := fmt.Sprintf("Deployment is scaling: %d/%d replicas ready", deployment.Status.ReadyReplicas, deploy.GetEffectiveReplicas(instance))
 		SetDeploymentReadyCondition(&instance.Status, false, deploymentMessage)
-	case deployment.Status.ReadyReplicas > getEffectiveReplicas(instance):
+	case deployment.Status.ReadyReplicas > deploy.GetEffectiveReplicas(instance):
 		instance.Status.Phase = ogxiov1beta1.OGXServerPhaseInitializing
-		deploymentMessage := fmt.Sprintf("Deployment is scaling down: %d/%d replicas ready", deployment.Status.ReadyReplicas, getEffectiveReplicas(instance))
+		deploymentMessage := fmt.Sprintf("Deployment is scaling down: %d/%d replicas ready", deployment.Status.ReadyReplicas, deploy.GetEffectiveReplicas(instance))
 		SetDeploymentReadyCondition(&instance.Status, false, deploymentMessage)
 	default:
 		instance.Status.Phase = ogxiov1beta1.OGXServerPhaseReady

@@ -26,3 +26,11 @@ func GetServicePort(instance *ogxiov1beta1.OGXServer) int32 {
 func GetServiceName(instance *ogxiov1beta1.OGXServer) string {
 	return fmt.Sprintf("%s-service", instance.Name)
 }
+
+// GetEffectiveReplicas returns the desired replica count, defaulting to 1.
+func GetEffectiveReplicas(instance *ogxiov1beta1.OGXServer) int32 {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Replicas != nil {
+		return *instance.Spec.Workload.Replicas
+	}
+	return 1
+}
