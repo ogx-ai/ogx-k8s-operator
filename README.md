@@ -1,11 +1,11 @@
-# llama-stack-operator
-This repo hosts a kubernetes operator that is responsible for creating and managing [llama-stack](https://github.com/meta-llama/llama-stack) server.
+# ogx-k8s-operator
+This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI Stack) servers.
 
 
 ## Features
 
-- Automated deployment of Llama Stack servers
-- Support for multiple [distributions](https://github.com/meta-llama/llama-stack?tab=readme-ov-file#distributions) (includes Ollama, vLLM, and others)
+- Automated deployment of OGX servers
+- Support for multiple distributions (includes Ollama, vLLM, and others)
 - Customizable server configurations
 - Volume management for model storage
 - Kubernetes-native resource management
@@ -14,7 +14,7 @@ This repo hosts a kubernetes operator that is responsible for creating and manag
 
 - [Quick Start](#quick-start)
     - [Installation](#installation)
-    - [Deploying Llama Stack Server](#deploying-the-llama-stack-server)
+    - [Deploying the OGX Server](#deploying-the-ogx-server)
 - [Enabling Network Policies](#enabling-network-policies)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
@@ -32,16 +32,16 @@ You can install the operator directly from a released version or the latest main
 To install the latest version from the main branch:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/main/release/operator.yaml
+kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/main/release/operator.yaml
 ```
 
 To install a specific released version (e.g., v1.0.0), replace `main` with the desired tag:
 
 ```bash
-kubectl apply -f https://raw.githubusercontent.com/llamastack/llama-stack-k8s-operator/v1.0.0/release/operator.yaml
+kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/v1.0.0/release/operator.yaml
 ```
 
-### Deploying the Llama Stack Server
+### Deploying the OGX Server
 
 1. Deploy the inference provider server (ollama, vllm)
 
@@ -71,111 +71,90 @@ Deploy vLLM with GPU support:
 ./hack/deploy-quickstart.sh --provider vllm --runtime-env "VLLM_TARGET_DEVICE=gpu,CUDA_VISIBLE_DEVICES=0"
 ```
 
-2. Create LlamaStackDistribution CR to get the server running. Example:
+2. Create an OGXServer CR to get the server running. Example:
 ```
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: llamastackdistribution-sample
+  name: ogxserver-sample
 spec:
-  replicas: 1
-  server:
-    distribution:
-      name: starter
-    containerSpec:
+  distribution:
+    name: starter
+  workload:
+    replicas: 1
+    storage:
+      size: "20Gi"
+      mountPath: "/.ogx"
+    overrides:
       env:
       - name: OLLAMA_INFERENCE_MODEL
         value: "llama3.2:1b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
-    storage:
-      size: "20Gi"
-      mountPath: "/home/lls/.lls"
 ```
 3. Verify the server pod is running in the user defined namespace.
 
 ### Local Vector Storage (inline::milvus)
 
-To enable the `inline::milvus` local vector storage provider, set `ENABLE_INLINE_MILVUS` in `spec.server.containerSpec.env`. This is only supported in single-worker, single-replica deployments. Milvus-Lite uses SQLite internally and does not support concurrent access from multiple processes.
+To enable the `inline::milvus` local vector storage provider, set `ENABLE_INLINE_MILVUS` in `spec.workload.overrides.env`. This is only supported in single-worker, single-replica deployments. Milvus-Lite uses SQLite internally and does not support concurrent access from multiple processes.
 
 ### Using a ConfigMap for config.yaml configuration
 
-A ConfigMap can be used to store config.yaml configuration for each LlamaStackDistribution.
+A ConfigMap can be used to store config.yaml configuration for each OGXServer.
 Updates to the ConfigMap will restart the Pod to load the new data.
 
-Example to create a config.yaml ConfigMap, and a LlamaStackDistribution that references it:
+Example to create a config.yaml ConfigMap, and an OGXServer that references it:
 ```
 kubectl apply -f config/samples/example-with-configmap.yaml
 ```
 
 ## Enabling Network Policies
 
-The operator can create an ingress-only `NetworkPolicy` for each `LlamaStackDistribution`. By default, traffic is limited to:
-- All pods within the same namespace
-- The operator namespace (`llama-stack-k8s-operator-system`)
-
-### Enable the Feature Flag
-
-Network policies are disabled by default. Enable via ConfigMap:
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: llama-stack-operator-config
-  namespace: llama-stack-k8s-operator-system
-data:
-  featureFlags: |
-    enableNetworkPolicy:
-      enabled: true
-EOF
-```
-
-### Configure Per-Instance Access
-
-Use `spec.network` to customize access controls:
+Network policies are enabled by default per-CR. Configure via `spec.network.policy`:
 
 ```yaml
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: my-llsd
+  name: my-ogxs
 spec:
-  server:
-    distribution:
-      name: starter
+  distribution:
+    name: starter
   network:
-    exposeRoute: false          # Set true to create an Ingress for external access
-    allowedFrom:
-      namespaces:               # Explicit namespace names
-        - my-app-namespace
-        - monitoring
-      labels:                   # Namespaces matching these label keys
-        - team=frontend
+    externalAccess:
+      enabled: true
+      hostname: my-ogx.example.com
+    policy:
+      enabled: true
+      ingress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: my-app-namespace
+          ports:
+            - protocol: TCP
+              port: 8321
 ```
 
 | Field | Description |
 |-------|-------------|
-| `network.exposeRoute` | When `true`, creates an Ingress for external access (default: `false`) |
-| `network.allowedFrom.namespaces` | List of namespace names allowed to access the service. Use `"*"` to allow all namespaces |
-| `network.allowedFrom.labels` | List of namespace label keys. Namespaces with these labels are allowed |
-
-Set `enabled: false` in the ConfigMap to disable; the operator will delete the managed policies.
+| `network.externalAccess.enabled` | When `true`, enables external access configuration for the server |
+| `network.externalAccess.hostname` | Hostname used for external access (for example, Ingress host) |
+| `network.policy.enabled` | When `true`, the operator creates a `NetworkPolicy` for the OGXServer workload |
+| `network.policy.ingress` | Ingress rules for the policy (for example, allowed sources and ports) |
 
 ## Image Mapping Overrides
 
-The operator supports ConfigMap-driven image updates for LLS Distribution images. This allows independent patching for security fixes or bug fixes without requiring a new operator version.
+The operator supports ConfigMap-driven image updates for OGX distribution images. This allows independent patching for security fixes or bug fixes without requiring a new operator version.
 
 ### Configuration
 
 Create or update the operator ConfigMap with an `image-overrides` key:
 
 ```yaml
-
-  image-overrides: |
-    starter-gpu: quay.io/custom/llama-stack:starter-gpu
-    starter: quay.io/custom/llama-stack:starter
+image-overrides: |
+  starter-gpu: quay.io/custom/ogx:starter-gpu
+  starter: quay.io/custom/ogx:starter
 ```
 
 ### Configuration Format
@@ -184,13 +163,13 @@ Use the distribution name directly as the key (e.g., `starter-gpu`, `starter`). 
 
 ### Example Usage
 
-To update the LLS Distribution image for all `starter` distributions:
+To update the OGX distribution image for all `starter` distributions:
 
 ```bash
-kubectl patch configmap llama-stack-operator-config -n llama-stack-k8s-operator-system --type merge -p '{"data":{"image-overrides":"starter: quay.io/opendatahub/llama-stack:latest"}}'
+kubectl patch configmap ogx-operator-config -n ogx-k8s-operator-system --type merge -p '{"data":{"image-overrides":"starter: quay.io/ogx-ai/ogx-server:latest"}}'
 ```
 
-This will cause all LlamaStackDistribution resources using the `starter` distribution to restart with the new image.
+This will cause all OGXServer resources using the `starter` distribution to restart with the new image.
 
 ## Developer Guide
 
@@ -216,10 +195,10 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
 - Custom operator image can be built using your local repository
 
   ```commandline
-  make image IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  make image IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
   ```
 
-  The default image used is `quay.io/llamastack/llama-stack-k8s-operator:latest` when not supply argument for `make image`
+  The default image used is `quay.io/ogx-ai/ogx-k8s-operator:latest` when not supply argument for `make image`
   To create a local file `local.mk` with env variables can overwrite the default values set in the `Makefile`.
 
 - Building multi-architecture images (ARM64, AMD64, etc.)
@@ -227,17 +206,17 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
   The operator supports building for multiple architectures including ARM64. To build and push multi-arch images:
 
   ```commandline
-  make image-buildx IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  make image-buildx IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
   ```
 
   By default, this builds for `linux/amd64,linux/arm64`. You can customize the platforms by setting the `PLATFORMS` variable:
 
   ```commandline
   # Build for specific platforms
-  make image-buildx IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag> PLATFORMS=linux/amd64,linux/arm64
+  make image-buildx IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag> PLATFORMS=linux/amd64,linux/arm64
 
   # Add more architectures (e.g., for future support)
-  make image-buildx IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag> PLATFORMS=linux/amd64,linux/arm64,linux/s390x,linux/ppc64le
+  make image-buildx IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag> PLATFORMS=linux/amd64,linux/arm64,linux/s390x,linux/ppc64le
   ```
 
   **Note**:
@@ -260,11 +239,11 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
 
   ```commandline
   # Build and push a single-arch image (used by each matrix job on its native runner)
-  make image-build-push-single PLATFORM=linux/amd64 IMG=quay.io/<username>/llama-stack-k8s-operator:<tag>-amd64
+  make image-build-push-single PLATFORM=linux/amd64 IMG=quay.io/<username>/ogx-k8s-operator:<tag>-amd64
 
   # Create a multi-arch manifest from per-arch images (used by the final manifest job)
-  make image-create-manifest IMG=quay.io/<username>/llama-stack-k8s-operator:<tag> \
-    ARCH_IMGS="quay.io/<username>/llama-stack-k8s-operator:<tag>-amd64 quay.io/<username>/llama-stack-k8s-operator:<tag>-arm64"
+  make image-create-manifest IMG=quay.io/<username>/ogx-k8s-operator:<tag> \
+    ARCH_IMGS="quay.io/<username>/ogx-k8s-operator:<tag>-amd64 quay.io/<username>/ogx-k8s-operator:<tag>-arm64"
   ```
 
 - Building ARM64-only images
@@ -272,8 +251,8 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
   To build a single ARM64 image (useful for testing or ARM-native systems):
 
   ```commandline
-  make image-build-arm IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
-  make image-push IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  make image-build-arm IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
+  make image-push IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
   ```
 
   This works with both Docker and Podman.
@@ -287,18 +266,33 @@ This will cause all LlamaStackDistribution resources using the `starter` distrib
 
 ### Deployment
 
-**Deploying operator locally**
+**Deploying on vanilla Kubernetes (cert-manager)**
 
 - Deploy the created image in your cluster using following command:
 
   ```commandline
-  make deploy IMG=quay.io/<username>/llama-stack-k8s-operator:<custom-tag>
+  make deploy IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
   ```
 
 - To remove resources created during installation use:
 
   ```commandline
   make undeploy
+  ```
+
+**Deploying on OpenShift**
+
+OpenShift clusters use the built-in service-serving-cert-signer for webhook TLS
+(no cert-manager required):
+
+  ```commandline
+  make deploy-openshift IMG=quay.io/<username>/ogx-k8s-operator:<custom-tag>
+  ```
+
+- To remove resources:
+
+  ```commandline
+  make undeploy-openshift
   ```
 
 ## Running E2E Tests

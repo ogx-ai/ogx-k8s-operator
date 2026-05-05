@@ -798,7 +798,7 @@ func TestParseImageMappingOverrides_SingleOverride(t *testing.T) {
 
 	// Test data with single override
 	configMapData := map[string]string{
-		"image-overrides": "starter: quay.io/custom/llama-stack:starter",
+		"image-overrides": "starter: quay.io/custom/ogx-server:starter",
 	}
 
 	// Call the function
@@ -806,7 +806,7 @@ func TestParseImageMappingOverrides_SingleOverride(t *testing.T) {
 
 	// Assertions
 	require.Len(t, result, 1, "Should have exactly one override")
-	require.Equal(t, "quay.io/custom/llama-stack:starter", result["starter"], "Override should match expected value")
+	require.Equal(t, "quay.io/custom/ogx-server:starter", result["starter"], "Override should match expected value")
 }
 
 func TestParseImageMappingOverrides_InvalidYAML(t *testing.T) {
@@ -866,7 +866,7 @@ func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 			Namespace: operatorNamespace.Name,
 		},
 		Data: map[string]string{
-			"image-overrides": "starter: quay.io/custom/llama-stack:starter",
+			"image-overrides": "starter: quay.io/custom/ogx-server:starter",
 		},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), configMap))
@@ -890,7 +890,7 @@ func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 	require.NoError(t, err, "Should create reconciler successfully")
 	require.NotNil(t, reconciler, "Reconciler should not be nil")
 	require.Len(t, reconciler.ImageMappingOverrides, 1, "Should have one image override")
-	require.Equal(t, "quay.io/custom/llama-stack:starter",
+	require.Equal(t, "quay.io/custom/ogx-server:starter",
 		reconciler.ImageMappingOverrides["starter"], "Override should match expected value")
 }
 
@@ -959,7 +959,7 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	if configMap.Data == nil {
 		configMap.Data = make(map[string]string)
 	}
-	configMap.Data["image-overrides"] = "starter: quay.io/custom/llama-stack:starter"
+	configMap.Data["image-overrides"] = "starter: quay.io/custom/ogx-server:starter"
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
 	// Reconcile with the same reconciler instance. refreshOperatorConfig (called
@@ -974,7 +974,7 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	waitForResourceWithKeyAndCondition(
 		t, k8sClient, types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 		deployment, func() bool {
-			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/llama-stack:starter"
+			return deployment.Spec.Template.Spec.Containers[0].Image == "quay.io/custom/ogx-server:starter"
 		}, "Deployment should be updated with new image")
 }
 

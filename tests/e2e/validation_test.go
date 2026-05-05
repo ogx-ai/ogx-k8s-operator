@@ -15,12 +15,12 @@ func TestValidationSuite(t *testing.T) {
 	}
 
 	t.Run("should validate CRDs", func(t *testing.T) {
-		err := validateCRD(TestEnv.Client, TestEnv.Ctx, "llamastackdistributions.llamastack.io")
-		require.NoErrorf(t, err, "error in validating CRD: llamastackdistributions.llamastack.io")
+		err := validateCRD(TestEnv.Client, TestEnv.Ctx, "ogxservers.ogx.io")
+		require.NoErrorf(t, err, "error in validating CRD: ogxservers.ogx.io")
 	})
 
 	t.Run("should validate operator deployment", func(t *testing.T) {
-		deployment, err := GetDeployment(TestEnv.Client, TestEnv.Ctx, "llama-stack-k8s-operator-controller-manager", TestOpts.OperatorNS)
+		deployment, err := GetDeployment(TestEnv.Client, TestEnv.Ctx, "ogx-k8s-operator-controller-manager", TestOpts.OperatorNS)
 		require.NoError(t, err, "Operator deployment not found")
 		require.Equal(t, int32(1), deployment.Status.ReadyReplicas, "Operator deployment not ready")
 	})
@@ -32,7 +32,7 @@ func TestValidationSuite(t *testing.T) {
 
 		operatorPodFound := false
 		for _, pod := range podList.Items {
-			if pod.Labels["app.kubernetes.io/name"] == "llama-stack-k8s-operator" {
+			if pod.Labels["app.kubernetes.io/name"] == "ogx-k8s-operator" {
 				operatorPodFound = true
 				require.Equal(t, corev1.PodRunning, pod.Status.Phase)
 				break

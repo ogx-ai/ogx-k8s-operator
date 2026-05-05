@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,7 +28,7 @@ import (
 
 const (
 	tlsTestTimeout = 5 * time.Minute
-	llsTestNS      = "llama-stack-test"
+	ogxTestNS      = "ogx-test"
 )
 
 func TestTLSSuite(t *testing.T) {
@@ -36,7 +36,6 @@ func TestTLSSuite(t *testing.T) {
 		t.Skip("Skipping TLS test suite")
 	}
 
-	// Generate certificates before running any tests
 	t.Run("should generate certificates", func(t *testing.T) {
 		generateCertificates(t)
 	})
@@ -45,8 +44,8 @@ func TestTLSSuite(t *testing.T) {
 		testCreateNamespace(t)
 	})
 
-	t.Run("should create LlamaStackDistribution with CA bundle", func(t *testing.T) {
-		testLlamaStackWithCABundle(t)
+	t.Run("should create OGXServer with CA bundle", func(t *testing.T) {
+		testOGXServerWithCABundle(t)
 	})
 
 	t.Run("should cleanup TLS resources", func(t *testing.T) {
@@ -57,10 +56,9 @@ func TestTLSSuite(t *testing.T) {
 func testCreateNamespace(t *testing.T) {
 	t.Helper()
 
-	// Create test namespace
 	testNs := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: llsTestNS,
+			Name: ogxTestNS,
 		},
 	}
 	err := TestEnv.Client.Create(TestEnv.Ctx, testNs)
@@ -68,92 +66,74 @@ func testCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Create CA bundle configmap in test namespace
-	err = createCABundleConfigMap(t, llsTestNS)
+	err = createCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
-	// Verify the CA bundle ConfigMap was created correctly
-	err = verifyCABundleConfigMap(t, llsTestNS)
+	err = verifyCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 }
 
-func testLlamaStackWithCABundle(t *testing.T) {
+func testOGXServerWithCABundle(t *testing.T) {
 	t.Helper()
 
-	// Deploy LlamaStackDistribution with CA bundle
-	err := deployLlamaStackWithCABundle(t)
+	err := deployOGXServerWithCABundle(t)
 	require.NoError(t, err)
 
-	// The YAML file creates a placeholder ConfigMap, so we need to update it with the actual CA bundle
-	err = updateCABundleConfigMap(t, llsTestNS)
+	err = updateCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
-	// Verify the CA bundle ConfigMap has the correct content after update
-	err = verifyCABundleConfigMap(t, llsTestNS)
+	err = verifyCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
-	// Verify the LlamaStack distribution is configured with TLS
-	err = verifyLlamaStackTLSConfig(t, llsTestNS, "llamastack-with-config")
+	err = verifyOGXServerCABundleConfig(t, ogxTestNS, "ogxserver-with-config")
 	require.NoError(t, err)
 
-	// Wait for the operator to process the LlamaStackDistribution and create the deployment
-	err = waitForDeploymentCreation(t, llsTestNS, "llamastack-with-config", 3*time.Minute)
-	require.NoError(t, err, "LlamaStack deployment should be created by operator")
+	err = waitForDeploymentCreation(t, ogxTestNS, "ogxserver-with-config", 3*time.Minute)
+	require.NoError(t, err, "OGXServer deployment should be created by operator")
 
-	// Wait for pods to be running and ready
-	err = WaitForPodsReady(t, TestEnv, llsTestNS, "llamastack-with-config", 5*time.Minute)
-	require.NoError(t, err, "LlamaStack pods should be running and ready")
+	err = WaitForPodsReady(t, TestEnv, ogxTestNS, "ogxserver-with-config", 5*time.Minute)
+	require.NoError(t, err, "OGXServer pods should be running and ready")
 
-	// Verify certificate volumes are mounted correctly
-	err = verifyCertificateMounts(t, llsTestNS, "llamastack-with-config")
+	err = verifyCertificateMounts(t, ogxTestNS, "ogxserver-with-config")
 	require.NoError(t, err, "Certificate volumes should be mounted correctly")
 
-	// Verify environment variables are set correctly
-	err = verifyEnvironmentVariables(t, llsTestNS, "llamastack-with-config")
+	err = verifyEnvironmentVariables(t, ogxTestNS, "ogxserver-with-config")
 	require.NoError(t, err, "Environment variables should be set correctly")
 }
 
 func testTLSCleanup(t *testing.T) {
 	t.Helper()
 
-	// Delete LlamaStackDistribution
-	distribution := &v1alpha1.LlamaStackDistribution{
+	server := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "llamastack-with-config",
-			Namespace: llsTestNS,
+			Name:      "ogxserver-with-config",
+			Namespace: ogxTestNS,
 		},
 	}
-	err := TestEnv.Client.Delete(TestEnv.Ctx, distribution)
+	err := TestEnv.Client.Delete(TestEnv.Ctx, server)
 	if err != nil && !k8serrors.IsNotFound(err) {
 		require.NoError(t, err)
 	}
 
-	// Wait for LlamaStack resources to be cleaned up
 	err = EnsureResourceDeleted(t, TestEnv, schema.GroupVersionKind{
 		Group:   "apps",
 		Version: "v1",
 		Kind:    "Deployment",
-	}, "llamastack-with-config", llsTestNS, ResourceReadyTimeout)
-	require.NoError(t, err, "LlamaStack deployment should be deleted")
+	}, "ogxserver-with-config", ogxTestNS, ResourceReadyTimeout)
+	require.NoError(t, err, "OGXServer deployment should be deleted")
 }
-
-// Helper functions
 
 func generateCertificates(t *testing.T) {
 	t.Helper()
 
-	// Get the project root path
 	projectRoot, err := filepath.Abs("../..")
 	require.NoError(t, err, "Failed to get project root")
 
-	// Run the certificate generation script
 	scriptPath := filepath.Join(projectRoot, "config", "samples", "generate_certificates.sh")
 	t.Logf("Running certificate generation script: %s", scriptPath)
 
-	// Change to the project root directory to run the script
 	t.Chdir(projectRoot)
 
-	// Execute the script
 	cmd := exec.CommandContext(t.Context(), "bash", scriptPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -167,13 +147,11 @@ func generateCertificates(t *testing.T) {
 func createCABundleConfigMap(t *testing.T, targetNS string) error {
 	t.Helper()
 
-	// Get the project root path
 	projectRoot, err := filepath.Abs("../..")
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
 
-	// Read CA bundle
 	caBundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
 	if err != nil {
 		return fmt.Errorf("failed to read CA bundle: %w", err)
@@ -189,11 +167,9 @@ func createCABundleConfigMap(t *testing.T, targetNS string) error {
 		},
 	}
 
-	// Try to create, if it exists, update it
 	err = TestEnv.Client.Create(TestEnv.Ctx, caBundleConfigMap)
 	if err != nil {
 		if k8serrors.IsAlreadyExists(err) {
-			// ConfigMap exists, update it
 			existingConfigMap := &corev1.ConfigMap{}
 			err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 				Namespace: targetNS,
@@ -221,7 +197,6 @@ func createCABundleConfigMap(t *testing.T, targetNS string) error {
 func verifyCABundleConfigMap(t *testing.T, targetNS string) error {
 	t.Helper()
 
-	// Get the ConfigMap
 	configMap := &corev1.ConfigMap{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: targetNS,
@@ -231,7 +206,6 @@ func verifyCABundleConfigMap(t *testing.T, targetNS string) error {
 		return fmt.Errorf("failed to get CA bundle ConfigMap: %w", err)
 	}
 
-	// Verify the CA bundle content exists
 	caBundle, exists := configMap.Data[controllers.DefaultCABundleKey]
 	if !exists {
 		return fmt.Errorf("failed to find %s CA bundle key in ConfigMap", controllers.DefaultCABundleKey)
@@ -241,12 +215,10 @@ func verifyCABundleConfigMap(t *testing.T, targetNS string) error {
 		return fmt.Errorf("failed to find any keys in CA bundle ConfigMap %s", controllers.DefaultCABundleKey)
 	}
 
-	// Check if CA bundle appears to be a placeholder
 	if len(caBundle) < 100 || !strings.Contains(caBundle, "BEGIN CERTIFICATE") {
 		t.Logf("WARNING: CA bundle appears to be a placeholder or invalid")
 		t.Logf("CA bundle content: %s", caBundle)
 
-		// Try to update the ConfigMap with the actual CA bundle from the file
 		err := updateCABundleConfigMap(t, targetNS)
 		if err != nil {
 			t.Logf("Failed to update CA bundle ConfigMap: %v", err)
@@ -256,26 +228,20 @@ func verifyCABundleConfigMap(t *testing.T, targetNS string) error {
 	return nil
 }
 
-func verifyLlamaStackTLSConfig(t *testing.T, namespace, name string) error {
+func verifyOGXServerCABundleConfig(t *testing.T, namespace, name string) error {
 	t.Helper()
 
-	// Get the LlamaStack distribution
-	distribution := &v1alpha1.LlamaStackDistribution{}
+	server := &ogxiov1beta1.OGXServer{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: namespace,
 		Name:      name,
-	}, distribution)
+	}, server)
 	if err != nil {
-		return fmt.Errorf("failed to get LlamaStack distribution: %w", err)
+		return fmt.Errorf("failed to get OGXServer: %w", err)
 	}
 
-	// Verify TLS configuration is present
-	if distribution.Spec.Server.TLSConfig == nil {
-		return errors.New("LlamaStack distribution does not have TLS config")
-	}
-
-	if distribution.Spec.Server.TLSConfig.CABundle == nil {
-		return errors.New("LlamaStack distribution TLS config does not have CA bundle")
+	if server.Spec.TLS == nil || server.Spec.TLS.Trust == nil || len(server.Spec.TLS.Trust.CACertificates) == 0 {
+		return errors.New("OGXServer does not have CA bundle config (spec.tls.trust.caCertificates)")
 	}
 
 	return nil
@@ -284,19 +250,16 @@ func verifyLlamaStackTLSConfig(t *testing.T, namespace, name string) error {
 func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 	t.Helper()
 
-	// Get the project root path
 	projectRoot, err := filepath.Abs("../..")
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
 
-	// Read the actual CA bundle from the file
 	actualCABundle, err := os.ReadFile(filepath.Join(projectRoot, "config", "samples", "vllm-ca-certs", controllers.DefaultCABundleKey))
 	if err != nil {
 		return fmt.Errorf("failed to read CA bundle file: %w", err)
 	}
 
-	// Get the existing ConfigMap
 	configMap := &corev1.ConfigMap{}
 	err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: targetNS,
@@ -306,7 +269,6 @@ func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 		return fmt.Errorf("failed to get ConfigMap: %w", err)
 	}
 
-	// Update the ConfigMap with the actual CA bundle
 	configMap.Data[controllers.DefaultCABundleKey] = string(actualCABundle)
 
 	err = TestEnv.Client.Update(TestEnv.Ctx, configMap)
@@ -317,36 +279,33 @@ func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 	return nil
 }
 
-func deployLlamaStackWithCABundle(t *testing.T) error {
+func deployOGXServerWithCABundle(t *testing.T) error {
 	t.Helper()
 
-	// Read LlamaStack TLS test configuration
 	projectRoot, err := filepath.Abs("../..")
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
 	}
 
-	llamaStackConfigPath := filepath.Join(projectRoot, "config", "samples", "example-with-ca-bundle.yaml")
-	llamaStackConfigData, err := os.ReadFile(llamaStackConfigPath)
+	configPath := filepath.Join(projectRoot, "config", "samples", "example-with-ca-bundle.yaml")
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
-		return fmt.Errorf("failed to read LlamaStack config: %w", err)
+		return fmt.Errorf("failed to read OGXServer config: %w", err)
 	}
 
-	// Apply LlamaStack configuration
-	objects, err := parseKubernetesYAML(llamaStackConfigData)
+	objects, err := parseKubernetesYAML(configData)
 	if err != nil {
-		return fmt.Errorf("failed to parse LlamaStack config: %w", err)
+		return fmt.Errorf("failed to parse OGXServer config: %w", err)
 	}
 
 	for _, obj := range objects {
-		// Set the namespace for namespaced resources
 		if obj.GetNamespace() == "" {
-			obj.SetNamespace(llsTestNS)
+			obj.SetNamespace(ogxTestNS)
 		}
 
 		err = TestEnv.Client.Create(TestEnv.Ctx, obj)
 		if err != nil && !k8serrors.IsAlreadyExists(err) {
-			return fmt.Errorf("failed to create LlamaStack resource: %w", err)
+			return fmt.Errorf("failed to create OGXServer resource: %w", err)
 		}
 	}
 
@@ -356,7 +315,6 @@ func deployLlamaStackWithCABundle(t *testing.T) error {
 func verifyCertificateMounts(t *testing.T, namespace, name string) error {
 	t.Helper()
 
-	// Get the deployment
 	deployment := &appsv1.Deployment{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: namespace,
@@ -366,12 +324,10 @@ func verifyCertificateMounts(t *testing.T, namespace, name string) error {
 		return fmt.Errorf("failed to get deployment: %w", err)
 	}
 
-	// Check if CA bundle volume is defined
 	if !hasCABundleVolume(deployment.Spec.Template.Spec.Volumes) {
 		return errors.New("CA bundle volume not found in deployment")
 	}
 
-	// Check if CA bundle is mounted in any container
 	if !hasCABundleMount(deployment.Spec.Template.Spec.Containers) {
 		return errors.New("CA bundle mount not found in any container")
 	}
@@ -381,8 +337,6 @@ func verifyCertificateMounts(t *testing.T, namespace, name string) error {
 
 func hasCABundleVolume(volumes []corev1.Volume) bool {
 	for _, volume := range volumes {
-		// Check for the managed CA bundle ConfigMap (named {instance-name}-ca-bundle)
-		// or the source CA bundle ConfigMap
 		if volume.ConfigMap != nil &&
 			(strings.HasSuffix(volume.ConfigMap.Name, "-ca-bundle") ||
 				volume.ConfigMap.Name == "custom-ca-bundle") {
@@ -415,7 +369,6 @@ func hasCABundleMountInContainer(mounts []corev1.VolumeMount) bool {
 func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 	t.Helper()
 
-	// Get the deployment
 	deployment := &appsv1.Deployment{}
 	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
 		Namespace: namespace,
@@ -425,7 +378,6 @@ func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 		return fmt.Errorf("failed to get deployment: %w", err)
 	}
 
-	// Check for TLS-related environment variables
 	tlsEnvVarsFound := 0
 	expectedEnvVars := map[string]string{
 		"SSL_CERT_FILE": controllers.ManagedCABundleFilePath,
@@ -452,10 +404,7 @@ func verifyEnvironmentVariables(t *testing.T, namespace, name string) error {
 }
 
 func parseKubernetesYAML(data []byte) ([]client.Object, error) {
-	// Split YAML documents
 	docs := yamlSplit(data)
-
-	// Pre-allocate slice with expected capacity
 	objects := make([]client.Object, 0, len(docs))
 
 	for _, doc := range docs {
@@ -506,20 +455,18 @@ func waitForDeploymentCreation(t *testing.T, namespace, name string, timeout tim
 	t.Helper()
 
 	return wait.PollUntilContextTimeout(TestEnv.Ctx, 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		// First check if the LlamaStackDistribution is being processed
-		distribution := &v1alpha1.LlamaStackDistribution{}
+		server := &ogxiov1beta1.OGXServer{}
 		err := TestEnv.Client.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
 			Name:      name,
-		}, distribution)
+		}, server)
 		if err != nil {
-			t.Logf("LlamaStackDistribution not found yet: %v", err)
+			t.Logf("OGXServer not found yet: %v", err)
 			return false, nil
 		}
 
-		t.Logf("LlamaStackDistribution status: Phase=%s", distribution.Status.Phase)
+		t.Logf("OGXServer status: Phase=%s", server.Status.Phase)
 
-		// Then check if the deployment has been created
 		deployment := &appsv1.Deployment{}
 		err = TestEnv.Client.Get(ctx, client.ObjectKey{
 			Namespace: namespace,

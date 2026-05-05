@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ogx-ai/ogx-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -49,13 +49,11 @@ type TestEnvironment struct {
 
 // SetupTestEnv sets up the test environment.
 func SetupTestEnv() (*TestEnvironment, error) {
-	// Get a config to talk to the apiserver
 	cfg, err := config.GetConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a new client
 	cl, err := client.New(cfg, client.Options{Scheme: Scheme})
 	if err != nil {
 		return nil, err
@@ -154,7 +152,6 @@ func WaitForPodsReady(t *testing.T, testenv *TestEnvironment, namespace, deploym
 	defer cancel()
 
 	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
-		// Get pods for the deployment
 		podList, err := GetPodsForDeployment(testenv, ctx, namespace, deploymentName)
 		if err != nil {
 			t.Logf("Error listing pods: %v", err)
@@ -166,7 +163,6 @@ func WaitForPodsReady(t *testing.T, testenv *TestEnvironment, namespace, deploym
 			return false, nil
 		}
 
-		// Check each pod's status
 		for _, pod := range podList.Items {
 			ready, err := checkPodStatus(t, &pod)
 			if err != nil {
@@ -187,19 +183,16 @@ func checkPodStatus(t *testing.T, pod *corev1.Pod) (bool, error) {
 	t.Helper()
 	t.Logf("Pod %s status: Phase=%s, Ready=%v", pod.Name, pod.Status.Phase, isPodReady(pod))
 
-	// Check if pod is running
 	if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded {
 		t.Logf("Pod %s not running yet (phase: %s)", pod.Name, pod.Status.Phase)
 		return false, nil
 	}
 
-	// Check if pod is ready
 	if !isPodReady(pod) {
 		t.Logf("Pod %s not ready yet", pod.Name)
 		return false, nil
 	}
 
-	// Check container statuses for errors
 	return checkContainerStatuses(t, pod)
 }
 
@@ -213,7 +206,6 @@ func checkContainerStatuses(t *testing.T, pod *corev1.Pod) (bool, error) {
 				containerStatus.State.Waiting.Reason,
 				containerStatus.State.Waiting.Message)
 
-			// Fail fast on image pull errors or crash loops
 			if containerStatus.State.Waiting.Reason == "ImagePullBackOff" ||
 				containerStatus.State.Waiting.Reason == "ErrImagePull" ||
 				containerStatus.State.Waiting.Reason == "CrashLoopBackOff" {
@@ -266,7 +258,7 @@ func registerSchemes() {
 	schemes := []func(*runtime.Scheme) error{
 		clientgoscheme.AddToScheme,
 		apiextv1.AddToScheme,
-		v1alpha1.AddToScheme,
+		ogxiov1beta1.AddToScheme,
 	}
 
 	for _, schemeFn := range schemes {
@@ -274,53 +266,48 @@ func registerSchemes() {
 	}
 }
 
-// GetSampleCRForDistribution returns a LlamaStackDistribution configured for the specified distribution type.
-func GetSampleCRForDistribution(t *testing.T, distType string) *v1alpha1.LlamaStackDistribution {
+// GetSampleCRForDistribution returns an OGXServer configured for the specified distribution type.
+func GetSampleCRForDistribution(t *testing.T, distType string) *ogxiov1beta1.OGXServer {
 	t.Helper()
-	// Get the absolute path of the project root
 	projectRoot, err := filepath.Abs("../..")
 	require.NoError(t, err)
 
-	// Construct the path to the sample file
-	samplePath := filepath.Join(projectRoot, "config", "samples", "_v1alpha1_llamastackdistribution.yaml")
+	samplePath := filepath.Join(projectRoot, "config", "samples", "_v1beta1_ogxserver.yaml")
 
-	// Read the sample file
 	yamlFile, err := os.ReadFile(samplePath)
 	require.NoError(t, err)
 
-	// Create and unmarshal the distribution
-	distribution := &v1alpha1.LlamaStackDistribution{}
-	err = yaml.Unmarshal(yamlFile, distribution)
+	server := &ogxiov1beta1.OGXServer{}
+	err = yaml.Unmarshal(yamlFile, server)
 	require.NoError(t, err)
 
-	// Modify the distribution based on the type
 	switch distType {
 	case starterDistType:
-		distribution.Spec.Server.Distribution.Name = starterDistType
-		distribution.ObjectMeta.Name = "llamastackdistribution-" + starterDistType + "-sample"
+		server.Spec.Distribution.Name = starterDistType
+		server.ObjectMeta.Name = "ogxserver-" + starterDistType + "-sample"
 	default:
 		t.Fatalf("Unknown distribution type: %s", distType)
 	}
 
-	return distribution
+	return server
 }
 
-// checkLlamaStackDistributionStatus helps identify if the custom resource reached the expected state during test execution.
-func checkLlamaStackDistributionStatus(t *testing.T, testenv *TestEnvironment, namespace, name string) {
+// checkOGXServerStatus helps identify if the custom resource reached the expected state during test execution.
+func checkOGXServerStatus(t *testing.T, testenv *TestEnvironment, namespace, name string) {
 	t.Helper()
 
-	llsDistro := &v1alpha1.LlamaStackDistribution{}
-	err := testenv.Client.Get(testenv.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, llsDistro)
+	ogxServer := &ogxiov1beta1.OGXServer{}
+	err := testenv.Client.Get(testenv.Ctx, client.ObjectKey{Namespace: namespace, Name: name}, ogxServer)
 	if err != nil {
-		t.Logf("⚠️  Error getting LlamaStackDistribution: %v", err)
+		t.Logf("Error getting OGXServer: %v", err)
 		return
 	}
 
-	t.Logf("LlamaStackDistribution status:")
-	t.Logf("  Phase: %s", llsDistro.Status.Phase)
-	t.Logf("  Generation: %d", llsDistro.Generation)
-	t.Logf("  ResourceVersion: %s", llsDistro.ResourceVersion)
-	t.Logf("  Conditions: %+v", llsDistro.Status.Conditions)
+	t.Logf("OGXServer status:")
+	t.Logf("  Phase: %s", ogxServer.Status.Phase)
+	t.Logf("  Generation: %d", ogxServer.Generation)
+	t.Logf("  ResourceVersion: %s", ogxServer.ResourceVersion)
+	t.Logf("  Conditions: %+v", ogxServer.Status.Conditions)
 }
 
 // checkNamespaceEvents reveals what Kubernetes operations occurred and why they may have failed.
@@ -330,21 +317,21 @@ func checkNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace stri
 	eventList := &corev1.EventList{}
 	err := testenv.Client.List(testenv.Ctx, eventList, client.InNamespace(namespace))
 	if err != nil {
-		t.Logf("⚠️  Error getting events: %v", err)
+		t.Logf("Error getting events: %v", err)
 		return
 	}
 
 	if len(eventList.Items) == 0 {
-		t.Log("📝 No events found in namespace")
+		t.Log("No events found in namespace")
 		return
 	}
 
 	maxEvents := 25
 	if len(eventList.Items) > maxEvents {
-		t.Logf("📝 Showing first %d events (of %d total):", maxEvents, len(eventList.Items))
+		t.Logf("Showing first %d events (of %d total):", maxEvents, len(eventList.Items))
 		eventList.Items = eventList.Items[:maxEvents]
 	} else {
-		t.Logf("📝 Found %d events in namespace %s:", len(eventList.Items), namespace)
+		t.Logf("Found %d events in namespace %s:", len(eventList.Items), namespace)
 	}
 
 	for _, event := range eventList.Items {
@@ -356,28 +343,17 @@ func checkNamespaceEvents(t *testing.T, testenv *TestEnvironment, namespace stri
 	}
 }
 
-// requireNoErrorWithDebugging provides comprehensive debugging context when tests fail to help identify root causes quickly.
+// requireNoErrorWithDebugging provides comprehensive debugging context when tests fail.
 func requireNoErrorWithDebugging(t *testing.T, testenv *TestEnvironment, err error, msg string, namespace, crName string) {
 	t.Helper()
 	if err != nil {
-		t.Logf("💥 ERROR OCCURRED: %s - %v", msg, err)
+		t.Logf("ERROR OCCURRED: %s - %v", msg, err)
 
-		// Check custom resource status first to see if the operator processed the request correctly
-		checkLlamaStackDistributionStatus(t, testenv, namespace, crName)
-
-		// Check events to understand what Kubernetes operations were attempted and why they failed
+		checkOGXServerStatus(t, testenv, namespace, crName)
 		checkNamespaceEvents(t, testenv, namespace)
-
-		// Check pod details to identify container startup issues or crash loops
 		logPodDetails(t, testenv, namespace)
-
-		// Check service endpoints to see if pods are being discovered by services
 		logServiceEndpoints(t, testenv, namespace, crName+"-service")
-
-		// Check service configuration to identify selector mismatches
 		logServiceSpec(t, testenv, namespace, crName+"-service")
-
-		// Check deployment spec to identify configuration problems preventing pod startup
 		logDeploymentSpec(t, testenv, namespace, crName)
 
 		require.NoError(t, err, msg)
@@ -395,16 +371,14 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 		return
 	}
 
-	t.Logf("📦 Found %d pods in namespace %s:", len(podList.Items), namespace)
+	t.Logf("Found %d pods in namespace %s:", len(podList.Items), namespace)
 	for _, pod := range podList.Items {
 		t.Logf("Pod: %s, Phase: %s", pod.Name, pod.Status.Phase)
 
 		for _, cs := range pod.Status.ContainerStatuses {
-			// RestartCount indicates crash loops or configuration issues
 			t.Logf("  Container %s: Ready=%v, RestartCount=%d",
 				cs.Name, cs.Ready, cs.RestartCount)
 
-			// Container states reveal why pods aren't starting or are crashing
 			if cs.State.Waiting != nil {
 				t.Logf("    Waiting: %s - %s",
 					cs.State.Waiting.Reason, cs.State.Waiting.Message)
@@ -415,7 +389,6 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 			}
 		}
 
-		// Pod logs would show startup errors but require different client access
 		t.Logf("  (Pod logs require direct kubectl access)")
 	}
 }
@@ -424,7 +397,6 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 func logServiceEndpoints(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
 	t.Helper()
 
-	// List all EndpointSlices for the service
 	endpointSliceList := &discoveryv1.EndpointSliceList{}
 	err := testenv.Client.List(testenv.Ctx, endpointSliceList,
 		client.InNamespace(namespace),
@@ -436,11 +408,11 @@ func logServiceEndpoints(t *testing.T, testenv *TestEnvironment, namespace, serv
 	}
 
 	if len(endpointSliceList.Items) == 0 {
-		t.Logf("🔗 Service %s has no endpoint slices", serviceName)
+		t.Logf("Service %s has no endpoint slices", serviceName)
 		return
 	}
 
-	t.Logf("🔗 Service %s endpoints:", serviceName)
+	t.Logf("Service %s endpoints:", serviceName)
 	for i, slice := range endpointSliceList.Items {
 		t.Logf("  EndpointSlice %d (%s):", i, slice.Name)
 		logEndpointSliceDetails(t, &slice)
@@ -511,9 +483,8 @@ func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name s
 		return
 	}
 
-	t.Logf("🚀 Deployment %s spec:", name)
+	t.Logf("Deployment %s spec:", name)
 	t.Logf("  Replicas: %d", *deployment.Spec.Replicas)
-	// Selector must match pod labels or pods won't be managed by deployment
 	t.Logf("  Selector: %+v", deployment.Spec.Selector.MatchLabels)
 	t.Logf("  Template labels: %+v", deployment.Spec.Template.Labels)
 
@@ -524,12 +495,10 @@ func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name s
 		for _, port := range container.Ports {
 			t.Logf("      - %d", port.ContainerPort)
 		}
-		// Environment variables can cause startup failures if misconfigured
 		t.Logf("    Env vars:")
 		for _, env := range container.Env {
 			t.Logf("      %s=%s", env.Name, env.Value)
 		}
-		// Readiness probe configuration affects when pods become service endpoints
 		if container.ReadinessProbe != nil {
 			t.Logf("    Readiness probe: %+v", container.ReadinessProbe)
 		}
@@ -551,9 +520,8 @@ func logServiceSpec(t *testing.T, testenv *TestEnvironment, namespace, serviceNa
 		return
 	}
 
-	t.Logf("🔧 Service %s spec:", serviceName)
+	t.Logf("Service %s spec:", serviceName)
 	t.Logf("  Type: %s", service.Spec.Type)
-	// Selector must match pod labels or service won't route traffic to pods
 	t.Logf("  Selector: %+v", service.Spec.Selector)
 	t.Logf("  Ports:")
 	for _, port := range service.Spec.Ports {

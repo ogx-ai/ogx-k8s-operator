@@ -246,7 +246,7 @@ func TestTransform(t *testing.T) {
 			transformer: CreateFieldMutator(FieldMutatorConfig{
 				Mappings: []FieldMapping{
 					{TargetKind: "Service", TargetField: "/spec/selector/app.kubernetes.io~1instance", SourceValue: "dynamic-instance-name", CreateIfNotExists: true},
-					{TargetKind: "Service", TargetField: "/spec/selector/app.kubernetes.io~1name", SourceValue: "llamastack", CreateIfNotExists: true},
+					{TargetKind: "Service", TargetField: "/spec/selector/app.kubernetes.io~1name", SourceValue: "ogx", CreateIfNotExists: true},
 				},
 			}),
 			initialResources: []*resource.Resource{
@@ -261,7 +261,7 @@ func TestTransform(t *testing.T) {
 				"my-service": {
 					"selector": map[string]any{
 						"app.kubernetes.io/instance": "dynamic-instance-name",
-						"app.kubernetes.io/name":     "llamastack",
+						"app.kubernetes.io/name":     "ogx",
 						"app":                        "other-label",
 					},
 				},
