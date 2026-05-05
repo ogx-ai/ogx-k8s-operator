@@ -631,7 +631,7 @@ func (r *OGXServer) GetAdoptNetworkingSource() string {
 // When the adopt-storage annotation is present, the adopted PVC name is "{legacyName}-pvc".
 // Otherwise the default convention is "{instanceName}-pvc".
 func (r *OGXServer) GetEffectivePVCName() string {
-	if src := r.GetAdoptStorageSource(); src != "" {
+	if src := r.GetAdoptStorageSource(); src != "" && ValidateAdoptionAnnotation(src) == nil {
 		return src + "-pvc"
 	}
 	return r.Name + "-pvc"

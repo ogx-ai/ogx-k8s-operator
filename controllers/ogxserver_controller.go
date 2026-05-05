@@ -111,7 +111,9 @@ type OGXServerReconciler struct {
 
 // hasOverrideConfig checks if the instance references an override ConfigMap.
 func (r *OGXServerReconciler) hasOverrideConfig(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
+	return instance.Spec.OverrideConfig != nil &&
+		instance.Spec.OverrideConfig.Name != "" &&
+		instance.Spec.OverrideConfig.Key != ""
 }
 
 // hasCACertificates checks if the instance has TLS trust CA certificates configured.
@@ -154,6 +156,15 @@ func (r *OGXServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Reconcile all resources, storing the error for later.
 	reconcileErr := r.reconcileResources(ctx, instance)
+
+	// Handle adoption requeue: not a real error, just needs a delayed retry.
+	var requeueErr *requeueError
+	if errors.As(reconcileErr, &requeueErr) {
+		if statusUpdateErr := r.updateStatus(ctx, instance, nil); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update status during adoption requeue")
+		}
+		return ctrl.Result{RequeueAfter: requeueErr.after}, nil
+	}
 
 	// Update the status, passing in any reconciliation error.
 	if statusUpdateErr := r.updateStatus(ctx, instance, reconcileErr); statusUpdateErr != nil {
@@ -231,12 +242,16 @@ func (r *OGXServerReconciler) fetchInstance(ctx context.Context, namespacedName 
 }
 
 // determineKindsToExclude returns a list of resource kinds that should be excluded
-// based on the instance specification.
+// based on the instance specification and adoption annotations.
 func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGXServer) []string {
 	var kinds []string
 
-	if instance.Spec.Workload == nil || instance.Spec.Workload.Storage == nil {
+	if shouldExcludePVC(instance) {
 		kinds = append(kinds, "PersistentVolumeClaim")
+	}
+
+	if shouldExcludeServiceForAdoption(instance) {
+		kinds = append(kinds, "Service")
 	}
 
 	// Per-CR NetworkPolicy toggle (default: enabled)
@@ -245,7 +260,6 @@ func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGX
 		kinds = append(kinds, "NetworkPolicy")
 	}
 
-	// Service is always created in v1beta1 (port always exists via defaults)
 	if !needsPodDisruptionBudget(instance) {
 		kinds = append(kinds, "PodDisruptionBudget")
 	}
@@ -255,6 +269,29 @@ func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGX
 	}
 
 	return kinds
+}
+
+func shouldExcludePVC(instance *ogxiov1beta1.OGXServer) bool {
+	// When a valid adopt-storage annotation is present, suppress PVC creation from
+	// the kustomize pipeline to avoid a duplicate empty PVC alongside the adopted one.
+	storageSource := instance.GetAdoptStorageSource()
+	if storageSource != "" && ogxiov1beta1.ValidateAdoptionAnnotation(storageSource) == nil {
+		return true
+	}
+
+	return instance.Spec.Workload == nil || instance.Spec.Workload.Storage == nil
+}
+
+func shouldExcludeServiceForAdoption(instance *ogxiov1beta1.OGXServer) bool {
+	// When a valid adopt-networking annotation is present and the CR name matches
+	// the legacy name, exclude Service from the kustomize pipeline because the
+	// adopted Service already has the correct name. When names differ, allow
+	// the pipeline to create a new Service alongside the adopted one.
+	legacyNet := instance.GetAdoptNetworkingSource()
+	if legacyNet == "" || ogxiov1beta1.ValidateAdoptionAnnotation(legacyNet) != nil {
+		return false
+	}
+	return legacyNet == instance.Name
 }
 
 // reconcileAllManifestResources applies all manifest-based resources using kustomize.
@@ -456,6 +493,16 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 
 // reconcileResources reconciles all resources for the OGXServer instance.
 func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	// Run adoption logic before manifest reconciliation so that adopted
+	// resources are available for the kustomize pipeline to reference.
+	adoptResult, err := r.adoptLegacyResources(ctx, instance)
+	if err != nil {
+		return fmt.Errorf("failed to adopt legacy resources: %w", err)
+	}
+	if adoptResult.requeue {
+		return &requeueError{after: adoptResult.requeueAfter}
+	}
+
 	// Reconcile ConfigMaps first
 	if err := r.reconcileConfigMaps(ctx, instance); err != nil {
 		return err
@@ -472,7 +519,24 @@ func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *
 		return fmt.Errorf("failed to reconcile Ingress: %w", err)
 	}
 
+	// Clean up adopted networking resources if the annotation was removed.
+	// This runs after normal networking reconciliation to avoid delete-before-create
+	// gaps during the migration-off path.
+	if err := r.cleanupAdoptedNetworking(ctx, instance); err != nil {
+		return fmt.Errorf("failed to clean up adopted networking: %w", err)
+	}
+
 	return nil
+}
+
+// requeueError signals that the reconciler should requeue after a delay
+// without reporting an error to the controller runtime.
+type requeueError struct {
+	after time.Duration
+}
+
+func (e *requeueError) Error() string {
+	return fmt.Sprintf("requeue after %s", e.after)
 }
 
 func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
@@ -601,9 +665,15 @@ func (r *OGXServerReconciler) mapConfigMapToReconcileRequests(ctx context.Contex
 		return nil
 	}
 
-	// List all OGXServer CRs to find which ones reference this ConfigMap.
+	// List relevant OGXServer CRs to find which ones reference this ConfigMap.
+	// User ConfigMaps are namespace-scoped per 003 design, so default to same-namespace
+	// listing. Keep operator config global since it can affect all instances.
 	var instances ogxiov1beta1.OGXServerList
-	if err := r.List(ctx, &instances); err != nil {
+	listOpts := []client.ListOption{client.InNamespace(configMap.Namespace)}
+	if configMap.Name == operatorConfigData {
+		listOpts = nil
+	}
+	if err := r.List(ctx, &instances, listOpts...); err != nil {
 		logger.Error(err, "failed to list OGXServer instances for ConfigMap mapping")
 		return nil
 	}
@@ -932,6 +1002,7 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 
 	logger.V(1).Info("Validating referenced override ConfigMap exists",
 		"configMapName", instance.Spec.OverrideConfig.Name,
+		"configMapKey", instance.Spec.OverrideConfig.Key,
 		"configMapNamespace", configMapNamespace)
 
 	// Read via direct client — user ConfigMaps lack operator labels
@@ -949,10 +1020,19 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 		}
 		return fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.OverrideConfig.Name, err)
 	}
+	if _, exists := configMap.Data[instance.Spec.OverrideConfig.Key]; !exists {
+		return fmt.Errorf(
+			"failed to find override ConfigMap key '%s' in ConfigMap %s/%s",
+			instance.Spec.OverrideConfig.Key,
+			configMapNamespace,
+			instance.Spec.OverrideConfig.Name,
+		)
+	}
 
 	logger.V(1).Info("Override ConfigMap found and validated",
 		"configMap", configMap.Name,
 		"namespace", configMap.Namespace,
+		"key", instance.Spec.OverrideConfig.Key,
 		"dataKeys", len(configMap.Data))
 	return nil
 }

@@ -478,10 +478,10 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 				if instance.Spec.Network == nil {
 					instance.Spec.Network = &ogxiov1beta1.NetworkSpec{}
 				}
-			instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
-				Enabled: boolPtr(false),
-			}
-			require.NoError(t, k8sClient.Update(t.Context(), instance))
+				instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
+					Enabled: boolPtr(false),
+				}
+				require.NoError(t, k8sClient.Update(t.Context(), instance))
 			},
 		},
 		{
@@ -508,11 +508,11 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 				if instance.Spec.Network == nil {
 					instance.Spec.Network = &ogxiov1beta1.NetworkSpec{}
 				}
-			instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
-				Enabled: boolPtr(false),
+				instance.Spec.Network.Policy = &ogxiov1beta1.NetworkPolicySpec{
+					Enabled: boolPtr(false),
+				}
 			}
-		}
-		require.NoError(t, k8sClient.Create(t.Context(), instance))
+			require.NoError(t, k8sClient.Create(t.Context(), instance))
 			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
 
 			tt.setup(t, instance)

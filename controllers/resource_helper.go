@@ -455,7 +455,7 @@ func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance 
 // configureUserConfig handles user configuration setup.
 func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	overrideConfig := instance.Spec.OverrideConfig
-	if overrideConfig == nil || overrideConfig.Name == "" {
+	if overrideConfig == nil || overrideConfig.Name == "" || overrideConfig.Key == "" {
 		return
 	}
 
@@ -465,6 +465,12 @@ func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSp
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: overrideConfig.Name,
+				},
+				Items: []corev1.KeyToPath{
+					{
+						Key:  overrideConfig.Key,
+						Path: "config.yaml",
+					},
 				},
 			},
 		},
