@@ -19,25 +19,44 @@ package v1beta1
 import "slices"
 
 // S3Provider configures a remote::s3 files provider instance.
+// +kubebuilder:validation:XValidation:rule="!has(self.region) || self.region.size() > 0",message="region must not be empty if specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.endpointUrl) || self.endpointUrl.size() > 0",message="endpointUrl must not be empty if specified"
 type S3Provider struct {
+	// BucketName is the S3 bucket name to store files.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	BucketName string `json:"bucketName"`
+	// Region is the AWS region where the bucket is located.
 	// +optional
-	// +kubebuilder:default:="us-east-1"
 	Region string `json:"region,omitempty"`
+	// AWSAccessKeyID is the AWS access key ID (optional if using IAM roles).
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
 	AWSAccessKeyID *SecretKeyRef `json:"awsAccessKeyId,omitempty"`
+	// AWSSecretAccessKey is the AWS secret access key (optional if using IAM roles).
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
 	AWSSecretAccessKey *SecretKeyRef `json:"awsSecretAccessKey,omitempty"`
+	// EndpointURL is a custom S3 endpoint URL (for MinIO, LocalStack, etc.).
 	// +optional
 	EndpointURL string `json:"endpointUrl,omitempty"`
+	// AutoCreateBucket controls whether to automatically create the S3 bucket
+	// if it doesn't exist.
+	// +optional
+	AutoCreateBucket *bool `json:"autoCreateBucket,omitempty"`
 }
 
 func (p S3Provider) DeriveID() string { return "remote-s3" }
 
 // InlineLocalFSProvider configures inline::localfs.
-type InlineLocalFSProvider struct{}
+type InlineLocalFSProvider struct {
+	// TTLSecs is the time-to-live in seconds for uploaded files.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	TTLSecs *int `json:"ttlSecs,omitempty"`
+}
 
 func (p InlineLocalFSProvider) DeriveID() string { return "inline-localfs" }
 
@@ -46,6 +65,8 @@ type FilesRemoteProviders struct {
 	// +optional
 	S3 *S3Provider `json:"s3,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 
@@ -65,6 +86,8 @@ type FilesInlineProviders struct {
 	// +optional
 	LocalFS *InlineLocalFSProvider `json:"localfs,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 

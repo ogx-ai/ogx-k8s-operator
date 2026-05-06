@@ -111,19 +111,12 @@ type OGXServerReconciler struct {
 
 // hasOverrideConfig checks if the instance references an override ConfigMap.
 func (r *OGXServerReconciler) hasOverrideConfig(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.ConfigMapName != ""
+	return instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
 }
 
-// hasCABundleConfigMap checks if the instance has a valid CA bundle ConfigMapName.
-// Returns true if configured, false otherwise.
-func (r *OGXServerReconciler) hasCABundleConfigMap(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.CABundle != nil && instance.Spec.CABundle.ConfigMapName != ""
-}
-
-// getCABundleConfigMapNamespace returns the namespace of the CA bundle ConfigMap,
-// which is always the instance's own namespace.
-func (r *OGXServerReconciler) getCABundleConfigMapNamespace(instance *ogxiov1beta1.OGXServer) string {
-	return instance.Namespace
+// hasCACertificates checks if the instance has TLS trust CA certificates configured.
+func (r *OGXServerReconciler) hasCACertificates(instance *ogxiov1beta1.OGXServer) bool {
+	return instance.Spec.TLS != nil && instance.Spec.TLS.Trust != nil && len(instance.Spec.TLS.Trust.CACertificates) > 0
 }
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -436,7 +429,7 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 
 	// Get CA bundle hash if needed
 	var caBundleHash string
-	if r.hasCABundleConfigMap(instance) {
+	if r.hasCACertificates(instance) {
 		caBundleHash, err = r.getCABundleConfigMapHash(ctx, instance)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get CA bundle ConfigMap hash: %w", err)
@@ -483,29 +476,11 @@ func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *
 }
 
 func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
-	if err := r.validateCABundleKeys(instance); err != nil {
-		return err
-	}
-
 	if err := r.reconcileOverrideAndCABundleConfigMaps(ctx, instance); err != nil {
 		return err
 	}
 
 	return r.reconcileManagedCABundle(ctx, instance)
-}
-
-func (r *OGXServerReconciler) validateCABundleKeys(instance *ogxiov1beta1.OGXServer) error {
-	if instance.Spec.CABundle == nil {
-		return nil
-	}
-
-	if len(instance.Spec.CABundle.ConfigMapKeys) > 0 {
-		if err := validateConfigMapKeys(instance.Spec.CABundle.ConfigMapKeys); err != nil {
-			return fmt.Errorf("failed to validate CA bundle ConfigMap keys: %w", err)
-		}
-	}
-
-	return nil
 }
 
 func (r *OGXServerReconciler) reconcileOverrideAndCABundleConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
@@ -515,7 +490,7 @@ func (r *OGXServerReconciler) reconcileOverrideAndCABundleConfigMaps(ctx context
 		}
 	}
 
-	if r.hasCABundleConfigMap(instance) {
+	if r.hasCACertificates(instance) {
 		if err := r.reconcileCABundleConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile CA bundle ConfigMap: %w", err)
 		}
@@ -528,7 +503,7 @@ func (r *OGXServerReconciler) reconcileManagedCABundle(ctx context.Context, inst
 	logger := log.FromContext(ctx)
 	managedConfigMapName := getManagedCABundleConfigMapName(instance)
 
-	if !r.hasCABundleConfigMap(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
+	if !r.hasCACertificates(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
 		// No CA bundles configured, delete managed ConfigMap if it exists
 		existingConfigMap := &corev1.ConfigMap{}
 		err := r.Get(ctx, types.NamespacedName{
@@ -659,15 +634,13 @@ func (r *OGXServerReconciler) instanceReferencesConfigMap(
 ) bool {
 	// Override config ConfigMap (always in the CR namespace).
 	if r.hasOverrideConfig(instance) &&
-		instance.Spec.OverrideConfig.ConfigMapName == cmName &&
+		instance.Spec.OverrideConfig.Name == cmName &&
 		instance.Namespace == cmNamespace {
 		return true
 	}
 
-	// CA bundle source ConfigMap.
-	if r.hasCABundleConfigMap(instance) &&
-		instance.Spec.CABundle.ConfigMapName == cmName &&
-		r.getCABundleConfigMapNamespace(instance) == cmNamespace {
+	// CA certificate source ConfigMaps.
+	if r.referencesCACertificateConfigMap(instance, cmName, cmNamespace) {
 		return true
 	}
 
@@ -678,6 +651,18 @@ func (r *OGXServerReconciler) instanceReferencesConfigMap(
 
 	// Operator config well-known ConfigMap.
 	return cmName == operatorConfigData && cmNamespace == r.operatorNamespace
+}
+
+func (r *OGXServerReconciler) referencesCACertificateConfigMap(instance *ogxiov1beta1.OGXServer, cmName, cmNamespace string) bool {
+	if !r.hasCACertificates(instance) || cmNamespace != instance.Namespace {
+		return false
+	}
+	for _, ref := range instance.Spec.TLS.Trust.CACertificates {
+		if ref.Name == cmName {
+			return true
+		}
+	}
+	return false
 }
 
 // userConfigMapPredicate returns a predicate that accepts only ConfigMaps with
@@ -946,23 +931,23 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 	configMapNamespace := instance.Namespace
 
 	logger.V(1).Info("Validating referenced override ConfigMap exists",
-		"configMapName", instance.Spec.OverrideConfig.ConfigMapName,
+		"configMapName", instance.Spec.OverrideConfig.Name,
 		"configMapNamespace", configMapNamespace)
 
 	// Read via direct client — user ConfigMaps lack operator labels
 	configMap := &corev1.ConfigMap{}
 	err := r.directGet(ctx, types.NamespacedName{
-		Name:      instance.Spec.OverrideConfig.ConfigMapName,
+		Name:      instance.Spec.OverrideConfig.Name,
 		Namespace: configMapNamespace,
 	}, configMap)
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			logger.Error(err, "Referenced override ConfigMap not found",
-				"configMapName", instance.Spec.OverrideConfig.ConfigMapName,
+				"configMapName", instance.Spec.OverrideConfig.Name,
 				"configMapNamespace", configMapNamespace)
-			return fmt.Errorf("failed to find referenced ConfigMap %s/%s", configMapNamespace, instance.Spec.OverrideConfig.ConfigMapName)
+			return fmt.Errorf("failed to find referenced ConfigMap %s/%s", configMapNamespace, instance.Spec.OverrideConfig.Name)
 		}
-		return fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.OverrideConfig.ConfigMapName, err)
+		return fmt.Errorf("failed to fetch ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.OverrideConfig.Name, err)
 	}
 
 	logger.V(1).Info("Override ConfigMap found and validated",
@@ -972,69 +957,53 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 	return nil
 }
 
-// reconcileCABundleConfigMap validates that the referenced CA bundle ConfigMap exists.
+// reconcileCABundleConfigMap validates that referenced CA certificate ConfigMaps exist.
 func (r *OGXServerReconciler) reconcileCABundleConfigMap(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	logger := log.FromContext(ctx)
 
-	if !r.hasCABundleConfigMap(instance) {
-		logger.V(1).Info("No CA bundle ConfigMap specified, skipping")
+	if !r.hasCACertificates(instance) {
+		logger.V(1).Info("No CA certificates specified, skipping")
 		return nil
 	}
 
-	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
+	for _, ref := range instance.Spec.TLS.Trust.CACertificates {
+		logger.V(1).Info("Validating referenced CA certificate ConfigMap exists",
+			"configMapName", ref.Name,
+			"configMapKey", ref.Key,
+			"configMapNamespace", instance.Namespace)
 
-	logger.V(1).Info("Validating referenced CA bundle ConfigMap exists",
-		"configMapName", instance.Spec.CABundle.ConfigMapName,
-		"configMapNamespace", configMapNamespace)
-
-	// Read via direct client — user CA bundle ConfigMaps lack operator labels
-	configMap := &corev1.ConfigMap{}
-	err := r.directGet(ctx, types.NamespacedName{
-		Name:      instance.Spec.CABundle.ConfigMapName,
-		Namespace: configMapNamespace,
-	}, configMap)
-	if err != nil {
-		if k8serrors.IsNotFound(err) {
-			logger.Error(err, "Referenced CA bundle ConfigMap not found",
-				"configMapName", instance.Spec.CABundle.ConfigMapName,
-				"configMapNamespace", configMapNamespace)
-			return fmt.Errorf("failed to find referenced CA bundle ConfigMap %s/%s", configMapNamespace, instance.Spec.CABundle.ConfigMapName)
-		}
-		return fmt.Errorf("failed to fetch CA bundle ConfigMap %s/%s: %w", configMapNamespace, instance.Spec.CABundle.ConfigMapName, err)
-	}
-
-	// Validate that the specified keys exist in the ConfigMap
-	var keysToValidate []string
-	if len(instance.Spec.CABundle.ConfigMapKeys) > 0 {
-		keysToValidate = instance.Spec.CABundle.ConfigMapKeys
-	} else {
-		// Default to DefaultCABundleKey when no keys are specified
-		keysToValidate = []string{DefaultCABundleKey}
-	}
-
-	for _, key := range keysToValidate {
-		if _, exists := configMap.Data[key]; !exists {
-			errMissing := fmt.Errorf("failed to find CA bundle key %q in ConfigMap", key)
-			logger.Error(errMissing, "CA bundle key not found in ConfigMap",
-				"configMapName", instance.Spec.CABundle.ConfigMapName,
-				"configMapNamespace", configMapNamespace,
-				"key", key)
-			return fmt.Errorf("failed to find CA bundle key '%s' in ConfigMap %s/%s", key, configMapNamespace, instance.Spec.CABundle.ConfigMapName)
+		configMap := &corev1.ConfigMap{}
+		err := r.directGet(ctx, types.NamespacedName{
+			Name:      ref.Name,
+			Namespace: instance.Namespace,
+		}, configMap)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				logger.Error(err, "Referenced CA certificate ConfigMap not found",
+					"configMapName", ref.Name,
+					"configMapNamespace", instance.Namespace)
+				return fmt.Errorf("failed to find referenced CA certificate ConfigMap %s/%s", instance.Namespace, ref.Name)
+			}
+			return fmt.Errorf("failed to fetch CA certificate ConfigMap %s/%s: %w", instance.Namespace, ref.Name, err)
 		}
 
-		// Note: Detailed PEM validation is performed later
-		// in extractValidCertificates() which validates all PEM blocks.
-		logger.V(1).Info("CA bundle key found",
-			"configMapName", instance.Spec.CABundle.ConfigMapName,
-			"configMapNamespace", configMapNamespace,
-			"key", key)
+		if _, exists := configMap.Data[ref.Key]; !exists {
+			errMissing := fmt.Errorf("failed to find CA certificate key %q in ConfigMap", ref.Key)
+			logger.Error(errMissing, "CA certificate key not found in ConfigMap",
+				"configMapName", ref.Name,
+				"configMapNamespace", instance.Namespace,
+				"key", ref.Key)
+			return fmt.Errorf("failed to find CA certificate key '%s' in ConfigMap %s/%s", ref.Key, instance.Namespace, ref.Name)
+		}
+
+		logger.V(1).Info("CA certificate ConfigMap key found",
+			"configMapName", ref.Name,
+			"configMapNamespace", instance.Namespace,
+			"key", ref.Key)
 	}
 
-	logger.V(1).Info("CA bundle ConfigMap found and validated",
-		"configMap", configMap.Name,
-		"namespace", configMap.Namespace,
-		"keys", keysToValidate,
-		"dataKeys", len(configMap.Data))
+	logger.V(1).Info("All CA certificate ConfigMaps validated",
+		"count", len(instance.Spec.TLS.Trust.CACertificates))
 	return nil
 }
 
@@ -1048,7 +1017,7 @@ func (r *OGXServerReconciler) getConfigMapHash(ctx context.Context, instance *og
 
 	configMap := &corev1.ConfigMap{}
 	err := r.directGet(ctx, types.NamespacedName{
-		Name:      instance.Spec.OverrideConfig.ConfigMapName,
+		Name:      instance.Spec.OverrideConfig.Name,
 		Namespace: configMapNamespace,
 	}, configMap)
 	if err != nil {
@@ -1062,7 +1031,7 @@ func (r *OGXServerReconciler) getConfigMapHash(ctx context.Context, instance *og
 // getCABundleConfigMapHash calculates a hash of the managed CA bundle ConfigMap to detect changes.
 func (r *OGXServerReconciler) getCABundleConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
 	// Check if any CA bundles are configured
-	if !r.hasCABundleConfigMap(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
+	if !r.hasCACertificates(instance) && !r.hasODHTrustedCABundle(ctx, instance) {
 		return "", nil
 	}
 
@@ -1164,27 +1133,27 @@ func (c *certificateCollector) concatenate() (string, error) {
 }
 
 func (r *OGXServerReconciler) gatherExplicitCABundle(ctx context.Context, instance *ogxiov1beta1.OGXServer, collector *certificateCollector) error {
-	if !r.hasCABundleConfigMap(instance) {
+	if !r.hasCACertificates(instance) {
 		return nil
 	}
 
-	configMapNamespace := r.getCABundleConfigMapNamespace(instance)
-	configMap := &corev1.ConfigMap{}
-	err := r.directGet(ctx, types.NamespacedName{
-		Name:      instance.Spec.CABundle.ConfigMapName,
-		Namespace: configMapNamespace,
-	}, configMap)
-	if err != nil {
-		return fmt.Errorf("failed to get CA bundle ConfigMap %s/%s: %w",
-			configMapNamespace, instance.Spec.CABundle.ConfigMapName, err)
+	for _, ref := range instance.Spec.TLS.Trust.CACertificates {
+		configMap := &corev1.ConfigMap{}
+		err := r.directGet(ctx, types.NamespacedName{
+			Name:      ref.Name,
+			Namespace: instance.Namespace,
+		}, configMap)
+		if err != nil {
+			return fmt.Errorf("failed to get CA certificate ConfigMap %s/%s: %w",
+				instance.Namespace, ref.Name, err)
+		}
+
+		if err := r.processConfigMapKeys(configMap, []string{ref.Key}, instance.Namespace, ref.Name, collector); err != nil {
+			return err
+		}
 	}
 
-	keysToProcess := instance.Spec.CABundle.ConfigMapKeys
-	if len(keysToProcess) == 0 {
-		keysToProcess = []string{DefaultCABundleKey}
-	}
-
-	return r.processConfigMapKeys(configMap, keysToProcess, configMapNamespace, instance.Spec.CABundle.ConfigMapName, collector)
+	return nil
 }
 
 func (r *OGXServerReconciler) gatherODHCABundle(ctx context.Context, instance *ogxiov1beta1.OGXServer, collector *certificateCollector) error {

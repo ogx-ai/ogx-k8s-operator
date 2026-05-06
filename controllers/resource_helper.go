@@ -20,9 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
-	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
@@ -37,9 +35,6 @@ import (
 
 // Constants for validation limits.
 const (
-	// maxConfigMapKeyLength defines the maximum allowed length for ConfigMap keys
-	// based on Kubernetes DNS subdomain name limits.
-	maxConfigMapKeyLength = 253
 	// FSGroup is the filesystem group ID for the pod.
 	// This is the default group ID for the llama-stack server.
 	FSGroup = int64(1001)
@@ -59,10 +54,6 @@ const (
 	startupProbeFailureThreshold    = 3  // Pod is marked Unhealthy after 3 consecutive failures
 	startupProbeSuccessThreshold    = 1  // Pod is marked Ready after 1 successful probe
 )
-
-// validConfigMapKeyRegex defines allowed characters for ConfigMap keys.
-// Kubernetes ConfigMap keys must be valid DNS subdomain names or data keys.
-var validConfigMapKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$`)
 
 // getManagedCABundleConfigMapName returns the name of the managed CA bundle ConfigMap.
 func getManagedCABundleConfigMapName(instance *ogxiov1beta1.OGXServer) string {
@@ -115,29 +106,6 @@ case $VERSION_CODE in
 esac`
 
 const llamaStackConfigPath = "/etc/llama-stack/config.yaml"
-
-// validateConfigMapKeys validates that all ConfigMap keys contain only safe characters.
-// Note: This function validates key names only. PEM content validation is performed
-// separately in the controller's reconcileCABundleConfigMap function.
-func validateConfigMapKeys(keys []string) error {
-	for _, key := range keys {
-		if key == "" {
-			return errors.New("ConfigMap key cannot be empty")
-		}
-		if len(key) > maxConfigMapKeyLength {
-			return fmt.Errorf("failed to validate ConfigMap key '%s': too long (max %d characters)", key, maxConfigMapKeyLength)
-		}
-		// Check for path traversal attempts first (before general regex check)
-		// to provide specific error messages for security-related issues
-		if strings.Contains(key, "..") || strings.Contains(key, "/") {
-			return fmt.Errorf("failed to validate ConfigMap key '%s': contains invalid path characters", key)
-		}
-		if !validConfigMapKeyRegex.MatchString(key) {
-			return fmt.Errorf("failed to validate ConfigMap key '%s': contains invalid characters. Only alphanumeric characters, hyphens, underscores, and dots are allowed", key)
-		}
-	}
-	return nil
-}
 
 // getHealthProbe returns the health probe handler for the container.
 func getHealthProbe(instance *ogxiov1beta1.OGXServer) corev1.ProbeHandler {
@@ -311,8 +279,8 @@ func configureContainerMounts(ctx context.Context, r *OGXServerReconciler, insta
 
 // hasAnyCABundle checks if any CA bundle will be mounted (explicit or auto-detected).
 func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer) bool {
-	// Check for explicit CA bundle configuration
-	if instance.Spec.CABundle != nil {
+	// Check for explicit CA certificate configuration
+	if instance.Spec.TLS != nil && instance.Spec.TLS.Trust != nil && len(instance.Spec.TLS.Trust.CACertificates) > 0 {
 		return true
 	}
 
@@ -329,7 +297,7 @@ func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxio
 // configureContainerCommands sets up container commands and args.
 func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.ConfigMapName != "" {
+	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
 		// Override the container entrypoint to use the custom config file instead of the default
 		// template. The script will determine the llama-stack version and use the appropriate module
 		// path to start the server.
@@ -368,7 +336,7 @@ func addStorageVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.C
 
 // addUserConfigVolumeMount adds the user config volume mount to the container if specified.
 func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.ConfigMapName != "" {
+	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
 			MountPath: "/etc/llama-stack/",
@@ -487,7 +455,7 @@ func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance 
 // configureUserConfig handles user configuration setup.
 func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
 	overrideConfig := instance.Spec.OverrideConfig
-	if overrideConfig == nil || overrideConfig.ConfigMapName == "" {
+	if overrideConfig == nil || overrideConfig.Name == "" {
 		return
 	}
 
@@ -496,7 +464,7 @@ func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSp
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: overrideConfig.ConfigMapName,
+					Name: overrideConfig.Name,
 				},
 			},
 		},

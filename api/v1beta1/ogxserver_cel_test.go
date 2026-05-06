@@ -617,13 +617,13 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 		{
 			name: "overrideConfig alone is valid",
 			mutate: func(o *OGXServer) {
-				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
 			},
 		},
 		{
 			name: "overrideConfig with providers is invalid",
 			mutate: func(o *OGXServer) {
-				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
 				o.Spec.Providers = &ProvidersSpec{
 					Inference: &InferenceProvidersSpec{
 						Remote: &InferenceRemoteProviders{
@@ -637,7 +637,7 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 		{
 			name: "overrideConfig with resources is invalid",
 			mutate: func(o *OGXServer) {
-				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
 				o.Spec.Resources = &ResourcesSpec{
 					Models: []ModelConfig{{Name: "llama3"}},
 				}
@@ -647,7 +647,7 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 		{
 			name: "overrideConfig with storage is invalid",
 			mutate: func(o *OGXServer) {
-				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
 				o.Spec.Storage = &StateStorageSpec{
 					KV: &KVStorageSpec{Type: "sqlite"},
 				}
@@ -657,7 +657,7 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 		{
 			name: "overrideConfig with disabledAPIs is invalid",
 			mutate: func(o *OGXServer) {
-				o.Spec.OverrideConfig = &OverrideConfigSpec{ConfigMapName: "my-config"}
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
 				o.Spec.DisabledAPIs = []string{"inference"}
 			},
 			wantError: "overrideConfig and disabledAPIs are mutually exclusive",
@@ -690,26 +690,13 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 		wantError string
 	}{
 		{
-			name: "disabledAPIs agents with inference provider has no conflict",
+			name: "disabledAPIs batches with inference provider has no conflict",
 			mutate: func(o *OGXServer) {
-				o.Spec.DisabledAPIs = []string{"agents"}
+				o.Spec.DisabledAPIs = []string{"batches"}
 				o.Spec.Providers = &ProvidersSpec{
 					Inference: &InferenceProvidersSpec{
 						Remote: &InferenceRemoteProviders{
 							VLLM: []VLLMProvider{{Endpoint: "https://vllm:8000"}},
-						},
-					},
-				}
-			},
-		},
-		{
-			name: "safety has no disabledAPIs conflict rule",
-			mutate: func(o *OGXServer) {
-				o.Spec.DisabledAPIs = []string{"agents"}
-				o.Spec.Providers = &ProvidersSpec{
-					Safety: &SafetyProvidersSpec{
-						Remote: &SafetyRemoteProviders{
-							Custom: []CustomProvider{{Type: "remote::llama-guard"}},
 						},
 					},
 				}
@@ -770,20 +757,6 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 				}
 			},
 			wantError: "files cannot be both in providers and disabledAPIs",
-		},
-		{
-			name: "safety in both disabledAPIs and providers is invalid",
-			mutate: func(o *OGXServer) {
-				o.Spec.DisabledAPIs = []string{"safety"}
-				o.Spec.Providers = &ProvidersSpec{
-					Safety: &SafetyProvidersSpec{
-						Remote: &SafetyRemoteProviders{
-							Custom: []CustomProvider{{Type: "remote::llama-guard"}},
-						},
-					},
-				}
-			},
-			wantError: "safety cannot be both in providers and disabledAPIs",
 		},
 	}
 
@@ -893,19 +866,125 @@ func TestCEL_WorkloadOverrides(t *testing.T) {
 	}
 }
 
-// TestCEL_EmptyStringViaUnstructured tests CEL rules of the form
+func TestCEL_VectorIndexConfig(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-vidx")
+
+	tests := []struct {
+		name      string
+		mutate    func(*OGXServer)
+		wantError string
+	}{
+		{
+			name: "hnsw only is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Providers = &ProvidersSpec{
+					VectorIo: &VectorIOProvidersSpec{
+						Remote: &VectorIORemoteProviders{
+							Pgvector: []PgvectorProvider{{
+								Password:    SecretKeyRef{Name: "s", Key: "k"},
+								VectorIndex: &VectorIndexConfig{HNSW: &HNSWConfig{M: ptr(16)}},
+							}},
+						},
+					},
+				}
+			},
+		},
+		{
+			name: "ivfFlat only is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Providers = &ProvidersSpec{
+					VectorIo: &VectorIOProvidersSpec{
+						Remote: &VectorIORemoteProviders{
+							Pgvector: []PgvectorProvider{{
+								Password:    SecretKeyRef{Name: "s", Key: "k"},
+								VectorIndex: &VectorIndexConfig{IVFFlat: &IVFFlatConfig{Nlist: ptr(100)}},
+							}},
+						},
+					},
+				}
+			},
+		},
+		{
+			name: "both hnsw and ivfFlat is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Providers = &ProvidersSpec{
+					VectorIo: &VectorIOProvidersSpec{
+						Remote: &VectorIORemoteProviders{
+							Pgvector: []PgvectorProvider{{
+								Password: SecretKeyRef{Name: "s", Key: "k"},
+								VectorIndex: &VectorIndexConfig{
+									HNSW:    &HNSWConfig{M: ptr(16)},
+									IVFFlat: &IVFFlatConfig{Nlist: ptr(100)},
+								},
+							}},
+						},
+					},
+				}
+			},
+			wantError: "only one of hnsw or ivfFlat can be specified",
+		},
+		{
+			name: "neither hnsw nor ivfFlat is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Providers = &ProvidersSpec{
+					VectorIo: &VectorIOProvidersSpec{
+						Remote: &VectorIORemoteProviders{
+							Pgvector: []PgvectorProvider{{
+								Password:    SecretKeyRef{Name: "s", Key: "k"},
+								VectorIndex: &VectorIndexConfig{},
+							}},
+						},
+					},
+				}
+			},
+			wantError: "one of hnsw or ivfFlat must be specified",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			tt.mutate(obj)
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected success, got: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+			} else {
+				requireCELError(t, err, tt.wantError)
+			}
+		})
+	}
+}
+
+// emptyStringTest defines a test case for CEL rules of the form
 // `!has(self.X) || self.X.size() > 0` that cannot be triggered via typed Go
 // structs because `omitempty` strips empty strings from the JSON payload.
 // These rules guard against raw JSON/YAML submissions (e.g. kubectl apply)
 // that explicitly set an optional string field to "".
-func TestCEL_EmptyStringViaUnstructured(t *testing.T) {
-	ns := createCELTestNamespace(t, "cel-unstr")
+type emptyStringTest struct {
+	name      string
+	mutate    func(map[string]any)
+	wantError string
+}
 
-	tests := []struct {
-		name      string
-		mutate    func(map[string]any)
-		wantError string
-	}{
+func runEmptyStringTests(t *testing.T, ns string, tests []emptyStringTest) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := validUnstructuredOGXServer(t, uniqueName(), ns)
+			tt.mutate(raw)
+			err := createUnstructured(t, raw)
+			requireAPIError(t, err, tt.wantError)
+		})
+	}
+}
+
+func TestCEL_EmptyStringViaUnstructured_SpecFields(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-unstr-spec")
+
+	runEmptyStringTests(t, ns, []emptyStringTest{
 		{
 			name: "custom provider with empty id is invalid",
 			mutate: func(raw map[string]any) {
@@ -969,14 +1048,308 @@ func TestCEL_EmptyStringViaUnstructured(t *testing.T) {
 			},
 			wantError: "serviceAccountName must not be empty if specified",
 		},
-	}
+	})
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw := validUnstructuredOGXServer(t, uniqueName(), ns)
-			tt.mutate(raw)
-			err := createUnstructured(t, raw)
-			requireAPIError(t, err, tt.wantError)
-		})
-	}
+func TestCEL_EmptyStringViaUnstructured_InferenceProviders(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-unstr-inf")
+
+	runEmptyStringTests(t, ns, []emptyStringTest{
+		{
+			name: "openai provider with empty endpoint is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"endpoint": "", "apiKey": map[string]any{"name": "s", "key": "k"}},
+				}, "spec", "providers", "inference", "remote", "openai")
+			},
+			wantError: "endpoint must not be empty if specified",
+		},
+		{
+			name: "azure provider with empty apiVersion is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"endpoint": "https://az", "apiKey": map[string]any{"name": "s", "key": "k"}, "apiVersion": ""},
+				}, "spec", "providers", "inference", "remote", "azure")
+			},
+			wantError: "apiVersion must not be empty if specified",
+		},
+		{
+			name: "azure provider with empty apiType is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"endpoint": "https://az", "apiKey": map[string]any{"name": "s", "key": "k"}, "apiType": ""},
+				}, "spec", "providers", "inference", "remote", "azure")
+			},
+			wantError: "apiType must not be empty if specified",
+		},
+		{
+			name: "bedrock provider with empty awsRoleArn is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"region": "us-east-1", "awsRoleArn": ""},
+				}, "spec", "providers", "inference", "remote", "bedrock")
+			},
+			wantError: "awsRoleArn must not be empty if specified",
+		},
+		{
+			name: "bedrock provider with empty profileName is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"region": "us-east-1", "profileName": ""},
+				}, "spec", "providers", "inference", "remote", "bedrock")
+			},
+			wantError: "profileName must not be empty if specified",
+		},
+		{
+			name: "bedrock provider with empty retryMode is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"region": "us-east-1", "retryMode": ""},
+				}, "spec", "providers", "inference", "remote", "bedrock")
+			},
+			wantError: "retryMode must not be empty if specified",
+		},
+		{
+			name: "bedrock provider with empty awsWebIdentityTokenFile is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"region": "us-east-1", "awsWebIdentityTokenFile": ""},
+				}, "spec", "providers", "inference", "remote", "bedrock")
+			},
+			wantError: "awsWebIdentityTokenFile must not be empty if specified",
+		},
+		{
+			name: "bedrock provider with empty awsRoleSessionName is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"region": "us-east-1", "awsRoleSessionName": ""},
+				}, "spec", "providers", "inference", "remote", "bedrock")
+			},
+			wantError: "awsRoleSessionName must not be empty if specified",
+		},
+		{
+			name: "vertexai provider with empty location is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"project": "my-project", "location": ""},
+				}, "spec", "providers", "inference", "remote", "vertexai")
+			},
+			wantError: "location must not be empty if specified",
+		},
+		{
+			name: "watsonx provider with empty endpoint is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"apiKey": map[string]any{"name": "s", "key": "k"}, "endpoint": ""},
+				}, "spec", "providers", "inference", "remote", "watsonx")
+			},
+			wantError: "endpoint must not be empty if specified",
+		},
+		{
+			name: "watsonx provider with empty projectId is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"apiKey": map[string]any{"name": "s", "key": "k"}, "projectId": ""},
+				}, "spec", "providers", "inference", "remote", "watsonx")
+			},
+			wantError: "projectId must not be empty if specified",
+		},
+	})
+}
+
+func TestCEL_EmptyStringViaUnstructured_VectorIOAndFiles(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-unstr-vio")
+
+	runEmptyStringTests(t, ns, []emptyStringTest{
+		{
+			name: "pgvector provider with empty host is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"password": map[string]any{"name": "s", "key": "k"}, "host": ""},
+				}, "spec", "providers", "vectorIo", "remote", "pgvector")
+			},
+			wantError: "host must not be empty if specified",
+		},
+		{
+			name: "pgvector provider with empty db is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"password": map[string]any{"name": "s", "key": "k"}, "db": ""},
+				}, "spec", "providers", "vectorIo", "remote", "pgvector")
+			},
+			wantError: "db must not be empty if specified",
+		},
+		{
+			name: "pgvector provider with empty user is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"password": map[string]any{"name": "s", "key": "k"}, "user": ""},
+				}, "spec", "providers", "vectorIo", "remote", "pgvector")
+			},
+			wantError: "user must not be empty if specified",
+		},
+		{
+			name: "milvus provider with empty consistencyLevel is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"uri": "http://milvus:19530", "consistencyLevel": ""},
+				}, "spec", "providers", "vectorIo", "remote", "milvus")
+			},
+			wantError: "consistencyLevel must not be empty if specified",
+		},
+		{
+			name: "qdrant provider with empty url is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"url": "", "host": "qdrant"},
+				}, "spec", "providers", "vectorIo", "remote", "qdrant")
+			},
+			wantError: "url must not be empty if specified",
+		},
+		{
+			name: "qdrant provider with empty host is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"url": "http://qdrant:6333", "host": ""},
+				}, "spec", "providers", "vectorIo", "remote", "qdrant")
+			},
+			wantError: "host must not be empty if specified",
+		},
+		{
+			name: "qdrant provider with empty location is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"url": "http://qdrant:6333", "location": ""},
+				}, "spec", "providers", "vectorIo", "remote", "qdrant")
+			},
+			wantError: "location must not be empty if specified",
+		},
+		{
+			name: "qdrant provider with empty prefix is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{"url": "http://qdrant:6333", "prefix": ""},
+				}, "spec", "providers", "vectorIo", "remote", "qdrant")
+			},
+			wantError: "prefix must not be empty if specified",
+		},
+		{
+			name: "s3 provider with empty region is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"bucketName": "my-bucket", "region": "",
+				}, "spec", "providers", "files", "remote", "s3")
+			},
+			wantError: "region must not be empty if specified",
+		},
+		{
+			name: "s3 provider with empty endpointUrl is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"bucketName": "my-bucket", "endpointUrl": "",
+				}, "spec", "providers", "files", "remote", "s3")
+			},
+			wantError: "endpointUrl must not be empty if specified",
+		},
+	})
+}
+
+func TestCEL_EmptyStringViaUnstructured_ResponsesAndNetwork(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-unstr-rsp")
+
+	runEmptyStringTests(t, ns, []emptyStringTest{
+		{
+			name: "vectorStoresConfig with empty defaultProviderId is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"defaultProviderId": "",
+				}, "spec", "providers", "responses", "inline", "builtin", "vectorStoresConfig")
+			},
+			wantError: "defaultProviderId must not be empty if specified",
+		},
+		{
+			name: "compactionConfig with empty summarizationPrompt is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"summarizationPrompt": "",
+				}, "spec", "providers", "responses", "inline", "builtin", "compactionConfig")
+			},
+			wantError: "summarizationPrompt must not be empty if specified",
+		},
+		{
+			name: "compactionConfig with empty summaryPrefix is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"summaryPrefix": "",
+				}, "spec", "providers", "responses", "inline", "builtin", "compactionConfig")
+			},
+			wantError: "summaryPrefix must not be empty if specified",
+		},
+		{
+			name: "compactionConfig with empty summarizationModel is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"summarizationModel": "",
+				}, "spec", "providers", "responses", "inline", "builtin", "compactionConfig")
+			},
+			wantError: "summarizationModel must not be empty if specified",
+		},
+		{
+			name: "compactionConfig with empty tokenizerEncoding is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, map[string]any{
+					"tokenizerEncoding": "",
+				}, "spec", "providers", "responses", "inline", "builtin", "compactionConfig")
+			},
+			wantError: "tokenizerEncoding must not be empty if specified",
+		},
+		{
+			name: "proxy config with empty url is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{
+						"endpoint": "https://vllm:8000",
+						"network":  map[string]any{"proxy": map[string]any{"url": ""}},
+					},
+				}, "spec", "providers", "inference", "remote", "vllm")
+			},
+			wantError: "url must not be empty if specified",
+		},
+		{
+			name: "proxy config with empty http is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{
+						"endpoint": "https://vllm:8000",
+						"network":  map[string]any{"proxy": map[string]any{"http": ""}},
+					},
+				}, "spec", "providers", "inference", "remote", "vllm")
+			},
+			wantError: "http must not be empty if specified",
+		},
+		{
+			name: "proxy config with empty https is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{
+						"endpoint": "https://vllm:8000",
+						"network":  map[string]any{"proxy": map[string]any{"https": ""}},
+					},
+				}, "spec", "providers", "inference", "remote", "vllm")
+			},
+			wantError: "https must not be empty if specified",
+		},
+		{
+			name: "proxy config with empty cacert is invalid",
+			mutate: func(raw map[string]any) {
+				setNestedField(raw, []any{
+					map[string]any{
+						"endpoint": "https://vllm:8000",
+						"network":  map[string]any{"proxy": map[string]any{"cacert": ""}},
+					},
+				}, "spec", "providers", "inference", "remote", "vllm")
+			},
+			wantError: "cacert must not be empty if specified",
+		},
+	})
 }

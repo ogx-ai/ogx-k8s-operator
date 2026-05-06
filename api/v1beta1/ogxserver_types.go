@@ -95,6 +95,24 @@ type SecretKeyRef struct {
 	// Key is the key within the Secret.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
+	Key string `json:"key"`
+}
+
+// ConfigMapKeyRef references a key within a ConfigMap.
+// The ConfigMap must be in the same namespace as the OGXServer and must have
+// the label ogx.io/watch: "true" to be detected by the operator's cache.
+type ConfigMapKeyRef struct {
+	// Name is the name of the ConfigMap.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Key is the key within the ConfigMap.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
 	Key string `json:"key"`
 }
 
@@ -154,6 +172,8 @@ type KVStorageSpec struct {
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
 	// Password references a Secret for Redis authentication.
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
 	Password *SecretKeyRef `json:"password,omitempty"`
 }
@@ -169,6 +189,8 @@ type SQLStorageSpec struct {
 	Type string `json:"type,omitempty"`
 	// ConnectionString references a Secret containing the database connection string.
 	// Required when type is "postgres".
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
 	ConnectionString *SecretKeyRef `json:"connectionString,omitempty"`
 }
@@ -183,23 +205,6 @@ type StateStorageSpec struct {
 	SQL *SQLStorageSpec `json:"sql,omitempty"`
 }
 
-// CABundleConfig defines the CA bundle configuration for custom certificates.
-type CABundleConfig struct {
-	// ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
-	// The ConfigMap must be in the same namespace as the OGXServer and must have
-	// the label ogx.io/watch: "true" to be detected by the operator's cache.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	ConfigMapName string `json:"configMapName"`
-	// ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
-	// All certificates from these keys will be concatenated into a single CA bundle file.
-	// +optional
-	// +kubebuilder:validation:MaxItems=50
-	// +kubebuilder:validation:Items:Pattern="^[a-zA-Z0-9]([a-zA-Z0-9\\-_.]*[a-zA-Z0-9])?$"
-	// +kubebuilder:validation:Items:MaxLength=253
-	ConfigMapKeys []string `json:"configMapKeys,omitempty"`
-}
-
 // TLSSpec defines TLS termination configuration for the server.
 type TLSSpec struct {
 	// SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
@@ -209,6 +214,43 @@ type TLSSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	SecretName string `json:"secretName"`
+}
+
+// TrustConfig configures trust anchors for verifying outbound TLS connections.
+type TrustConfig struct {
+	// CACertificates lists ConfigMap keys containing PEM-encoded CA certificates.
+	// All certificates are concatenated into a single trust bundle.
+	// Referenced ConfigMaps must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	CACertificates []ConfigMapKeyRef `json:"caCertificates,omitempty"`
+}
+
+// IdentityConfig configures client certificate identity for mTLS authentication.
+type IdentityConfig struct {
+	// Cert references a ConfigMap key containing the PEM-encoded TLS client certificate.
+	// The ConfigMap must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +kubebuilder:validation:Required
+	Cert ConfigMapKeyRef `json:"cert"`
+	// Key references a Secret key containing the PEM-encoded TLS client private key.
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +kubebuilder:validation:Required
+	Key SecretKeyRef `json:"key"`
+}
+
+// TLSClientConfig groups outbound TLS settings: trust anchors and client identity.
+type TLSClientConfig struct {
+	// Trust configures CA certificates for verifying outbound TLS connections
+	// to providers and backends.
+	// +optional
+	Trust *TrustConfig `json:"trust,omitempty"`
+	// Identity configures client certificate and key for mTLS authentication
+	// with providers and backends.
+	// +optional
+	Identity *IdentityConfig `json:"identity,omitempty"`
 }
 
 // NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
@@ -389,17 +431,6 @@ type WorkloadSpec struct {
 	Overrides *WorkloadOverrides `json:"overrides,omitempty"`
 }
 
-// OverrideConfigSpec specifies a user-provided ConfigMap for full config.yaml override.
-// Mutually exclusive with providers, resources, storage, and disabled.
-type OverrideConfigSpec struct {
-	// ConfigMapName is the name of the ConfigMap containing config.yaml.
-	// The ConfigMap must be in the same namespace as the OGXServer and must have
-	// the label ogx.io/watch: "true" to be detected by the operator's cache.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	ConfigMapName string `json:"configMapName"`
-}
-
 // OGXServerSpec defines the desired state of OGXServer.
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.providers)",message="overrideConfig and providers are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
@@ -411,7 +442,6 @@ type OverrideConfigSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'files') || !has(self.providers.files)",message="files cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'batches') || !has(self.providers.batches)",message="batches cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'responses') || !has(self.providers.responses)",message="responses cannot be both in providers and disabledAPIs"
-// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'safety') || !has(self.providers.safety)",message="safety cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -434,23 +464,25 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=8
-	// +kubebuilder:validation:items:Enum=agents;batches;inference;responses;safety;tool_runtime;vector_io;files
+	// +kubebuilder:validation:MaxItems=6
+	// +kubebuilder:validation:items:Enum=batches;inference;responses;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// Network defines network access controls.
 	// +optional
 	Network *NetworkSpec `json:"network,omitempty"`
-	// CABundle defines the CA bundle configuration for custom certificates
-	// used to verify outbound TLS connections to providers and backends.
+	// TLS configures outbound TLS trust anchors and client identity for
+	// connections to providers and backends.
 	// +optional
-	CABundle *CABundleConfig `json:"caBundle,omitempty"`
+	TLS *TLSClientConfig `json:"tls,omitempty"`
 	// Workload consolidates Kubernetes deployment settings.
 	// +optional
 	Workload *WorkloadSpec `json:"workload,omitempty"`
-	// OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.
-	// Mutually exclusive with providers, resources, storage, and disabled.
+	// OverrideConfig references a ConfigMap key containing a full config.yaml override.
+	// Mutually exclusive with providers, resources, storage, and disabledAPIs.
+	// The ConfigMap must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
-	OverrideConfig *OverrideConfigSpec `json:"overrideConfig,omitempty"`
+	OverrideConfig *ConfigMapKeyRef `json:"overrideConfig,omitempty"`
 }
 
 // OGXServerPhase represents the current phase of the OGXServer.

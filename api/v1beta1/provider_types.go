@@ -52,6 +52,8 @@ type CustomProvider struct {
 	// SecretRefs is a map of named secret references for provider-specific
 	// connection fields (e.g., host, password). Each key becomes the env var
 	// field suffix and maps to config.<key> with env var substitution.
+	// Each Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +optional
 	// +kubebuilder:validation:MinProperties=1
 	SecretRefs map[string]SecretKeyRef `json:"secretRefs,omitempty"`
@@ -71,8 +73,6 @@ type ProvidersSpec struct {
 	// +optional
 	Inference *InferenceProvidersSpec `json:"inference,omitempty"`
 	// +optional
-	Safety *SafetyProvidersSpec `json:"safety,omitempty"`
-	// +optional
 	VectorIo *VectorIOProvidersSpec `json:"vectorIo,omitempty"`
 	// +optional
 	ToolRuntime *ToolRuntimeProvidersSpec `json:"toolRuntime,omitempty"`
@@ -88,7 +88,7 @@ func (s *ProvidersSpec) IDs() []string {
 	if s == nil {
 		return nil
 	}
-	return slices.Concat(s.Inference.IDs(), s.Safety.IDs(), s.VectorIo.IDs(), s.ToolRuntime.IDs(), s.Files.IDs(), s.Batches.IDs(), s.Responses.IDs())
+	return slices.Concat(s.Inference.IDs(), s.VectorIo.IDs(), s.ToolRuntime.IDs(), s.Files.IDs(), s.Batches.IDs(), s.Responses.IDs())
 }
 
 func (b RoutedProviderBase) deriveOrDefault(defaultID string) string {

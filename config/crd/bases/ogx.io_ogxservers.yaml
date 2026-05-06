@@ -70,45 +70,20 @@ spec:
           spec:
             description: OGXServerSpec defines the desired state of OGXServer.
             properties:
-              caBundle:
-                description: |-
-                  CABundle defines the CA bundle configuration for custom certificates
-                  used to verify outbound TLS connections to providers and backends.
-                properties:
-                  configMapKeys:
-                    description: |-
-                      ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.
-                      All certificates from these keys will be concatenated into a single CA bundle file.
-                    items:
-                      type: string
-                    maxItems: 50
-                    type: array
-                  configMapName:
-                    description: |-
-                      ConfigMapName is the name of the ConfigMap containing CA bundle certificates.
-                      The ConfigMap must be in the same namespace as the OGXServer and must have
-                      the label ogx.io/watch: "true" to be detected by the operator's cache.
-                    minLength: 1
-                    type: string
-                required:
-                - configMapName
-                type: object
               disabledAPIs:
                 description: |-
                   DisabledAPIs lists API names to remove from the generated config.
                   Mutually exclusive with overrideConfig.
                 items:
                   enum:
-                  - agents
                   - batches
                   - inference
                   - responses
-                  - safety
                   - tool_runtime
                   - vector_io
                   - files
                   type: string
-                maxItems: 8
+                maxItems: 6
                 minItems: 1
                 type: array
               distribution:
@@ -583,18 +558,24 @@ spec:
                 type: object
               overrideConfig:
                 description: |-
-                  OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.
-                  Mutually exclusive with providers, resources, storage, and disabled.
+                  OverrideConfig references a ConfigMap key containing a full config.yaml override.
+                  Mutually exclusive with providers, resources, storage, and disabledAPIs.
+                  The ConfigMap must be in the same namespace as the OGXServer
+                  and must have the label ogx.io/watch: "true".
                 properties:
-                  configMapName:
-                    description: |-
-                      ConfigMapName is the name of the ConfigMap containing config.yaml.
-                      The ConfigMap must be in the same namespace as the OGXServer and must have
-                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                  key:
+                    description: Key is the key within the ConfigMap.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                    type: string
+                  name:
+                    description: Name is the name of the ConfigMap.
                     minLength: 1
                     type: string
                 required:
-                - configMapName
+                - key
+                - name
                 type: object
               providers:
                 description: |-
@@ -627,7 +608,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -642,6 +625,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -665,15 +650,23 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           reference:
                             description: InlineReferenceProvider configures inline::reference
                               for batches.
                             properties:
                               maxConcurrentBatches:
+                                description: |-
+                                  MaxConcurrentBatches is the maximum number of concurrent batches
+                                  to process simultaneously.
                                 minimum: 1
                                 type: integer
                               maxConcurrentRequestsPerBatch:
+                                description: |-
+                                  MaxConcurrentRequestsPerBatch is the maximum number of concurrent
+                                  requests to process per batch.
                                 minimum: 1
                                 type: integer
                             type: object
@@ -701,7 +694,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -716,6 +711,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -739,6 +736,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                     type: object
@@ -767,7 +766,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -782,6 +783,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -805,9 +808,17 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           localfs:
                             description: InlineLocalFSProvider configures inline::localfs.
+                            properties:
+                              ttlSecs:
+                                description: TTLSecs is the time-to-live in seconds
+                                  for uploaded files.
+                                minimum: 1
+                                type: integer
                             type: object
                         type: object
                       remote:
@@ -832,7 +843,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -847,6 +860,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -870,20 +885,29 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           s3:
                             description: S3Provider configures a remote::s3 files
                               provider instance.
                             properties:
+                              autoCreateBucket:
+                                description: |-
+                                  AutoCreateBucket controls whether to automatically create the S3 bucket
+                                  if it doesn't exist.
+                                type: boolean
                               awsAccessKeyId:
                                 description: |-
-                                  SecretKeyRef references a specific key in a Kubernetes Secret.
-                                  The Secret must be in the same namespace as the OGXServer and must have
-                                  the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  AWSAccessKeyID is the AWS access key ID (optional if using IAM roles).
+                                  The Secret must be in the same namespace as the OGXServer
+                                  and must have the label ogx.io/watch: "true".
                                 properties:
                                   key:
                                     description: Key is the key within the Secret.
+                                    maxLength: 253
                                     minLength: 1
+                                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                     type: string
                                   name:
                                     description: Name is the name of the Kubernetes
@@ -896,13 +920,15 @@ spec:
                                 type: object
                               awsSecretAccessKey:
                                 description: |-
-                                  SecretKeyRef references a specific key in a Kubernetes Secret.
-                                  The Secret must be in the same namespace as the OGXServer and must have
-                                  the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                  AWSSecretAccessKey is the AWS secret access key (optional if using IAM roles).
+                                  The Secret must be in the same namespace as the OGXServer
+                                  and must have the label ogx.io/watch: "true".
                                 properties:
                                   key:
                                     description: Key is the key within the Secret.
+                                    maxLength: 253
                                     minLength: 1
+                                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                     type: string
                                   name:
                                     description: Name is the name of the Kubernetes
@@ -914,16 +940,27 @@ spec:
                                 - name
                                 type: object
                               bucketName:
+                                description: BucketName is the S3 bucket name to store
+                                  files.
                                 minLength: 1
                                 type: string
                               endpointUrl:
+                                description: EndpointURL is a custom S3 endpoint URL
+                                  (for MinIO, LocalStack, etc.).
                                 type: string
                               region:
-                                default: us-east-1
+                                description: Region is the AWS region where the bucket
+                                  is located.
                                 type: string
                             required:
                             - bucketName
                             type: object
+                            x-kubernetes-validations:
+                            - message: region must not be empty if specified
+                              rule: '!has(self.region) || self.region.size() > 0'
+                            - message: endpointUrl must not be empty if specified
+                              rule: '!has(self.endpointUrl) || self.endpointUrl.size()
+                                > 0'
                         type: object
                     type: object
                   inference:
@@ -952,7 +989,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -967,6 +1006,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -990,21 +1031,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
-                            type: array
-                          sentenceTransformers:
-                            items:
-                              description: InlineSentenceTransformersProvider enables
-                                inline::sentence-transformers.
-                              properties:
-                                id:
-                                  description: |-
-                                    ID is a unique provider identifier. Derived from the provider
-                                    type when omitted. Must be unique across all providers.
-                                  type: string
-                              type: object
-                              x-kubernetes-validations:
-                              - message: id must not be empty if specified
-                                rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                       remote:
@@ -1016,15 +1044,26 @@ spec:
                               description: AzureProvider configures a remote::azure
                                 inference provider instance.
                               properties:
+                                allowedModels:
+                                  description: |-
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the authentication credential for the Azure provider.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1035,9 +1074,18 @@ spec:
                                   - key
                                   - name
                                   type: object
+                                apiType:
+                                  description: APIType is the Azure API type (e.g.,
+                                    azure).
+                                  type: string
                                 apiVersion:
+                                  description: APIVersion is the Azure API version
+                                    (e.g., 2024-12-01-preview).
                                   type: string
                                 endpoint:
+                                  description: |-
+                                    Endpoint is the Azure API base URL
+                                    (e.g., https://your-resource-name.openai.azure.com/openai/v1).
                                   minLength: 1
                                   type: string
                                 id:
@@ -1045,28 +1093,167 @@ spec:
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
                               required:
                               - apiKey
                               - endpoint
                               type: object
                               x-kubernetes-validations:
+                              - message: apiVersion must not be empty if specified
+                                rule: '!has(self.apiVersion) || self.apiVersion.size()
+                                  > 0'
+                              - message: apiType must not be empty if specified
+                                rule: '!has(self.apiType) || self.apiType.size() >
+                                  0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           bedrock:
                             items:
                               description: BedrockProvider configures a remote::bedrock
                                 inference provider instance.
                               properties:
-                                awsAccessKeyId:
+                                allowedModels:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
+                                apiKey:
+                                  description: |-
+                                    APIKey is the authentication credential for the Bedrock provider.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                                      type: string
+                                    name:
+                                      description: Name is the name of the Kubernetes
+                                        Secret.
+                                      minLength: 1
+                                      type: string
+                                  required:
+                                  - key
+                                  - name
+                                  type: object
+                                awsAccessKeyId:
+                                  description: |-
+                                    AWSAccessKeyID is the AWS access key to use.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
+                                  properties:
+                                    key:
+                                      description: Key is the key within the Secret.
+                                      maxLength: 253
+                                      minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1078,16 +1265,23 @@ spec:
                                   - name
                                   type: object
                                 awsRoleArn:
+                                  description: AWSRoleArn is the AWS role ARN to assume.
+                                  type: string
+                                awsRoleSessionName:
+                                  description: AWSRoleSessionName is the session name
+                                    to use when assuming a role.
                                   type: string
                                 awsSecretAccessKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    AWSSecretAccessKey is the AWS secret access key to use.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1100,13 +1294,15 @@ spec:
                                   type: object
                                 awsSessionToken:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    AWSSessionToken is the AWS session token to use.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1117,20 +1313,172 @@ spec:
                                   - key
                                   - name
                                   type: object
+                                awsWebIdentityTokenFile:
+                                  description: AWSWebIdentityTokenFile is the path
+                                    to the web identity token file.
+                                  type: string
+                                connectTimeout:
+                                  description: ConnectTimeout is the connection timeout
+                                    in seconds.
+                                  minimum: 1
+                                  type: integer
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
+                                profileName:
+                                  description: ProfileName is the AWS profile name
+                                    that contains credentials to use.
+                                  type: string
+                                readTimeout:
+                                  description: ReadTimeout is the read timeout in
+                                    seconds.
+                                  minimum: 1
+                                  type: integer
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
                                 region:
+                                  description: Region is the AWS region for the Bedrock
+                                    Runtime endpoint.
                                   minLength: 1
                                   type: string
+                                retryMode:
+                                  description: RetryMode is the type of retries to
+                                    perform (e.g., standard, adaptive).
+                                  type: string
+                                sessionTTL:
+                                  description: SessionTTL is the time in seconds until
+                                    a session expires.
+                                  minimum: 1
+                                  type: integer
+                                totalMaxAttempts:
+                                  description: |-
+                                    TotalMaxAttempts is the maximum number of attempts for a single request,
+                                    including the initial attempt.
+                                  minimum: 1
+                                  type: integer
                               required:
                               - region
                               type: object
                               x-kubernetes-validations:
+                              - message: awsRoleArn must not be empty if specified
+                                rule: '!has(self.awsRoleArn) || self.awsRoleArn.size()
+                                  > 0'
+                              - message: awsWebIdentityTokenFile must not be empty
+                                  if specified
+                                rule: '!has(self.awsWebIdentityTokenFile) || self.awsWebIdentityTokenFile.size()
+                                  > 0'
+                              - message: awsRoleSessionName must not be empty if specified
+                                rule: '!has(self.awsRoleSessionName) || self.awsRoleSessionName.size()
+                                  > 0'
+                              - message: profileName must not be empty if specified
+                                rule: '!has(self.profileName) || self.profileName.size()
+                                  > 0'
+                              - message: retryMode must not be empty if specified
+                                rule: '!has(self.retryMode) || self.retryMode.size()
+                                  > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           custom:
                             items:
@@ -1151,7 +1499,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1166,6 +1516,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1189,21 +1541,34 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           openai:
                             items:
                               description: OpenAIProvider configures a remote::openai
                                 inference provider instance.
                               properties:
+                                allowedModels:
+                                  description: |-
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the authentication credential for the OpenAI provider.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1215,56 +1580,289 @@ spec:
                                   - name
                                   type: object
                                 endpoint:
+                                  description: Endpoint is the base URL for the OpenAI
+                                    API.
                                   type: string
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
                               required:
                               - apiKey
                               type: object
                               x-kubernetes-validations:
+                              - message: endpoint must not be empty if specified
+                                rule: '!has(self.endpoint) || self.endpoint.size()
+                                  > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           vertexai:
                             items:
                               description: VertexAIProvider configures a remote::vertexai
                                 inference provider instance.
                               properties:
+                                allowedModels:
+                                  description: |-
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
                                 location:
-                                  default: global
+                                  description: Location is the Google Cloud location
+                                    for Vertex AI.
                                   type: string
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
                                 project:
+                                  description: Project is the Google Cloud project
+                                    ID for Vertex AI.
                                   minLength: 1
                                   type: string
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
                               required:
                               - project
                               type: object
                               x-kubernetes-validations:
+                              - message: location must not be empty if specified
+                                rule: '!has(self.location) || self.location.size()
+                                  > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           vllm:
                             items:
                               description: VLLMProvider configures a remote::vllm
                                 inference provider instance.
                               properties:
+                                allowedModels:
+                                  description: |-
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
                                 apiToken:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIToken is the authentication token for the vLLM endpoint.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1276,6 +1874,8 @@ spec:
                                   - name
                                   type: object
                                 endpoint:
+                                  description: Endpoint is the URL for the vLLM model
+                                    serving endpoint.
                                   minLength: 1
                                   type: string
                                 id:
@@ -1284,29 +1884,143 @@ spec:
                                     type when omitted. Must be unique across all providers.
                                   type: string
                                 maxTokens:
+                                  description: MaxTokens is the maximum number of
+                                    tokens to generate.
                                   minimum: 1
                                   type: integer
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
                               required:
                               - endpoint
                               type: object
                               x-kubernetes-validations:
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           watsonx:
                             items:
                               description: WatsonxProvider configures a remote::watsonx
                                 inference provider instance.
                               properties:
+                                allowedModels:
+                                  description: |-
+                                    AllowedModels restricts which models can be registered with this provider.
+                                    When empty, all models are allowed.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the authentication credential for the watsonx provider.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1318,20 +2032,136 @@ spec:
                                   - name
                                   type: object
                                 endpoint:
+                                  description: Endpoint is the base URL for accessing
+                                    watsonx.ai.
                                   type: string
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                network:
+                                  description: |-
+                                    Network configures network settings (TLS, proxy, timeouts, headers)
+                                    for the remote connection.
+                                  properties:
+                                    headers:
+                                      additionalProperties:
+                                        type: string
+                                      description: Headers specifies additional HTTP
+                                        headers to include in all requests.
+                                      minProperties: 1
+                                      type: object
+                                    proxy:
+                                      description: Proxy configures HTTP proxy settings.
+                                      properties:
+                                        cacert:
+                                          description: CACert is the path to a CA
+                                            certificate for verifying the proxy's
+                                            certificate.
+                                          type: string
+                                        http:
+                                          description: HTTP is the proxy URL for HTTP
+                                            connections.
+                                          type: string
+                                        https:
+                                          description: HTTPS is the proxy URL for
+                                            HTTPS connections.
+                                          type: string
+                                        noProxy:
+                                          description: NoProxy is a list of hosts
+                                            that should bypass the proxy.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        url:
+                                          description: URL is the proxy URL for all
+                                            connections.
+                                          type: string
+                                      type: object
+                                      x-kubernetes-validations:
+                                      - message: url must not be empty if specified
+                                        rule: '!has(self.url) || self.url.size() >
+                                          0'
+                                      - message: http must not be empty if specified
+                                        rule: '!has(self.http) || self.http.size()
+                                          > 0'
+                                      - message: https must not be empty if specified
+                                        rule: '!has(self.https) || self.https.size()
+                                          > 0'
+                                      - message: cacert must not be empty if specified
+                                        rule: '!has(self.cacert) || self.cacert.size()
+                                          > 0'
+                                    timeout:
+                                      description: Timeout configures connection and
+                                        read timeout settings.
+                                      properties:
+                                        connect:
+                                          description: Connect is the connection timeout
+                                            in seconds.
+                                          minimum: 1
+                                          type: integer
+                                        read:
+                                          description: Read is the read timeout in
+                                            seconds.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    tls:
+                                      description: TLS configures TLS/SSL settings.
+                                      properties:
+                                        ciphers:
+                                          description: Ciphers is a list of allowed
+                                            TLS cipher suites.
+                                          items:
+                                            minLength: 1
+                                            type: string
+                                          minItems: 1
+                                          type: array
+                                        minVersion:
+                                          description: MinVersion sets the minimum
+                                            TLS version.
+                                          enum:
+                                          - TLSv1.2
+                                          - TLSv1.3
+                                          type: string
+                                        verify:
+                                          description: |-
+                                            Verify controls whether TLS certificate verification is enabled.
+                                            Trust anchors and client identity are configured globally via spec.tls.
+                                          type: boolean
+                                      type: object
+                                  type: object
                                 projectId:
+                                  description: ProjectID is the watsonx.ai project
+                                    ID.
                                   type: string
+                                refreshModels:
+                                  description: |-
+                                    RefreshModels controls whether the provider periodically refreshes
+                                    its model list from the remote endpoint.
+                                  type: boolean
+                                timeout:
+                                  description: Timeout is the timeout in seconds for
+                                    HTTP requests.
+                                  minimum: 1
+                                  type: integer
                               required:
                               - apiKey
                               type: object
                               x-kubernetes-validations:
+                              - message: endpoint must not be empty if specified
+                                rule: '!has(self.endpoint) || self.endpoint.size()
+                                  > 0'
+                              - message: projectId must not be empty if specified
+                                rule: '!has(self.projectId) || self.projectId.size()
+                                  > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                     type: object
@@ -1345,6 +2175,313 @@ spec:
                           builtin:
                             description: InlineBuiltinResponsesProvider configures
                               inline::builtin for responses.
+                            properties:
+                              compactionConfig:
+                                description: |-
+                                  CompactionConfig configures conversation compaction behavior
+                                  and prompt templates.
+                                properties:
+                                  defaultCompactThreshold:
+                                    description: |-
+                                      DefaultCompactThreshold is the token count threshold for auto-compaction.
+                                      Conversations exceeding this count will be automatically compacted.
+                                    minimum: 1
+                                    type: integer
+                                  summarizationModel:
+                                    description: |-
+                                      SummarizationModel is the model to use for generating compaction
+                                      summaries. If unset, uses the same model as the conversation.
+                                    type: string
+                                  summarizationPrompt:
+                                    description: |-
+                                      SummarizationPrompt is the prompt used to instruct the model to
+                                      summarize conversation history during compaction.
+                                    type: string
+                                  summaryPrefix:
+                                    description: |-
+                                      SummaryPrefix is text prepended to the compaction summary to frame
+                                      it as a handoff for the next LLM context window.
+                                    type: string
+                                  tokenizerEncoding:
+                                    description: |-
+                                      TokenizerEncoding is the tiktoken encoding name for token counting
+                                      (e.g., "o200k_base", "cl100k_base").
+                                    type: string
+                                type: object
+                                x-kubernetes-validations:
+                                - message: summarizationPrompt must not be empty if
+                                    specified
+                                  rule: '!has(self.summarizationPrompt) || self.summarizationPrompt.size()
+                                    > 0'
+                                - message: summaryPrefix must not be empty if specified
+                                  rule: '!has(self.summaryPrefix) || self.summaryPrefix.size()
+                                    > 0'
+                                - message: summarizationModel must not be empty if
+                                    specified
+                                  rule: '!has(self.summarizationModel) || self.summarizationModel.size()
+                                    > 0'
+                                - message: tokenizerEncoding must not be empty if
+                                    specified
+                                  rule: '!has(self.tokenizerEncoding) || self.tokenizerEncoding.size()
+                                    > 0'
+                              vectorStoresConfig:
+                                description: |-
+                                  VectorStoresConfig configures vector store behavior for file search
+                                  and retrieval-augmented generation.
+                                properties:
+                                  annotationPromptParams:
+                                    description: AnnotationPromptParams configures
+                                      source annotation settings.
+                                    properties:
+                                      annotationInstructionTemplate:
+                                        description: AnnotationInstructionTemplate
+                                          provides instructions for citing sources.
+                                        type: string
+                                      chunkAnnotationTemplate:
+                                        description: ChunkAnnotationTemplate is the
+                                          template for chunks with annotation info.
+                                        type: string
+                                      enableAnnotations:
+                                        description: EnableAnnotations controls whether
+                                          source annotations are included.
+                                        type: boolean
+                                    type: object
+                                  chunkRetrievalParams:
+                                    description: ChunkRetrievalParams configures chunk
+                                      retrieval and ranking.
+                                    properties:
+                                      chunkMultiplier:
+                                        description: ChunkMultiplier multiplies the
+                                          number of chunks retrieved for over-retrieval.
+                                        minimum: 1
+                                        type: integer
+                                      defaultRerankerStrategy:
+                                        description: DefaultRerankerStrategy is the
+                                          default reranking strategy.
+                                        enum:
+                                        - rrf
+                                        - weighted
+                                        - normalized
+                                        type: string
+                                      defaultSearchMode:
+                                        description: DefaultSearchMode is the default
+                                          search mode.
+                                        enum:
+                                        - vector
+                                        - keyword
+                                        - hybrid
+                                        type: string
+                                      maxTokensInContext:
+                                        description: MaxTokensInContext limits total
+                                          tokens allowed in RAG context.
+                                        minimum: 1
+                                        type: integer
+                                      rrfImpactFactor:
+                                        description: |-
+                                          RRFImpactFactor is the impact factor for Reciprocal Rank Fusion reranking.
+                                          Specified as a decimal string (e.g., "60.0").
+                                        type: string
+                                      weightedSearchAlpha:
+                                        description: |-
+                                          WeightedSearchAlpha is the alpha weight for weighted search reranking (0.0-1.0).
+                                          Specified as a decimal string (e.g., "0.5").
+                                        type: string
+                                    type: object
+                                  contextPromptParams:
+                                    description: ContextPromptParams configures context
+                                      prompt templates.
+                                    properties:
+                                      chunkAnnotationTemplate:
+                                        description: ChunkAnnotationTemplate is the
+                                          template for formatting individual chunks.
+                                        type: string
+                                      contextTemplate:
+                                        description: ContextTemplate is the template
+                                          for explaining search results to the model.
+                                        type: string
+                                    type: object
+                                  contextualRetrievalParams:
+                                    description: ContextualRetrievalParams configures
+                                      contextual retrieval during ingestion.
+                                    properties:
+                                      defaultMaxConcurrency:
+                                        description: DefaultMaxConcurrency limits
+                                          concurrent LLM calls for contextualization.
+                                        minimum: 1
+                                        type: integer
+                                      defaultTimeoutSeconds:
+                                        description: DefaultTimeoutSeconds is the
+                                          timeout per LLM contextualization call.
+                                        minimum: 1
+                                        type: integer
+                                      maxDocumentTokens:
+                                        description: MaxDocumentTokens limits document
+                                          size in tokens for contextual retrieval.
+                                        minimum: 1
+                                        type: integer
+                                      model:
+                                        description: Model is the default LLM model
+                                          for contextual retrieval.
+                                        properties:
+                                          embeddingDimensions:
+                                            description: EmbeddingDimensions is the
+                                              dimensionality of the embedding vectors.
+                                            minimum: 1
+                                            type: integer
+                                          modelId:
+                                            description: ModelID is the model identifier.
+                                            minLength: 1
+                                            type: string
+                                          providerId:
+                                            description: ProviderID is the provider
+                                              to use for this model.
+                                            minLength: 1
+                                            type: string
+                                        required:
+                                        - modelId
+                                        - providerId
+                                        type: object
+                                    type: object
+                                  defaultEmbeddingModel:
+                                    description: DefaultEmbeddingModel configures
+                                      the default embedding model.
+                                    properties:
+                                      embeddingDimensions:
+                                        description: EmbeddingDimensions is the dimensionality
+                                          of the embedding vectors.
+                                        minimum: 1
+                                        type: integer
+                                      modelId:
+                                        description: ModelID is the model identifier.
+                                        minLength: 1
+                                        type: string
+                                      providerId:
+                                        description: ProviderID is the provider to
+                                          use for this model.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - modelId
+                                    - providerId
+                                    type: object
+                                  defaultProviderId:
+                                    description: |-
+                                      DefaultProviderID is the vector_io provider to use when multiple
+                                      providers are available and none is specified.
+                                    type: string
+                                  defaultRerankerModel:
+                                    description: DefaultRerankerModel configures the
+                                      default reranker model.
+                                    properties:
+                                      modelId:
+                                        description: ModelID is the model identifier.
+                                        minLength: 1
+                                        type: string
+                                      providerId:
+                                        description: ProviderID is the provider to
+                                          use for this model.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - modelId
+                                    - providerId
+                                    type: object
+                                  fileBatchParams:
+                                    description: FileBatchParams configures file batch
+                                      processing.
+                                    properties:
+                                      cleanupIntervalSeconds:
+                                        description: CleanupIntervalSeconds is the
+                                          interval between expired batch cleanup runs.
+                                        minimum: 1
+                                        type: integer
+                                      fileBatchChunkSize:
+                                        description: FileBatchChunkSize is the number
+                                          of files to process in each batch chunk.
+                                        minimum: 1
+                                        type: integer
+                                      maxConcurrentFilesPerBatch:
+                                        description: MaxConcurrentFilesPerBatch limits
+                                          concurrent files processed per batch.
+                                        minimum: 1
+                                        type: integer
+                                    type: object
+                                  fileIngestionParams:
+                                    description: FileIngestionParams configures file
+                                      ingestion chunk settings.
+                                    properties:
+                                      defaultChunkOverlapTokens:
+                                        description: DefaultChunkOverlapTokens is
+                                          the default overlap between chunks in tokens.
+                                        minimum: 0
+                                        type: integer
+                                      defaultChunkSizeTokens:
+                                        description: DefaultChunkSizeTokens is the
+                                          default chunk size in tokens.
+                                        minimum: 1
+                                        type: integer
+                                    type: object
+                                  fileSearchParams:
+                                    description: FileSearchParams configures file
+                                      search output formatting.
+                                    properties:
+                                      footerTemplate:
+                                        description: FooterTemplate is the template
+                                          for the footer text after search results.
+                                        type: string
+                                      headerTemplate:
+                                        description: HeaderTemplate is the template
+                                          for the header text before search results.
+                                        type: string
+                                    type: object
+                                  rewriteQueryParams:
+                                    description: RewriteQueryParams configures query
+                                      rewriting/expansion. Nil disables rewriting.
+                                    properties:
+                                      maxTokens:
+                                        description: MaxTokens is the maximum number
+                                          of tokens for query expansion responses.
+                                        minimum: 1
+                                        type: integer
+                                      model:
+                                        description: Model is the LLM model used for
+                                          query rewriting.
+                                        properties:
+                                          embeddingDimensions:
+                                            description: EmbeddingDimensions is the
+                                              dimensionality of the embedding vectors.
+                                            minimum: 1
+                                            type: integer
+                                          modelId:
+                                            description: ModelID is the model identifier.
+                                            minLength: 1
+                                            type: string
+                                          providerId:
+                                            description: ProviderID is the provider
+                                              to use for this model.
+                                            minLength: 1
+                                            type: string
+                                        required:
+                                        - modelId
+                                        - providerId
+                                        type: object
+                                      prompt:
+                                        description: |-
+                                          Prompt is the prompt template for query rewriting.
+                                          Use {query} as a placeholder for the original query.
+                                        type: string
+                                      temperature:
+                                        description: |-
+                                          Temperature controls randomness in query rewriting (0.0 = deterministic, 1.0 = creative).
+                                          Specified as a decimal string (e.g., "0.7").
+                                        type: string
+                                    type: object
+                                type: object
+                                x-kubernetes-validations:
+                                - message: defaultProviderId must not be empty if
+                                    specified
+                                  rule: '!has(self.defaultProviderId) || self.defaultProviderId.size()
+                                    > 0'
                             type: object
                           custom:
                             items:
@@ -1365,7 +2502,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1380,6 +2519,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1403,6 +2544,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                       remote:
@@ -1428,7 +2571,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1443,6 +2588,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1466,134 +2613,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
-                            type: array
-                        type: object
-                    type: object
-                  safety:
-                    description: SafetyProvidersSpec configures safety providers.
-                    properties:
-                      inline:
-                        description: SafetyInlineProviders groups inline safety providers.
-                        properties:
-                          custom:
-                            items:
-                              description: CustomProvider defines the configuration
-                                for a custom provider instance.
-                              properties:
-                                id:
-                                  description: |-
-                                    ID is a unique provider identifier. Derived from the provider
-                                    type when omitted. Must be unique across all providers.
-                                  type: string
-                                secretRefs:
-                                  additionalProperties:
-                                    description: |-
-                                      SecretKeyRef references a specific key in a Kubernetes Secret.
-                                      The Secret must be in the same namespace as the OGXServer and must have
-                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
-                                    properties:
-                                      key:
-                                        description: Key is the key within the Secret.
-                                        minLength: 1
-                                        type: string
-                                      name:
-                                        description: Name is the name of the Kubernetes
-                                          Secret.
-                                        minLength: 1
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
-                                  description: |-
-                                    SecretRefs is a map of named secret references for provider-specific
-                                    connection fields (e.g., host, password). Each key becomes the env var
-                                    field suffix and maps to config.<key> with env var substitution.
-                                  minProperties: 1
-                                  type: object
-                                settings:
-                                  description: |-
-                                    Settings contains provider-specific configuration merged into the
-                                    provider's config section in config.yaml. Passed through as-is
-                                    without any secret resolution. Use secretRefs for secret values.
-                                  x-kubernetes-preserve-unknown-fields: true
-                                type:
-                                  description: |-
-                                    Type is the provider type, specified with a "remote::" or "inline::"
-                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
-                                  minLength: 1
-                                  type: string
-                              required:
-                              - type
-                              type: object
-                              x-kubernetes-validations:
-                              - message: type must have a 'remote::' or 'inline::'
-                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
-                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
-                              - message: id must not be empty if specified
-                                rule: '!has(self.id) || self.id.size() > 0'
-                            type: array
-                        type: object
-                      remote:
-                        description: SafetyRemoteProviders groups remote safety providers.
-                        properties:
-                          custom:
-                            items:
-                              description: CustomProvider defines the configuration
-                                for a custom provider instance.
-                              properties:
-                                id:
-                                  description: |-
-                                    ID is a unique provider identifier. Derived from the provider
-                                    type when omitted. Must be unique across all providers.
-                                  type: string
-                                secretRefs:
-                                  additionalProperties:
-                                    description: |-
-                                      SecretKeyRef references a specific key in a Kubernetes Secret.
-                                      The Secret must be in the same namespace as the OGXServer and must have
-                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
-                                    properties:
-                                      key:
-                                        description: Key is the key within the Secret.
-                                        minLength: 1
-                                        type: string
-                                      name:
-                                        description: Name is the name of the Kubernetes
-                                          Secret.
-                                        minLength: 1
-                                        type: string
-                                    required:
-                                    - key
-                                    - name
-                                    type: object
-                                  description: |-
-                                    SecretRefs is a map of named secret references for provider-specific
-                                    connection fields (e.g., host, password). Each key becomes the env var
-                                    field suffix and maps to config.<key> with env var substitution.
-                                  minProperties: 1
-                                  type: object
-                                settings:
-                                  description: |-
-                                    Settings contains provider-specific configuration merged into the
-                                    provider's config section in config.yaml. Passed through as-is
-                                    without any secret resolution. Use secretRefs for secret values.
-                                  x-kubernetes-preserve-unknown-fields: true
-                                type:
-                                  description: |-
-                                    Type is the provider type, specified with a "remote::" or "inline::"
-                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
-                                  minLength: 1
-                                  type: string
-                              required:
-                              - type
-                              type: object
-                              x-kubernetes-validations:
-                              - message: type must have a 'remote::' or 'inline::'
-                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
-                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
-                              - message: id must not be empty if specified
-                                rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                     type: object
@@ -1624,7 +2645,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1639,6 +2662,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1662,6 +2687,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           fileSearch:
                             items:
@@ -1672,10 +2699,276 @@ spec:
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                vectorStoresConfig:
+                                  description: VectorStoresConfig configures vector
+                                    store behavior for file search.
+                                  properties:
+                                    annotationPromptParams:
+                                      description: AnnotationPromptParams configures
+                                        source annotation settings.
+                                      properties:
+                                        annotationInstructionTemplate:
+                                          description: AnnotationInstructionTemplate
+                                            provides instructions for citing sources.
+                                          type: string
+                                        chunkAnnotationTemplate:
+                                          description: ChunkAnnotationTemplate is
+                                            the template for chunks with annotation
+                                            info.
+                                          type: string
+                                        enableAnnotations:
+                                          description: EnableAnnotations controls
+                                            whether source annotations are included.
+                                          type: boolean
+                                      type: object
+                                    chunkRetrievalParams:
+                                      description: ChunkRetrievalParams configures
+                                        chunk retrieval and ranking.
+                                      properties:
+                                        chunkMultiplier:
+                                          description: ChunkMultiplier multiplies
+                                            the number of chunks retrieved for over-retrieval.
+                                          minimum: 1
+                                          type: integer
+                                        defaultRerankerStrategy:
+                                          description: DefaultRerankerStrategy is
+                                            the default reranking strategy.
+                                          enum:
+                                          - rrf
+                                          - weighted
+                                          - normalized
+                                          type: string
+                                        defaultSearchMode:
+                                          description: DefaultSearchMode is the default
+                                            search mode.
+                                          enum:
+                                          - vector
+                                          - keyword
+                                          - hybrid
+                                          type: string
+                                        maxTokensInContext:
+                                          description: MaxTokensInContext limits total
+                                            tokens allowed in RAG context.
+                                          minimum: 1
+                                          type: integer
+                                        rrfImpactFactor:
+                                          description: |-
+                                            RRFImpactFactor is the impact factor for Reciprocal Rank Fusion reranking.
+                                            Specified as a decimal string (e.g., "60.0").
+                                          type: string
+                                        weightedSearchAlpha:
+                                          description: |-
+                                            WeightedSearchAlpha is the alpha weight for weighted search reranking (0.0-1.0).
+                                            Specified as a decimal string (e.g., "0.5").
+                                          type: string
+                                      type: object
+                                    contextPromptParams:
+                                      description: ContextPromptParams configures
+                                        context prompt templates.
+                                      properties:
+                                        chunkAnnotationTemplate:
+                                          description: ChunkAnnotationTemplate is
+                                            the template for formatting individual
+                                            chunks.
+                                          type: string
+                                        contextTemplate:
+                                          description: ContextTemplate is the template
+                                            for explaining search results to the model.
+                                          type: string
+                                      type: object
+                                    contextualRetrievalParams:
+                                      description: ContextualRetrievalParams configures
+                                        contextual retrieval during ingestion.
+                                      properties:
+                                        defaultMaxConcurrency:
+                                          description: DefaultMaxConcurrency limits
+                                            concurrent LLM calls for contextualization.
+                                          minimum: 1
+                                          type: integer
+                                        defaultTimeoutSeconds:
+                                          description: DefaultTimeoutSeconds is the
+                                            timeout per LLM contextualization call.
+                                          minimum: 1
+                                          type: integer
+                                        maxDocumentTokens:
+                                          description: MaxDocumentTokens limits document
+                                            size in tokens for contextual retrieval.
+                                          minimum: 1
+                                          type: integer
+                                        model:
+                                          description: Model is the default LLM model
+                                            for contextual retrieval.
+                                          properties:
+                                            embeddingDimensions:
+                                              description: EmbeddingDimensions is
+                                                the dimensionality of the embedding
+                                                vectors.
+                                              minimum: 1
+                                              type: integer
+                                            modelId:
+                                              description: ModelID is the model identifier.
+                                              minLength: 1
+                                              type: string
+                                            providerId:
+                                              description: ProviderID is the provider
+                                                to use for this model.
+                                              minLength: 1
+                                              type: string
+                                          required:
+                                          - modelId
+                                          - providerId
+                                          type: object
+                                      type: object
+                                    defaultEmbeddingModel:
+                                      description: DefaultEmbeddingModel configures
+                                        the default embedding model.
+                                      properties:
+                                        embeddingDimensions:
+                                          description: EmbeddingDimensions is the
+                                            dimensionality of the embedding vectors.
+                                          minimum: 1
+                                          type: integer
+                                        modelId:
+                                          description: ModelID is the model identifier.
+                                          minLength: 1
+                                          type: string
+                                        providerId:
+                                          description: ProviderID is the provider
+                                            to use for this model.
+                                          minLength: 1
+                                          type: string
+                                      required:
+                                      - modelId
+                                      - providerId
+                                      type: object
+                                    defaultProviderId:
+                                      description: |-
+                                        DefaultProviderID is the vector_io provider to use when multiple
+                                        providers are available and none is specified.
+                                      type: string
+                                    defaultRerankerModel:
+                                      description: DefaultRerankerModel configures
+                                        the default reranker model.
+                                      properties:
+                                        modelId:
+                                          description: ModelID is the model identifier.
+                                          minLength: 1
+                                          type: string
+                                        providerId:
+                                          description: ProviderID is the provider
+                                            to use for this model.
+                                          minLength: 1
+                                          type: string
+                                      required:
+                                      - modelId
+                                      - providerId
+                                      type: object
+                                    fileBatchParams:
+                                      description: FileBatchParams configures file
+                                        batch processing.
+                                      properties:
+                                        cleanupIntervalSeconds:
+                                          description: CleanupIntervalSeconds is the
+                                            interval between expired batch cleanup
+                                            runs.
+                                          minimum: 1
+                                          type: integer
+                                        fileBatchChunkSize:
+                                          description: FileBatchChunkSize is the number
+                                            of files to process in each batch chunk.
+                                          minimum: 1
+                                          type: integer
+                                        maxConcurrentFilesPerBatch:
+                                          description: MaxConcurrentFilesPerBatch
+                                            limits concurrent files processed per
+                                            batch.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    fileIngestionParams:
+                                      description: FileIngestionParams configures
+                                        file ingestion chunk settings.
+                                      properties:
+                                        defaultChunkOverlapTokens:
+                                          description: DefaultChunkOverlapTokens is
+                                            the default overlap between chunks in
+                                            tokens.
+                                          minimum: 0
+                                          type: integer
+                                        defaultChunkSizeTokens:
+                                          description: DefaultChunkSizeTokens is the
+                                            default chunk size in tokens.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    fileSearchParams:
+                                      description: FileSearchParams configures file
+                                        search output formatting.
+                                      properties:
+                                        footerTemplate:
+                                          description: FooterTemplate is the template
+                                            for the footer text after search results.
+                                          type: string
+                                        headerTemplate:
+                                          description: HeaderTemplate is the template
+                                            for the header text before search results.
+                                          type: string
+                                      type: object
+                                    rewriteQueryParams:
+                                      description: RewriteQueryParams configures query
+                                        rewriting/expansion. Nil disables rewriting.
+                                      properties:
+                                        maxTokens:
+                                          description: MaxTokens is the maximum number
+                                            of tokens for query expansion responses.
+                                          minimum: 1
+                                          type: integer
+                                        model:
+                                          description: Model is the LLM model used
+                                            for query rewriting.
+                                          properties:
+                                            embeddingDimensions:
+                                              description: EmbeddingDimensions is
+                                                the dimensionality of the embedding
+                                                vectors.
+                                              minimum: 1
+                                              type: integer
+                                            modelId:
+                                              description: ModelID is the model identifier.
+                                              minLength: 1
+                                              type: string
+                                            providerId:
+                                              description: ProviderID is the provider
+                                                to use for this model.
+                                              minLength: 1
+                                              type: string
+                                          required:
+                                          - modelId
+                                          - providerId
+                                          type: object
+                                        prompt:
+                                          description: |-
+                                            Prompt is the prompt template for query rewriting.
+                                            Use {query} as a placeholder for the original query.
+                                          type: string
+                                        temperature:
+                                          description: |-
+                                            Temperature controls randomness in query rewriting (0.0 = deterministic, 1.0 = creative).
+                                            Specified as a decimal string (e.g., "0.7").
+                                          type: string
+                                      type: object
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: defaultProviderId must not be empty if
+                                      specified
+                                    rule: '!has(self.defaultProviderId) || self.defaultProviderId.size()
+                                      > 0'
                               type: object
                               x-kubernetes-validations:
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                       remote:
@@ -1689,13 +2982,15 @@ spec:
                               properties:
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the Brave Search API key.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1712,6 +3007,8 @@ spec:
                                     type when omitted. Must be unique across all providers.
                                   type: string
                                 maxResults:
+                                  description: MaxResults is the maximum number of
+                                    search results to return.
                                   minimum: 1
                                   type: integer
                               required:
@@ -1720,6 +3017,8 @@ spec:
                               x-kubernetes-validations:
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           custom:
                             items:
@@ -1740,7 +3039,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1755,6 +3056,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1778,6 +3081,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           modelContextProtocol:
                             items:
@@ -1793,6 +3098,8 @@ spec:
                               x-kubernetes-validations:
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           tavilySearch:
                             items:
@@ -1801,13 +3108,15 @@ spec:
                               properties:
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the Tavily Search API key.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1824,6 +3133,8 @@ spec:
                                     type when omitted. Must be unique across all providers.
                                   type: string
                                 maxResults:
+                                  description: MaxResults is the maximum number of
+                                    search results to return.
                                   minimum: 1
                                   type: integer
                               required:
@@ -1832,6 +3143,8 @@ spec:
                               x-kubernetes-validations:
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                     type: object
@@ -1861,7 +3174,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1876,6 +3191,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1899,6 +3216,8 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                       remote:
@@ -1924,7 +3243,9 @@ spec:
                                     properties:
                                       key:
                                         description: Key is the key within the Secret.
+                                        maxLength: 253
                                         minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                         type: string
                                       name:
                                         description: Name is the name of the Kubernetes
@@ -1939,6 +3260,8 @@ spec:
                                     SecretRefs is a map of named secret references for provider-specific
                                     connection fields (e.g., host, password). Each key becomes the env var
                                     field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   minProperties: 1
                                   type: object
                                 settings:
@@ -1962,12 +3285,18 @@ spec:
                                 rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           milvus:
                             items:
                               description: MilvusProvider configures a remote::milvus
                                 vector I/O provider instance.
                               properties:
+                                consistencyLevel:
+                                  description: ConsistencyLevel is the consistency
+                                    level of the Milvus server.
+                                  type: string
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
@@ -1975,13 +3304,15 @@ spec:
                                   type: string
                                 token:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    Token is the authentication token for the Milvus server.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -1993,14 +3324,20 @@ spec:
                                   - name
                                   type: object
                                 uri:
+                                  description: URI is the URI of the Milvus server.
                                   minLength: 1
                                   type: string
                               required:
                               - uri
                               type: object
                               x-kubernetes-validations:
+                              - message: consistencyLevel must not be empty if specified
+                                rule: '!has(self.consistencyLevel) || self.consistencyLevel.size()
+                                  > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           pgvector:
                             items:
@@ -2008,10 +3345,19 @@ spec:
                                 vector I/O provider instance.
                               properties:
                                 db:
-                                  default: postgres
+                                  description: DB is the PostgreSQL database name.
+                                  type: string
+                                distanceMetric:
+                                  description: DistanceMetric is the distance metric
+                                    used for vector search.
+                                  enum:
+                                  - COSINE
+                                  - L2
+                                  - L1
+                                  - INNER_PRODUCT
                                   type: string
                                 host:
-                                  default: localhost
+                                  description: Host is the PostgreSQL server hostname.
                                   type: string
                                 id:
                                   description: |-
@@ -2020,13 +3366,15 @@ spec:
                                   type: string
                                 password:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    Password is the PostgreSQL password.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -2038,19 +3386,71 @@ spec:
                                   - name
                                   type: object
                                 port:
-                                  default: 5432
+                                  description: Port is the PostgreSQL server port.
                                   maximum: 65535
                                   minimum: 1
                                   type: integer
                                 user:
-                                  default: postgres
+                                  description: User is the PostgreSQL username.
                                   type: string
+                                vectorIndex:
+                                  description: |-
+                                    VectorIndex configures the vector index strategy for
+                                    Approximate Nearest Neighbor (ANN) search.
+                                  properties:
+                                    hnsw:
+                                      description: HNSW configures an HNSW index.
+                                      properties:
+                                        efConstruction:
+                                          description: EfConstruction controls the
+                                            index build-time accuracy/speed tradeoff.
+                                          minimum: 1
+                                          type: integer
+                                        efSearch:
+                                          description: EfSearch controls the query-time
+                                            accuracy/speed tradeoff.
+                                          minimum: 1
+                                          type: integer
+                                        m:
+                                          description: M is the maximum number of
+                                            connections per element in the HNSW graph.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                    ivfFlat:
+                                      description: IVFFlat configures an IVFFlat index.
+                                      properties:
+                                        nlist:
+                                          description: Nlist is the number of inverted
+                                            lists (clusters).
+                                          minimum: 1
+                                          type: integer
+                                        nprobe:
+                                          description: Nprobe is the number of clusters
+                                            to search at query time.
+                                          minimum: 1
+                                          type: integer
+                                      type: object
+                                  type: object
+                                  x-kubernetes-validations:
+                                  - message: one of hnsw or ivfFlat must be specified
+                                    rule: has(self.hnsw) || has(self.ivfFlat)
+                                  - message: only one of hnsw or ivfFlat can be specified
+                                    rule: '!(has(self.hnsw) && has(self.ivfFlat))'
                               required:
                               - password
                               type: object
                               x-kubernetes-validations:
+                              - message: host must not be empty if specified
+                                rule: '!has(self.host) || self.host.size() > 0'
+                              - message: db must not be empty if specified
+                                rule: '!has(self.db) || self.db.size() > 0'
+                              - message: user must not be empty if specified
+                                rule: '!has(self.user) || self.user.size() > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                           qdrant:
                             items:
@@ -2059,13 +3459,15 @@ spec:
                               properties:
                                 apiKey:
                                   description: |-
-                                    SecretKeyRef references a specific key in a Kubernetes Secret.
-                                    The Secret must be in the same namespace as the OGXServer and must have
-                                    the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    APIKey is the authentication key for the Qdrant server.
+                                    The Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
                                   properties:
                                     key:
                                       description: Key is the key within the Secret.
+                                      maxLength: 253
                                       minLength: 1
+                                      pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                                       type: string
                                     name:
                                       description: Name is the name of the Kubernetes
@@ -2076,25 +3478,68 @@ spec:
                                   - key
                                   - name
                                   type: object
+                                grpcPort:
+                                  description: GRPCPort is the gRPC port of the Qdrant
+                                    server.
+                                  maximum: 65535
+                                  minimum: 1
+                                  type: integer
                                 host:
+                                  description: Host is the hostname of the Qdrant
+                                    server.
                                   type: string
+                                https:
+                                  description: HTTPS controls whether to use HTTPS
+                                    for the connection.
+                                  type: boolean
                                 id:
                                   description: |-
                                     ID is a unique provider identifier. Derived from the provider
                                     type when omitted. Must be unique across all providers.
                                   type: string
+                                location:
+                                  description: Location is the Qdrant server location
+                                    identifier.
+                                  type: string
                                 port:
+                                  description: Port is the REST API port of the Qdrant
+                                    server.
                                   maximum: 65535
                                   minimum: 1
                                   type: integer
+                                preferGrpc:
+                                  description: PreferGRPC controls whether to prefer
+                                    gRPC over REST for communication.
+                                  type: boolean
+                                prefix:
+                                  description: Prefix is the URL path prefix for the
+                                    Qdrant server.
+                                  type: string
+                                timeout:
+                                  description: Timeout is the connection timeout in
+                                    seconds.
+                                  minimum: 1
+                                  type: integer
                                 url:
+                                  description: URL is the URL of the Qdrant server.
                                   type: string
                               type: object
                               x-kubernetes-validations:
                               - message: at least one of url or host must be specified
                                 rule: has(self.url) || has(self.host)
+                              - message: url must not be empty if specified
+                                rule: '!has(self.url) || self.url.size() > 0'
+                              - message: host must not be empty if specified
+                                rule: '!has(self.host) || self.host.size() > 0'
+                              - message: location must not be empty if specified
+                                rule: '!has(self.location) || self.location.size()
+                                  > 0'
+                              - message: prefix must not be empty if specified
+                                rule: '!has(self.prefix) || self.prefix.size() > 0'
                               - message: id must not be empty if specified
                                 rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
                             type: array
                         type: object
                     type: object
@@ -2170,11 +3615,16 @@ spec:
                           when type is "redis".
                         type: string
                       password:
-                        description: Password references a Secret for Redis authentication.
+                        description: |-
+                          Password references a Secret for Redis authentication.
+                          The Secret must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            maxLength: 253
                             minLength: 1
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                             type: string
                           name:
                             description: Name is the name of the Kubernetes Secret.
@@ -2206,10 +3656,14 @@ spec:
                         description: |-
                           ConnectionString references a Secret containing the database connection string.
                           Required when type is "postgres".
+                          The Secret must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
                         properties:
                           key:
                             description: Key is the key within the Secret.
+                            maxLength: 253
                             minLength: 1
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
                             type: string
                           name:
                             description: Name is the name of the Kubernetes Secret.
@@ -2232,6 +3686,95 @@ spec:
                       rule: self.type != 'postgres' || has(self.connectionString)
                     - message: connectionString is only valid when type is postgres
                       rule: '!has(self.connectionString) || self.type == ''postgres'''
+                type: object
+              tls:
+                description: |-
+                  TLS configures outbound TLS trust anchors and client identity for
+                  connections to providers and backends.
+                properties:
+                  identity:
+                    description: |-
+                      Identity configures client certificate and key for mTLS authentication
+                      with providers and backends.
+                    properties:
+                      cert:
+                        description: |-
+                          Cert references a ConfigMap key containing the PEM-encoded TLS client certificate.
+                          The ConfigMap must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
+                        properties:
+                          key:
+                            description: Key is the key within the ConfigMap.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                            type: string
+                          name:
+                            description: Name is the name of the ConfigMap.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      key:
+                        description: |-
+                          Key references a Secret key containing the PEM-encoded TLS client private key.
+                          The Secret must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
+                        properties:
+                          key:
+                            description: Key is the key within the Secret.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                            type: string
+                          name:
+                            description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    required:
+                    - cert
+                    - key
+                    type: object
+                  trust:
+                    description: |-
+                      Trust configures CA certificates for verifying outbound TLS connections
+                      to providers and backends.
+                    properties:
+                      caCertificates:
+                        description: |-
+                          CACertificates lists ConfigMap keys containing PEM-encoded CA certificates.
+                          All certificates are concatenated into a single trust bundle.
+                          Referenced ConfigMaps must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
+                        items:
+                          description: |-
+                            ConfigMapKeyRef references a key within a ConfigMap.
+                            The ConfigMap must be in the same namespace as the OGXServer and must have
+                            the label ogx.io/watch: "true" to be detected by the operator's cache.
+                          properties:
+                            key:
+                              description: Key is the key within the ConfigMap.
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                              type: string
+                            name:
+                              description: Name is the name of the ConfigMap.
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        minItems: 1
+                        type: array
+                    type: object
                 type: object
               workload:
                 description: Workload consolidates Kubernetes deployment settings.
@@ -4743,9 +6286,6 @@ spec:
             - message: responses cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''responses'') || !has(self.providers.responses)'
-            - message: safety cannot be both in providers and disabledAPIs
-              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
-                d == ''safety'') || !has(self.providers.safety)'
           status:
             description: OGXServerStatus defines the observed state of OGXServer.
             properties:

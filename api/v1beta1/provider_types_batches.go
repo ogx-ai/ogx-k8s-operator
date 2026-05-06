@@ -20,9 +20,13 @@ import "slices"
 
 // InlineReferenceProvider configures inline::reference for batches.
 type InlineReferenceProvider struct {
+	// MaxConcurrentBatches is the maximum number of concurrent batches
+	// to process simultaneously.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	MaxConcurrentBatches *int `json:"maxConcurrentBatches,omitempty"`
+	// MaxConcurrentRequestsPerBatch is the maximum number of concurrent
+	// requests to process per batch.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	MaxConcurrentRequestsPerBatch *int `json:"maxConcurrentRequestsPerBatch,omitempty"`
@@ -33,6 +37,8 @@ func (p InlineReferenceProvider) DeriveID() string { return "inline-reference" }
 // BatchesRemoteProviders groups remote batches providers.
 type BatchesRemoteProviders struct {
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 
@@ -48,6 +54,8 @@ type BatchesInlineProviders struct {
 	// +optional
 	Reference *InlineReferenceProvider `json:"reference,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 

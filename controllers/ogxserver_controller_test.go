@@ -185,7 +185,7 @@ server:
 	instance := NewOGXServerBuilder().
 		WithName("test-configmap-reference").
 		WithNamespace(namespace.Name).
-		WithOverrideConfig(configMap.Name).
+		WithOverrideConfig(configMap.Name, "config.yaml").
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
@@ -525,90 +525,6 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 	}
 }
 
-// TestCABundleConfigMapKeyValidation tests that invalid ConfigMap keys are rejected during reconciliation.
-func TestCABundleConfigMapKeyValidation(t *testing.T) {
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
-
-	tests := []struct {
-		name          string
-		configMapKeys []string
-		shouldFail    bool
-		errorContains string
-	}{
-		{
-			name:          "valid ConfigMap keys",
-			configMapKeys: []string{"ca-bundle.crt", "root-ca.pem", "intermediate.crt"},
-			shouldFail:    false,
-		},
-		{
-			name:          "ConfigMap key with path traversal (..) should fail",
-			configMapKeys: []string{"../etc/passwd"},
-			shouldFail:    true,
-			errorContains: "invalid path characters",
-		},
-		{
-			name:          "ConfigMap key with forward slash should fail",
-			configMapKeys: []string{"path/to/cert.crt"},
-			shouldFail:    true,
-			errorContains: "invalid path characters",
-		},
-		{
-			name:          "ConfigMap key with double dots in middle should fail",
-			configMapKeys: []string{"ca..bundle.crt"},
-			shouldFail:    true,
-			errorContains: "invalid path characters",
-		},
-		{
-			name:          "empty ConfigMap key should fail",
-			configMapKeys: []string{""},
-			shouldFail:    true,
-			errorContains: "cannot be empty",
-		},
-		{
-			name:          "ConfigMap key with invalid characters should fail",
-			configMapKeys: []string{"ca bundle with spaces.crt"},
-			shouldFail:    true,
-			errorContains: "invalid characters",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// --- arrange ---
-			namespace := createTestNamespace(t, "test-cabundle-validation")
-			instance := NewOGXServerBuilder().
-				WithName("test-cabundle").
-				WithNamespace(namespace.Name).
-				WithCABundle("test-ca-configmap", tt.configMapKeys).
-				Build()
-
-			require.NoError(t, k8sClient.Create(t.Context(), instance))
-			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
-
-			// --- act ---
-			reconciler := createTestReconciler()
-			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      instance.Name,
-					Namespace: instance.Namespace,
-				},
-			})
-
-			// --- assert ---
-			if tt.shouldFail {
-				require.Error(t, err, "reconciliation should fail for invalid ConfigMap keys")
-				require.Contains(t, err.Error(), tt.errorContains,
-					"error message should indicate the validation failure")
-			} else if err != nil {
-				// For valid keys, reconciliation might fail for other reasons (ConfigMap doesn't exist),
-				// but it should NOT fail due to key validation
-				require.NotContains(t, err.Error(), "failed to validate CA bundle ConfigMap keys",
-					"reconciliation should not fail due to key validation for valid keys")
-			}
-		})
-	}
-}
-
 // TestManagedCABundleConfigMap tests that the operator creates and manages CA bundle ConfigMaps.
 func TestManagedCABundleConfigMap(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
@@ -636,7 +552,10 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		instance := NewOGXServerBuilder().
 			WithName("test-managed").
 			WithNamespace(namespace.Name).
-			WithCABundle("source-ca-bundle", []string{"root-ca.crt", "intermediate.crt"}).
+			WithCACertificates(
+				ogxiov1beta1.ConfigMapKeyRef{Name: "source-ca-bundle", Key: "root-ca.crt"},
+				ogxiov1beta1.ConfigMapKeyRef{Name: "source-ca-bundle", Key: "intermediate.crt"},
+			).
 			Build()
 
 		require.NoError(t, k8sClient.Create(t.Context(), instance))
@@ -690,7 +609,7 @@ func TestManagedCABundleConfigMap(t *testing.T) {
 		instance := NewOGXServerBuilder().
 			WithName("test-update").
 			WithNamespace(namespace.Name).
-			WithCABundle("source-ca-bundle", nil).
+			WithCACertificates(ogxiov1beta1.ConfigMapKeyRef{Name: "source-ca-bundle", Key: "ca-bundle.crt"}).
 			Build()
 
 		require.NoError(t, k8sClient.Create(t.Context(), instance))
@@ -746,7 +665,7 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1234567890ABCDEF
 		instance := NewOGXServerBuilder().
 			WithName("test-reject").
 			WithNamespace(namespace.Name).
-			WithCABundle("source-with-key", nil).
+			WithCACertificates(ogxiov1beta1.ConfigMapKeyRef{Name: "source-with-key", Key: "ca-bundle.crt"}).
 			Build()
 
 		require.NoError(t, k8sClient.Create(t.Context(), instance))
@@ -789,7 +708,7 @@ InvalidCertificateDataThatIsNotValidX509
 		instance := NewOGXServerBuilder().
 			WithName("test-reject-invalid").
 			WithNamespace(namespace.Name).
-			WithCABundle("source-with-invalid-cert", nil).
+			WithCACertificates(ogxiov1beta1.ConfigMapKeyRef{Name: "source-with-invalid-cert", Key: "ca-bundle.crt"}).
 			Build()
 
 		require.NoError(t, k8sClient.Create(t.Context(), instance))
@@ -1073,7 +992,7 @@ func TestMapConfigMapToReconcileRequests(t *testing.T) {
 	instance := NewOGXServerBuilder().
 		WithName("test-cm-mapping").
 		WithNamespace(namespace.Name).
-		WithOverrideConfig(userConfigMap.Name).
+		WithOverrideConfig(userConfigMap.Name, "config.yaml").
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 	t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })

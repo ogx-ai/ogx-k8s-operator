@@ -333,9 +333,13 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `endpoint` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
-| `apiVersion` _string_ |  |  |  |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `endpoint` _string_ | Endpoint is the Azure API base URL<br />(e.g., https://your-resource-name.openai.azure.com/openai/v1). |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the authentication credential for the Azure provider.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `apiVersion` _string_ | APIVersion is the Azure API version (e.g., 2024-12-01-preview). |  |  |
+| `apiType` _string_ | APIType is the Azure API type (e.g., azure). |  |  |
 
 #### BatchesInlineProviders
 
@@ -347,7 +351,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `reference` _[InlineReferenceProvider](#inlinereferenceprovider)_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### BatchesProvidersSpec
 
@@ -370,7 +374,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### BedrockProvider
 
@@ -382,11 +386,23 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `region` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `awsSessionToken` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `awsRoleArn` _string_ |  |  |  |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `region` _string_ | Region is the AWS region for the Bedrock Runtime endpoint. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the authentication credential for the Bedrock provider.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ | AWSAccessKeyID is the AWS access key to use.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ | AWSSecretAccessKey is the AWS secret access key to use.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `awsSessionToken` _[SecretKeyRef](#secretkeyref)_ | AWSSessionToken is the AWS session token to use.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `awsRoleArn` _string_ | AWSRoleArn is the AWS role ARN to assume. |  |  |
+| `awsWebIdentityTokenFile` _string_ | AWSWebIdentityTokenFile is the path to the web identity token file. |  |  |
+| `awsRoleSessionName` _string_ | AWSRoleSessionName is the session name to use when assuming a role. |  |  |
+| `profileName` _string_ | ProfileName is the AWS profile name that contains credentials to use. |  |  |
+| `totalMaxAttempts` _integer_ | TotalMaxAttempts is the maximum number of attempts for a single request,<br />including the initial attempt. |  | Minimum: 1 <br /> |
+| `retryMode` _string_ | RetryMode is the type of retries to perform (e.g., standard, adaptive). |  |  |
+| `connectTimeout` _integer_ | ConnectTimeout is the connection timeout in seconds. |  | Minimum: 1 <br /> |
+| `readTimeout` _integer_ | ReadTimeout is the read timeout in seconds. |  | Minimum: 1 <br /> |
+| `sessionTTL` _integer_ | SessionTTL is the time in seconds until a session expires. |  | Minimum: 1 <br /> |
 
 #### BraveSearchProvider
 
@@ -398,20 +414,17 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
-| `maxResults` _integer_ |  |  | Minimum: 1 <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the Brave Search API key.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `maxResults` _integer_ | MaxResults is the maximum number of search results to return. |  | Minimum: 1 <br /> |
 
-#### CABundleConfig
+#### CompactionConfig
 
-CABundleConfig defines the CA bundle configuration for custom certificates.
+_Underlying type:_ _[struct{SummarizationPrompt string "json:\"summarizationPrompt,omitempty\""; SummaryPrefix string "json:\"summaryPrefix,omitempty\""; SummarizationModel string "json:\"summarizationModel,omitempty\""; DefaultCompactThreshold *int "json:\"defaultCompactThreshold,omitempty\""; TokenizerEncoding string "json:\"tokenizerEncoding,omitempty\""}](#struct{summarizationprompt-string-"json:\"summarizationprompt,omitempty\"";-summaryprefix-string-"json:\"summaryprefix,omitempty\"";-summarizationmodel-string-"json:\"summarizationmodel,omitempty\"";-defaultcompactthreshold-*int-"json:\"defaultcompactthreshold,omitempty\"";-tokenizerencoding-string-"json:\"tokenizerencoding,omitempty\""})_
+
+CompactionConfig configures conversation compaction behavior for responses.
 
 _Appears in:_
-- [OGXServerSpec](#ogxserverspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing CA bundle certificates.<br />The ConfigMap must be in the same namespace as the OGXServer and must have<br />the label ogx.io/watch: "true" to be detected by the operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `configMapKeys` _string array_ | ConfigMapKeys specifies keys within the ConfigMap containing CA bundle data.<br />All certificates from these keys will be concatenated into a single CA bundle file. |  | MaxItems: 50 <br /> |
+- [InlineBuiltinResponsesProvider](#inlinebuiltinresponsesprovider)
 
 #### ConfigGenerationStatus
 
@@ -429,6 +442,22 @@ _Appears in:_
 | `resourceCount` _integer_ | ResourceCount is the number of registered resources. |  |  |
 | `configVersion` _integer_ | ConfigVersion is the config.yaml schema version. |  |  |
 
+#### ConfigMapKeyRef
+
+ConfigMapKeyRef references a key within a ConfigMap.
+The ConfigMap must be in the same namespace as the OGXServer and must have
+the label ogx.io/watch: "true" to be detected by the operator's cache.
+
+_Appears in:_
+- [IdentityConfig](#identityconfig)
+- [OGXServerSpec](#ogxserverspec)
+- [TrustConfig](#trustconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the name of the ConfigMap. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `key` _string_ | Key is the key within the ConfigMap. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$` <br />Required: \{\} <br /> |
+
 #### CustomProvider
 
 CustomProvider defines the configuration for a custom provider instance.
@@ -442,8 +471,6 @@ _Appears in:_
 - [InferenceRemoteProviders](#inferenceremoteproviders)
 - [ResponsesInlineProviders](#responsesinlineproviders)
 - [ResponsesRemoteProviders](#responsesremoteproviders)
-- [SafetyInlineProviders](#safetyinlineproviders)
-- [SafetyRemoteProviders](#safetyremoteproviders)
 - [ToolRuntimeInlineProviders](#toolruntimeinlineproviders)
 - [ToolRuntimeRemoteProviders](#toolruntimeremoteproviders)
 - [VectorIOInlineProviders](#vectorioinlineproviders)
@@ -453,7 +480,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
 | `type` _string_ | Type is the provider type, specified with a "remote::" or "inline::"<br />prefix (e.g., "remote::llama-guard", "inline::my-provider"). |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution. |  | MinProperties: 1 <br /> |
+| `secretRefs` _object (keys:string, values:[SecretKeyRef](#secretkeyref))_ | SecretRefs is a map of named secret references for provider-specific<br />connection fields (e.g., host, password). Each key becomes the env var<br />field suffix and maps to config.<key> with env var substitution.<br />Each Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | MinProperties: 1 <br /> |
 | `settings` _[JSON](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#json-v1-apiextensions-k8s-io)_ | Settings contains provider-specific configuration merged into the<br />provider's config section in config.yaml. Passed through as-is<br />without any secret resolution. Use secretRefs for secret values. |  |  |
 
 #### DistributionConfig
@@ -504,7 +531,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `localfs` _[InlineLocalFSProvider](#inlinelocalfsprovider)_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### FilesProvidersSpec
 
@@ -528,7 +555,19 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `s3` _[S3Provider](#s3provider)_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+
+#### IdentityConfig
+
+IdentityConfig configures client certificate identity for mTLS authentication.
+
+_Appears in:_
+- [TLSClientConfig](#tlsclientconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `cert` _[ConfigMapKeyRef](#configmapkeyref)_ | Cert references a ConfigMap key containing the PEM-encoded TLS client certificate.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `key` _[SecretKeyRef](#secretkeyref)_ | Key references a Secret key containing the PEM-encoded TLS client private key.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
 
 #### InferenceInlineProviders
 
@@ -539,8 +578,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `sentenceTransformers` _[InlineSentenceTransformersProvider](#inlinesentencetransformersprovider) array_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### InferenceProvidersSpec
 
@@ -563,13 +601,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `vllm` _[VLLMProvider](#vllmprovider) array_ |  |  |  |
-| `openai` _[OpenAIProvider](#openaiprovider) array_ |  |  |  |
-| `azure` _[AzureProvider](#azureprovider) array_ |  |  |  |
-| `bedrock` _[BedrockProvider](#bedrockprovider) array_ |  |  |  |
-| `vertexai` _[VertexAIProvider](#vertexaiprovider) array_ |  |  |  |
-| `watsonx` _[WatsonxProvider](#watsonxprovider) array_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `vllm` _[VLLMProvider](#vllmprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `openai` _[OpenAIProvider](#openaiprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `azure` _[AzureProvider](#azureprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `bedrock` _[BedrockProvider](#bedrockprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `vertexai` _[VertexAIProvider](#vertexaiprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `watsonx` _[WatsonxProvider](#watsonxprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### InlineBuiltinResponsesProvider
 
@@ -577,6 +615,11 @@ InlineBuiltinResponsesProvider configures inline::builtin for responses.
 
 _Appears in:_
 - [ResponsesInlineProviders](#responsesinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `vectorStoresConfig` _[VectorStoresConfig](#vectorstoresconfig)_ | VectorStoresConfig configures vector store behavior for file search<br />and retrieval-augmented generation. |  |  |
+| `compactionConfig` _[CompactionConfig](#compactionconfig)_ | CompactionConfig configures conversation compaction behavior<br />and prompt templates. |  |  |
 
 #### InlineFileSearchProvider
 
@@ -588,6 +631,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `vectorStoresConfig` _[VectorStoresConfig](#vectorstoresconfig)_ | VectorStoresConfig configures vector store behavior for file search. |  |  |
 
 #### InlineLocalFSProvider
 
@@ -595,6 +639,10 @@ InlineLocalFSProvider configures inline::localfs.
 
 _Appears in:_
 - [FilesInlineProviders](#filesinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `ttlSecs` _integer_ | TTLSecs is the time-to-live in seconds for uploaded files. |  | Minimum: 1 <br /> |
 
 #### InlineReferenceProvider
 
@@ -605,19 +653,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `maxConcurrentBatches` _integer_ |  |  | Minimum: 1 <br /> |
-| `maxConcurrentRequestsPerBatch` _integer_ |  |  | Minimum: 1 <br /> |
-
-#### InlineSentenceTransformersProvider
-
-InlineSentenceTransformersProvider enables inline::sentence-transformers.
-
-_Appears in:_
-- [InferenceInlineProviders](#inferenceinlineproviders)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
+| `maxConcurrentBatches` _integer_ | MaxConcurrentBatches is the maximum number of concurrent batches<br />to process simultaneously. |  | Minimum: 1 <br /> |
+| `maxConcurrentRequestsPerBatch` _integer_ | MaxConcurrentRequestsPerBatch is the maximum number of concurrent<br />requests to process per batch. |  | Minimum: 1 <br /> |
 
 #### KVStorageSpec
 
@@ -630,7 +667,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `type` _string_ | Type is the KV storage backend type. | sqlite | Enum: [sqlite redis] <br /> |
 | `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
-| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication. |  |  |
+| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
 #### MilvusProvider
 
@@ -642,8 +679,9 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `uri` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `token` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `uri` _string_ | URI is the URI of the Milvus server. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `token` _[SecretKeyRef](#secretkeyref)_ | Token is the authentication token for the Milvus server.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `consistencyLevel` _string_ | ConsistencyLevel is the consistency level of the Milvus server. |  |  |
 
 #### ModelConfig
 
@@ -772,11 +810,11 @@ _Appears in:_
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
 | `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models, tools, and shields to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 8 <br />MinItems: 1 <br />items:Enum: [agents batches inference responses safety tool_runtime vector_io files] <br /> |
+| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 6 <br />MinItems: 1 <br />items:Enum: [batches inference responses tool_runtime vector_io files] <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
-| `caBundle` _[CABundleConfig](#cabundleconfig)_ | CABundle defines the CA bundle configuration for custom certificates<br />used to verify outbound TLS connections to providers and backends. |  |  |
+| `tls` _[TLSClientConfig](#tlsclientconfig)_ | TLS configures outbound TLS trust anchors and client identity for<br />connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
-| `overrideConfig` _[OverrideConfigSpec](#overrideconfigspec)_ | OverrideConfig specifies a user-provided ConfigMap for full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabled. |  |  |
+| `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabledAPIs.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
 #### OGXServerStatus
 
@@ -807,20 +845,11 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `endpoint` _string_ |  |  |  |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
-
-#### OverrideConfigSpec
-
-OverrideConfigSpec specifies a user-provided ConfigMap for full config.yaml override.
-Mutually exclusive with providers, resources, storage, and disabled.
-
-_Appears in:_
-- [OGXServerSpec](#ogxserverspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `configMapName` _string_ | ConfigMapName is the name of the ConfigMap containing config.yaml.<br />The ConfigMap must be in the same namespace as the OGXServer and must have<br />the label ogx.io/watch: "true" to be detected by the operator's cache. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `endpoint` _string_ | Endpoint is the base URL for the OpenAI API. |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the authentication credential for the OpenAI provider.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
 
 #### PVCStorageSpec
 
@@ -844,11 +873,13 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `host` _string_ |  | localhost |  |
-| `port` _integer_ |  | 5432 | Maximum: 65535 <br />Minimum: 1 <br /> |
-| `db` _string_ |  | postgres |  |
-| `user` _string_ |  | postgres |  |
-| `password` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
+| `host` _string_ | Host is the PostgreSQL server hostname. |  |  |
+| `port` _integer_ | Port is the PostgreSQL server port. |  | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `db` _string_ | DB is the PostgreSQL database name. |  |  |
+| `user` _string_ | User is the PostgreSQL username. |  |  |
+| `password` _[SecretKeyRef](#secretkeyref)_ | Password is the PostgreSQL password.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `distanceMetric` _string_ | DistanceMetric is the distance metric used for vector search. |  | Enum: [COSINE L2 L1 INNER_PRODUCT] <br /> |
+| `vectorIndex` _[VectorIndexConfig](#vectorindexconfig)_ | VectorIndex configures the vector index strategy for<br />Approximate Nearest Neighbor (ANN) search. |  |  |
 
 #### PodDisruptionBudgetSpec
 
@@ -899,12 +930,26 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `inference` _[InferenceProvidersSpec](#inferenceprovidersspec)_ |  |  |  |
-| `safety` _[SafetyProvidersSpec](#safetyprovidersspec)_ |  |  |  |
 | `vectorIo` _[VectorIOProvidersSpec](#vectorioprovidersspec)_ |  |  |  |
 | `toolRuntime` _[ToolRuntimeProvidersSpec](#toolruntimeprovidersspec)_ |  |  |  |
 | `files` _[FilesProvidersSpec](#filesprovidersspec)_ |  |  |  |
 | `batches` _[BatchesProvidersSpec](#batchesprovidersspec)_ |  |  |  |
 | `responses` _[ResponsesProvidersSpec](#responsesprovidersspec)_ |  |  |  |
+
+#### ProxyConfig
+
+ProxyConfig configures HTTP proxy settings for remote provider connections.
+
+_Appears in:_
+- [NetworkConfig](#networkconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `url` _string_ | URL is the proxy URL for all connections. |  |  |
+| `http` _string_ | HTTP is the proxy URL for HTTP connections. |  |  |
+| `https` _string_ | HTTPS is the proxy URL for HTTPS connections. |  |  |
+| `cacert` _string_ | CACert is the path to a CA certificate for verifying the proxy's certificate. |  |  |
+| `noProxy` _string array_ | NoProxy is a list of hosts that should bypass the proxy. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
 #### QdrantProvider
 
@@ -916,10 +961,48 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `url` _string_ |  |  |  |
-| `host` _string_ |  |  |  |
-| `port` _integer_ |  |  | Maximum: 65535 <br />Minimum: 1 <br /> |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
+| `url` _string_ | URL is the URL of the Qdrant server. |  |  |
+| `host` _string_ | Host is the hostname of the Qdrant server. |  |  |
+| `port` _integer_ | Port is the REST API port of the Qdrant server. |  | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the authentication key for the Qdrant server.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `location` _string_ | Location is the Qdrant server location identifier. |  |  |
+| `grpcPort` _integer_ | GRPCPort is the gRPC port of the Qdrant server. |  | Maximum: 65535 <br />Minimum: 1 <br /> |
+| `preferGrpc` _boolean_ | PreferGRPC controls whether to prefer gRPC over REST for communication. |  |  |
+| `https` _boolean_ | HTTPS controls whether to use HTTPS for the connection. |  |  |
+| `prefix` _string_ | Prefix is the URL path prefix for the Qdrant server. |  |  |
+| `timeout` _integer_ | Timeout is the connection timeout in seconds. |  | Minimum: 1 <br /> |
+
+#### QualifiedModel
+
+QualifiedModel identifies a model with its provider.
+
+_Appears in:_
+- [ContextualRetrievalParams](#contextualretrievalparams)
+- [RewriteQueryParams](#rewritequeryparams)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `providerId` _string_ | ProviderID is the provider to use for this model. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `modelId` _string_ | ModelID is the model identifier. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `embeddingDimensions` _integer_ | EmbeddingDimensions is the dimensionality of the embedding vectors. |  | Minimum: 1 <br /> |
+
+#### RemoteInferenceCommonConfig
+
+RemoteInferenceCommonConfig contains fields shared by all remote inference providers.
+
+_Appears in:_
+- [AzureProvider](#azureprovider)
+- [BedrockProvider](#bedrockprovider)
+- [OpenAIProvider](#openaiprovider)
+- [VLLMProvider](#vllmprovider)
+- [VertexAIProvider](#vertexaiprovider)
+- [WatsonxProvider](#watsonxprovider)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
 
 #### ResolvedDistributionStatus
 
@@ -957,7 +1040,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `builtin` _[InlineBuiltinResponsesProvider](#inlinebuiltinresponsesprovider)_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### ResponsesProvidersSpec
 
@@ -980,7 +1063,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### RoutedProviderBase
 
@@ -992,7 +1075,6 @@ _Appears in:_
 - [BraveSearchProvider](#bravesearchprovider)
 - [CustomProvider](#customprovider)
 - [InlineFileSearchProvider](#inlinefilesearchprovider)
-- [InlineSentenceTransformersProvider](#inlinesentencetransformersprovider)
 - [MilvusProvider](#milvusprovider)
 - [ModelContextProtocolProvider](#modelcontextprotocolprovider)
 - [OpenAIProvider](#openaiprovider)
@@ -1016,11 +1098,12 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `bucketName` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `region` _string_ |  | us-east-1 |  |
-| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `endpointUrl` _string_ |  |  |  |
+| `bucketName` _string_ | BucketName is the S3 bucket name to store files. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `region` _string_ | Region is the AWS region where the bucket is located. |  |  |
+| `awsAccessKeyId` _[SecretKeyRef](#secretkeyref)_ | AWSAccessKeyID is the AWS access key ID (optional if using IAM roles).<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `awsSecretAccessKey` _[SecretKeyRef](#secretkeyref)_ | AWSSecretAccessKey is the AWS secret access key (optional if using IAM roles).<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `endpointUrl` _string_ | EndpointURL is a custom S3 endpoint URL (for MinIO, LocalStack, etc.). |  |  |
+| `autoCreateBucket` _boolean_ | AutoCreateBucket controls whether to automatically create the S3 bucket<br />if it doesn't exist. |  |  |
 
 #### SQLStorageSpec
 
@@ -1032,41 +1115,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `type` _string_ | Type is the SQL storage backend type. | sqlite | Enum: [sqlite postgres] <br /> |
-| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres". |  |  |
-
-#### SafetyInlineProviders
-
-SafetyInlineProviders groups inline safety providers.
-
-_Appears in:_
-- [SafetyProvidersSpec](#safetyprovidersspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
-
-#### SafetyProvidersSpec
-
-SafetyProvidersSpec configures safety providers.
-
-_Appears in:_
-- [ProvidersSpec](#providersspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `remote` _[SafetyRemoteProviders](#safetyremoteproviders)_ |  |  |  |
-| `inline` _[SafetyInlineProviders](#safetyinlineproviders)_ |  |  |  |
-
-#### SafetyRemoteProviders
-
-SafetyRemoteProviders groups remote safety providers.
-
-_Appears in:_
-- [SafetyProvidersSpec](#safetyprovidersspec)
-
-| Field | Description | Default | Validation |
-| --- | --- | --- | --- |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres".<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
 #### SecretKeyRef
 
@@ -1079,6 +1128,7 @@ _Appears in:_
 - [BedrockProvider](#bedrockprovider)
 - [BraveSearchProvider](#bravesearchprovider)
 - [CustomProvider](#customprovider)
+- [IdentityConfig](#identityconfig)
 - [KVStorageSpec](#kvstoragespec)
 - [MilvusProvider](#milvusprovider)
 - [OpenAIProvider](#openaiprovider)
@@ -1093,7 +1143,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `name` _string_ | Name is the name of the Kubernetes Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `key` _string_ | Key is the key within the Secret. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `key` _string_ | Key is the key within the Secret. |  | MaxLength: 253 <br />MinLength: 1 <br />Pattern: `^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$` <br />Required: \{\} <br /> |
 
 #### StateStorageSpec
 
@@ -1106,6 +1156,31 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `kv` _[KVStorageSpec](#kvstoragespec)_ | KV configures key-value storage. |  |  |
 | `sql` _[SQLStorageSpec](#sqlstoragespec)_ | SQL configures SQL storage. |  |  |
+
+#### TLSClientConfig
+
+TLSClientConfig groups outbound TLS settings: trust anchors and client identity.
+
+_Appears in:_
+- [OGXServerSpec](#ogxserverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `trust` _[TrustConfig](#trustconfig)_ | Trust configures CA certificates for verifying outbound TLS connections<br />to providers and backends. |  |  |
+| `identity` _[IdentityConfig](#identityconfig)_ | Identity configures client certificate and key for mTLS authentication<br />with providers and backends. |  |  |
+
+#### TLSConfig
+
+TLSConfig configures TLS settings for remote provider connections.
+
+_Appears in:_
+- [NetworkConfig](#networkconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `verify` _boolean_ | Verify controls whether TLS certificate verification is enabled.<br />Trust anchors and client identity are configured globally via spec.tls. |  |  |
+| `minVersion` _string_ | MinVersion sets the minimum TLS version. |  | Enum: [TLSv1.2 TLSv1.3] <br /> |
+| `ciphers` _string array_ | Ciphers is a list of allowed TLS cipher suites. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
 #### TLSSpec
 
@@ -1128,8 +1203,20 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
-| `maxResults` _integer_ |  |  | Minimum: 1 <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the Tavily Search API key.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `maxResults` _integer_ | MaxResults is the maximum number of search results to return. |  | Minimum: 1 <br /> |
+
+#### TimeoutConfig
+
+TimeoutConfig configures network timeout settings.
+
+_Appears in:_
+- [NetworkConfig](#networkconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `connect` _integer_ | Connect is the connection timeout in seconds. |  | Minimum: 1 <br /> |
+| `read` _integer_ | Read is the read timeout in seconds. |  | Minimum: 1 <br /> |
 
 #### ToolRuntimeInlineProviders
 
@@ -1140,8 +1227,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `fileSearch` _[InlineFileSearchProvider](#inlinefilesearchprovider) array_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `fileSearch` _[InlineFileSearchProvider](#inlinefilesearchprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### ToolRuntimeProvidersSpec
 
@@ -1164,10 +1251,21 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `braveSearch` _[BraveSearchProvider](#bravesearchprovider) array_ |  |  |  |
-| `tavilySearch` _[TavilySearchProvider](#tavilysearchprovider) array_ |  |  |  |
-| `modelContextProtocol` _[ModelContextProtocolProvider](#modelcontextprotocolprovider) array_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `braveSearch` _[BraveSearchProvider](#bravesearchprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `tavilySearch` _[TavilySearchProvider](#tavilysearchprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `modelContextProtocol` _[ModelContextProtocolProvider](#modelcontextprotocolprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+
+#### TrustConfig
+
+TrustConfig configures trust anchors for verifying outbound TLS connections.
+
+_Appears in:_
+- [TLSClientConfig](#tlsclientconfig)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `caCertificates` _[ConfigMapKeyRef](#configmapkeyref) array_ | CACertificates lists ConfigMap keys containing PEM-encoded CA certificates.<br />All certificates are concatenated into a single trust bundle.<br />Referenced ConfigMaps must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | MinItems: 1 <br /> |
 
 #### VLLMProvider
 
@@ -1179,9 +1277,12 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `endpoint` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `apiToken` _[SecretKeyRef](#secretkeyref)_ |  |  |  |
-| `maxTokens` _integer_ |  |  | Minimum: 1 <br /> |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `endpoint` _string_ | Endpoint is the URL for the vLLM model serving endpoint. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiToken` _[SecretKeyRef](#secretkeyref)_ | APIToken is the authentication token for the vLLM endpoint.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `maxTokens` _integer_ | MaxTokens is the maximum number of tokens to generate. |  | Minimum: 1 <br /> |
 
 #### VectorIOInlineProviders
 
@@ -1192,7 +1293,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### VectorIOProvidersSpec
 
@@ -1215,10 +1316,30 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `pgvector` _[PgvectorProvider](#pgvectorprovider) array_ |  |  |  |
-| `milvus` _[MilvusProvider](#milvusprovider) array_ |  |  |  |
-| `qdrant` _[QdrantProvider](#qdrantprovider) array_ |  |  |  |
-| `custom` _[CustomProvider](#customprovider) array_ |  |  |  |
+| `pgvector` _[PgvectorProvider](#pgvectorprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `milvus` _[MilvusProvider](#milvusprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `qdrant` _[QdrantProvider](#qdrantprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+
+#### VectorIndexConfig
+
+_Underlying type:_ _[struct{HNSW *HNSWConfig "json:\"hnsw,omitempty\""; IVFFlat *IVFFlatConfig "json:\"ivfFlat,omitempty\""}](#struct{hnsw-*hnswconfig-"json:\"hnsw,omitempty\"";-ivfflat-*ivfflatconfig-"json:\"ivfflat,omitempty\""})_
+
+VectorIndexConfig configures the vector index strategy for PGVector.
+Exactly one of hnsw or ivfFlat must be specified.
+
+_Appears in:_
+- [PgvectorProvider](#pgvectorprovider)
+
+#### VectorStoresConfig
+
+_Underlying type:_ _[struct{DefaultProviderID string "json:\"defaultProviderId,omitempty\""; DefaultEmbeddingModel *QualifiedModel "json:\"defaultEmbeddingModel,omitempty\""; DefaultRerankerModel *RerankerModel "json:\"defaultRerankerModel,omitempty\""; RewriteQueryParams *RewriteQueryParams "json:\"rewriteQueryParams,omitempty\""; FileSearchParams *FileSearchDisplayParams "json:\"fileSearchParams,omitempty\""; ContextPromptParams *ContextPromptParams "json:\"contextPromptParams,omitempty\""; AnnotationPromptParams *AnnotationPromptParams "json:\"annotationPromptParams,omitempty\""; FileIngestionParams *FileIngestionParams "json:\"fileIngestionParams,omitempty\""; ChunkRetrievalParams *ChunkRetrievalParams "json:\"chunkRetrievalParams,omitempty\""; FileBatchParams *FileBatchParams "json:\"fileBatchParams,omitempty\""; ContextualRetrievalParams *ContextualRetrievalParams "json:\"contextualRetrievalParams,omitempty\""}](#struct{defaultproviderid-string-"json:\"defaultproviderid,omitempty\"";-defaultembeddingmodel-*qualifiedmodel-"json:\"defaultembeddingmodel,omitempty\"";-defaultrerankermodel-*rerankermodel-"json:\"defaultrerankermodel,omitempty\"";-rewritequeryparams-*rewritequeryparams-"json:\"rewritequeryparams,omitempty\"";-filesearchparams-*filesearchdisplayparams-"json:\"filesearchparams,omitempty\"";-contextpromptparams-*contextpromptparams-"json:\"contextpromptparams,omitempty\"";-annotationpromptparams-*annotationpromptparams-"json:\"annotationpromptparams,omitempty\"";-fileingestionparams-*fileingestionparams-"json:\"fileingestionparams,omitempty\"";-chunkretrievalparams-*chunkretrievalparams-"json:\"chunkretrievalparams,omitempty\"";-filebatchparams-*filebatchparams-"json:\"filebatchparams,omitempty\"";-contextualretrievalparams-*contextualretrievalparams-"json:\"contextualretrievalparams,omitempty\""})_
+
+VectorStoresConfig configures vector store behavior for responses and file search.
+
+_Appears in:_
+- [InlineBuiltinResponsesProvider](#inlinebuiltinresponsesprovider)
+- [InlineFileSearchProvider](#inlinefilesearchprovider)
 
 #### VersionInfo
 
@@ -1243,8 +1364,11 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `project` _string_ |  |  | MinLength: 1 <br />Required: \{\} <br /> |
-| `location` _string_ |  | global |  |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `project` _string_ | Project is the Google Cloud project ID for Vertex AI. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `location` _string_ | Location is the Google Cloud location for Vertex AI. |  |  |
 
 #### WatsonxProvider
 
@@ -1256,9 +1380,13 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `id` _string_ | ID is a unique provider identifier. Derived from the provider<br />type when omitted. Must be unique across all providers. |  |  |
-| `endpoint` _string_ |  |  |  |
-| `apiKey` _[SecretKeyRef](#secretkeyref)_ |  |  | Required: \{\} <br /> |
-| `projectId` _string_ |  |  |  |
+| `allowedModels` _string array_ | AllowedModels restricts which models can be registered with this provider.<br />When empty, all models are allowed. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
+| `refreshModels` _boolean_ | RefreshModels controls whether the provider periodically refreshes<br />its model list from the remote endpoint. |  |  |
+| `network` _[NetworkConfig](#networkconfig)_ | Network configures network settings (TLS, proxy, timeouts, headers)<br />for the remote connection. |  |  |
+| `endpoint` _string_ | Endpoint is the base URL for accessing watsonx.ai. |  |  |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the authentication credential for the watsonx provider.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `projectId` _string_ | ProjectID is the watsonx.ai project ID. |  |  |
+| `timeout` _integer_ | Timeout is the timeout in seconds for HTTP requests. |  | Minimum: 1 <br /> |
 
 #### WorkloadOverrides
 

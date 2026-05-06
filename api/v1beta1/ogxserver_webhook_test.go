@@ -34,7 +34,6 @@ func TestDeriveID(t *testing.T) {
 		{"Bedrock default", (BedrockProvider{}).DeriveID(), "remote-bedrock"},
 		{"VertexAI default", (VertexAIProvider{}).DeriveID(), "remote-vertexai"},
 		{"Watsonx default", (WatsonxProvider{}).DeriveID(), "remote-watsonx"},
-		{"SentenceTransformers default", (InlineSentenceTransformersProvider{}).DeriveID(), "inline-sentence-transformers"},
 		{"Pgvector default", (PgvectorProvider{}).DeriveID(), "remote-pgvector"},
 		{"Milvus default", (MilvusProvider{}).DeriveID(), "remote-milvus"},
 		{"Qdrant default", (QdrantProvider{}).DeriveID(), "remote-qdrant"},
@@ -94,9 +93,6 @@ func TestProvidersSpecIDs(t *testing.T) {
 						Endpoint:           "https://vllm:8000",
 					}},
 				},
-				Inline: &InferenceInlineProviders{
-					SentenceTransformers: []InlineSentenceTransformersProvider{{}},
-				},
 			},
 			VectorIo: &VectorIOProvidersSpec{
 				Remote: &VectorIORemoteProviders{
@@ -110,13 +106,12 @@ func TestProvidersSpecIDs(t *testing.T) {
 			},
 		}
 		assertSliceEqual(t, spec.Inference.Remote.IDs(), []string{"vllm-gpu"})
-		assertSliceEqual(t, spec.Inference.Inline.IDs(), []string{"inline-sentence-transformers"})
 		assertSliceEqual(t, spec.VectorIo.Remote.IDs(), []string{"remote-pgvector"})
 		assertSliceEqual(t, spec.Files.Remote.IDs(), []string{"remote-s3"})
 
 		ids := spec.IDs()
-		if len(ids) != 4 {
-			t.Errorf("IDs() = %v, want 4 elements", ids)
+		if len(ids) != 3 {
+			t.Errorf("IDs() = %v, want 3 elements", ids)
 		}
 	})
 
@@ -216,29 +211,6 @@ func TestValidateProviderIDs(t *testing.T) {
 			errSubstr: "duplicate provider ID",
 		},
 		{
-			name: "safety providers included in check",
-			providers: &ProvidersSpec{
-				Inference: &InferenceProvidersSpec{
-					Remote: &InferenceRemoteProviders{
-						VLLM: []VLLMProvider{{
-							RoutedProviderBase: RoutedProviderBase{ID: "my-provider"},
-							Endpoint:           "https://vllm:8000",
-						}},
-					},
-				},
-				Safety: &SafetyProvidersSpec{
-					Remote: &SafetyRemoteProviders{
-						Custom: []CustomProvider{{
-							RoutedProviderBase: RoutedProviderBase{ID: "my-provider"},
-							Type:               "remote::llama-guard",
-						}},
-					},
-				},
-			},
-			wantErrs:  1,
-			errSubstr: "duplicate provider ID",
-		},
-		{
 			name: "multiple collisions",
 			providers: &ProvidersSpec{
 				Inference: &InferenceProvidersSpec{
@@ -253,19 +225,14 @@ func TestValidateProviderIDs(t *testing.T) {
 						}},
 					},
 				},
-				Safety: &SafetyProvidersSpec{
-					Remote: &SafetyRemoteProviders{
-						Custom: []CustomProvider{{
-							RoutedProviderBase: RoutedProviderBase{ID: "dup1"},
-							Type:               "remote::guard",
-						}},
-					},
-				},
 				VectorIo: &VectorIOProvidersSpec{
 					Remote: &VectorIORemoteProviders{
 						Pgvector: []PgvectorProvider{{
-							RoutedProviderBase: RoutedProviderBase{ID: "dup2"},
+							RoutedProviderBase: RoutedProviderBase{ID: "dup1"},
 							Password:           SecretKeyRef{Name: "s", Key: "k"},
+						}},
+						Qdrant: []QdrantProvider{{
+							RoutedProviderBase: RoutedProviderBase{ID: "dup2"},
 						}},
 					},
 				},
@@ -321,9 +288,6 @@ func TestValidateProviderIDs(t *testing.T) {
 				Inference: &InferenceProvidersSpec{
 					Remote: &InferenceRemoteProviders{
 						VLLM: []VLLMProvider{{Endpoint: "https://vllm:8000"}},
-					},
-					Inline: &InferenceInlineProviders{
-						SentenceTransformers: []InlineSentenceTransformersProvider{{}},
 					},
 				},
 			},
@@ -416,20 +380,6 @@ func TestValidateProviderReferences(t *testing.T) {
 							RoutedProviderBase: RoutedProviderBase{ID: "my-vllm"},
 							Endpoint:           "https://vllm:8000",
 						}},
-					},
-				},
-			},
-			wantErrs: 0,
-		},
-		{
-			name: "reference to safety custom provider",
-			resources: &ResourcesSpec{
-				Models: []ModelConfig{{Name: "llama3", Provider: "remote-llama-guard"}},
-			},
-			providers: &ProvidersSpec{
-				Safety: &SafetyProvidersSpec{
-					Remote: &SafetyRemoteProviders{
-						Custom: []CustomProvider{{Type: "remote::llama-guard"}},
 					},
 				},
 			},

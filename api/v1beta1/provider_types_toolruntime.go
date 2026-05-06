@@ -21,8 +21,12 @@ import "slices"
 // BraveSearchProvider configures a remote::brave-search tool runtime provider.
 type BraveSearchProvider struct {
 	RoutedProviderBase `json:",inline"`
+	// APIKey is the Brave Search API key.
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +kubebuilder:validation:Required
 	APIKey SecretKeyRef `json:"apiKey"`
+	// MaxResults is the maximum number of search results to return.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	MaxResults *int `json:"maxResults,omitempty"`
@@ -33,8 +37,12 @@ func (p BraveSearchProvider) DeriveID() string { return p.deriveOrDefault("remot
 // TavilySearchProvider configures a remote::tavily-search tool runtime provider.
 type TavilySearchProvider struct {
 	RoutedProviderBase `json:",inline"`
+	// APIKey is the Tavily Search API key.
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
 	// +kubebuilder:validation:Required
 	APIKey SecretKeyRef `json:"apiKey"`
+	// MaxResults is the maximum number of search results to return.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	MaxResults *int `json:"maxResults,omitempty"`
@@ -54,6 +62,9 @@ func (p ModelContextProtocolProvider) DeriveID() string {
 // InlineFileSearchProvider configures inline::file-search.
 type InlineFileSearchProvider struct {
 	RoutedProviderBase `json:",inline"`
+	// VectorStoresConfig configures vector store behavior for file search.
+	// +optional
+	VectorStoresConfig *VectorStoresConfig `json:"vectorStoresConfig,omitempty"`
 }
 
 func (p InlineFileSearchProvider) DeriveID() string { return p.deriveOrDefault("inline-file-search") }
@@ -61,12 +72,20 @@ func (p InlineFileSearchProvider) DeriveID() string { return p.deriveOrDefault("
 // ToolRuntimeRemoteProviders groups remote tool runtime providers.
 type ToolRuntimeRemoteProviders struct {
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	BraveSearch []BraveSearchProvider `json:"braveSearch,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	TavilySearch []TavilySearchProvider `json:"tavilySearch,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	ModelContextProtocol []ModelContextProtocolProvider `json:"modelContextProtocol,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 
@@ -83,8 +102,12 @@ func (r *ToolRuntimeRemoteProviders) IDs() []string {
 // ToolRuntimeInlineProviders groups inline tool runtime providers.
 type ToolRuntimeInlineProviders struct {
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	FileSearch []InlineFileSearchProvider `json:"fileSearch,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
 	Custom []CustomProvider `json:"custom,omitempty"`
 }
 

@@ -119,18 +119,22 @@ func (b *OGXServerBuilder) WithServiceAccountName(serviceAccountName string) *OG
 	return b
 }
 
-func (b *OGXServerBuilder) WithOverrideConfig(configMapName string) *OGXServerBuilder {
-	b.instance.Spec.OverrideConfig = &ogxiov1beta1.OverrideConfigSpec{
-		ConfigMapName: configMapName,
+func (b *OGXServerBuilder) WithOverrideConfig(configMapName, key string) *OGXServerBuilder {
+	b.instance.Spec.OverrideConfig = &ogxiov1beta1.ConfigMapKeyRef{
+		Name: configMapName,
+		Key:  key,
 	}
 	return b
 }
 
-func (b *OGXServerBuilder) WithCABundle(configMapName string, configMapKeys []string) *OGXServerBuilder {
-	b.instance.Spec.CABundle = &ogxiov1beta1.CABundleConfig{
-		ConfigMapName: configMapName,
-		ConfigMapKeys: configMapKeys,
+func (b *OGXServerBuilder) WithCACertificates(refs ...ogxiov1beta1.ConfigMapKeyRef) *OGXServerBuilder {
+	if b.instance.Spec.TLS == nil {
+		b.instance.Spec.TLS = &ogxiov1beta1.TLSClientConfig{}
 	}
+	if b.instance.Spec.TLS.Trust == nil {
+		b.instance.Spec.TLS.Trust = &ogxiov1beta1.TrustConfig{}
+	}
+	b.instance.Spec.TLS.Trust.CACertificates = refs
 	return b
 }
 
