@@ -276,7 +276,8 @@ docker-buildx: image-buildx ## Deprecated: use image-buildx instead
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p release
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default > release/operator.yaml
+	$(KUSTOMIZE) build config/overlays/cert-manager > release/operator.yaml
+	$(KUSTOMIZE) build config/overlays/openshift > release/operator-openshift.yaml
 
 .PHONY: image
 image: image-build image-push ## Build and push image with the manager.
@@ -296,13 +297,22 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 	$(KUSTOMIZE) build config/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize ## Deploy controller to the K8s cluster (cert-manager overlay, vanilla K8s).
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | kubectl apply -f -
+	$(KUSTOMIZE) build config/overlays/cert-manager | kubectl apply -f -
+
+.PHONY: deploy-openshift
+deploy-openshift: manifests kustomize ## Deploy controller to an OpenShift cluster (service-serving-cert-signer).
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(KUSTOMIZE) build config/overlays/openshift | oc apply -f -
 
 .PHONY: undeploy
-undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/overlays/cert-manager | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: undeploy-openshift
+undeploy-openshift: kustomize ## Undeploy controller from an OpenShift cluster. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	$(KUSTOMIZE) build config/overlays/openshift | oc delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
 
