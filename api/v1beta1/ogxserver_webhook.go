@@ -103,7 +103,28 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 		allErrs = append(allErrs, validateProviderReferences(r.Spec.Resources, r.Spec.Providers)...)
 	}
 
+	allErrs = append(allErrs, validateAdoptionAnnotations(r)...)
+
 	return allErrs
+}
+
+// validateAdoptionAnnotations rejects adoption annotations whose value equals
+// the CR name. Same-name adoption causes Deployment name conflicts and is not
+// a supported migration path.
+func validateAdoptionAnnotations(r *OGXServer) field.ErrorList {
+	var errs field.ErrorList
+	annotationPath := field.NewPath("metadata", "annotations")
+
+	for _, key := range []string{AdoptStorageAnnotation, AdoptNetworkingAnnotation} {
+		if val, ok := r.Annotations[key]; ok && val == r.Name {
+			errs = append(errs, field.Invalid(
+				annotationPath.Key(key), val,
+				"adoption annotation value must not equal the CR name; same-name adoption causes resource conflicts",
+			))
+		}
+	}
+
+	return errs
 }
 
 // collectAllProviderIDs returns all provider IDs and any duplicate ID errors.

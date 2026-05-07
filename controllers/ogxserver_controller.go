@@ -250,10 +250,6 @@ func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGX
 		kinds = append(kinds, "PersistentVolumeClaim")
 	}
 
-	if shouldExcludeServiceForAdoption(instance) {
-		kinds = append(kinds, "Service")
-	}
-
 	// Per-CR NetworkPolicy toggle (default: enabled)
 	if instance.Spec.Network != nil && instance.Spec.Network.Policy != nil &&
 		instance.Spec.Network.Policy.Enabled != nil && !*instance.Spec.Network.Policy.Enabled {
@@ -280,18 +276,6 @@ func shouldExcludePVC(instance *ogxiov1beta1.OGXServer) bool {
 	}
 
 	return instance.Spec.Workload == nil || instance.Spec.Workload.Storage == nil
-}
-
-func shouldExcludeServiceForAdoption(instance *ogxiov1beta1.OGXServer) bool {
-	// When a valid adopt-networking annotation is present and the CR name matches
-	// the legacy name, exclude Service from the kustomize pipeline because the
-	// adopted Service already has the correct name. When names differ, allow
-	// the pipeline to create a new Service alongside the adopted one.
-	legacyNet := instance.GetAdoptNetworkingSource()
-	if legacyNet == "" || ogxiov1beta1.ValidateAdoptionAnnotation(legacyNet) != nil {
-		return false
-	}
-	return legacyNet == instance.Name
 }
 
 // reconcileAllManifestResources applies all manifest-based resources using kustomize.

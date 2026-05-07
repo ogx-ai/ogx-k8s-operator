@@ -19,6 +19,8 @@ package v1beta1
 import (
 	"strings"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestDeriveID(t *testing.T) {
@@ -455,6 +457,92 @@ func TestValidateDistributionName(t *testing.T) {
 	}
 }
 
+func TestValidateAdoptionAnnotations(t *testing.T) {
+	tests := []struct {
+		name        string
+		server      *OGXServer
+		wantErrs    int
+		errContains string
+	}{
+		{
+			name: "no adoption annotations is valid",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "my-server"},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "adopt-storage with different name is valid",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "new-server",
+					Annotations: map[string]string{AdoptStorageAnnotation: "old-server"},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "adopt-storage equals CR name is rejected",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "my-server",
+					Annotations: map[string]string{AdoptStorageAnnotation: "my-server"},
+				},
+			},
+			wantErrs:    1,
+			errContains: "must not equal the CR name",
+		},
+		{
+			name: "adopt-networking equals CR name is rejected",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "my-server",
+					Annotations: map[string]string{AdoptNetworkingAnnotation: "my-server"},
+				},
+			},
+			wantErrs:    1,
+			errContains: "must not equal the CR name",
+		},
+		{
+			name: "both annotations equal CR name gives two errors",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "my-server",
+					Annotations: map[string]string{
+						AdoptStorageAnnotation:    "my-server",
+						AdoptNetworkingAnnotation: "my-server",
+					},
+				},
+			},
+			wantErrs: 2,
+		},
+		{
+			name: "adopt-networking with different name is valid",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "new-server",
+					Annotations: map[string]string{AdoptNetworkingAnnotation: "old-server"},
+				},
+			},
+			wantErrs: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateAdoptionAnnotations(tt.server)
+			if len(errs) != tt.wantErrs {
+				t.Errorf("validateAdoptionAnnotations() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+			if tt.errContains != "" && len(errs) > 0 {
+				if !strings.Contains(errs[0].Detail, tt.errContains) {
+					t.Errorf("error detail %q does not contain %q", errs[0].Detail, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
 func TestCollectValidationErrors(t *testing.T) {
 	knownNames := []string{"starter", "remote-vllm"}
 
@@ -529,6 +617,19 @@ func TestCollectValidationErrors(t *testing.T) {
 				},
 			},
 			wantErrs: 0,
+		},
+		{
+			name: "self-adoption annotation is rejected",
+			server: &OGXServer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "my-server",
+					Annotations: map[string]string{AdoptStorageAnnotation: "my-server"},
+				},
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+				},
+			},
+			wantErrs: 1,
 		},
 	}
 

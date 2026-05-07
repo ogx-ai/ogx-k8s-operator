@@ -60,7 +60,7 @@ func (r *OGXServerReconciler) adoptLegacyResources(ctx context.Context, instance
 	}
 
 	// Validate annotations before any adoption work.
-	if !validateAdoptionSources(ctx, &instance.Status, storageSource, networkingSource) {
+	if !validateAdoptionSources(ctx, &instance.Status, instance.Name, storageSource, networkingSource) {
 		return result, nil
 	}
 
@@ -85,22 +85,30 @@ func (r *OGXServerReconciler) adoptLegacyResources(ctx context.Context, instance
 func validateAdoptionSources(
 	ctx context.Context,
 	status *ogxiov1beta1.OGXServerStatus,
-	storageSource, networkingSource string,
+	instanceName, storageSource, networkingSource string,
 ) bool {
-	if !validateAdoptionSource(ctx, status, "adopt-storage", storageSource) {
+	if !validateAdoptionSource(ctx, status, "adopt-storage", storageSource, instanceName) {
 		return false
 	}
 
-	return validateAdoptionSource(ctx, status, "adopt-networking", networkingSource)
+	return validateAdoptionSource(ctx, status, "adopt-networking", networkingSource, instanceName)
 }
 
 func validateAdoptionSource(
 	ctx context.Context,
 	status *ogxiov1beta1.OGXServerStatus,
-	annotationName, value string,
+	annotationName, value, instanceName string,
 ) bool {
 	if value == "" {
 		return true
+	}
+
+	if value == instanceName {
+		logger := log.FromContext(ctx)
+		logger.Info("adoption annotation value equals CR name, rejecting", "annotation", annotationName, "value", value)
+		SetAdoptionConfigInvalidCondition(status, fmt.Sprintf(
+			"%s: value %q must not equal the CR name; same-name adoption causes resource conflicts", annotationName, value))
+		return false
 	}
 
 	if err := ogxiov1beta1.ValidateAdoptionAnnotation(value); err != nil {
@@ -368,9 +376,9 @@ func (r *OGXServerReconciler) transferOwnership(ctx context.Context, instance *o
 }
 
 // cleanupAdoptedNetworking deletes adopted legacy networking resources when the
-// adopt-networking annotation is removed and the CR name differs from the legacy
-// name (different-name case). In the same-name case, the resources have the same
-// names as what the kustomize pipeline creates, so they are managed normally.
+// adopt-networking annotation is removed. Since same-name adoption is rejected
+// at admission time, adopted resources always have different names from the
+// kustomize-created ones and must be explicitly deleted.
 func (r *OGXServerReconciler) cleanupAdoptedNetworking(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	// Only clean up if the annotation has been removed.
 	if instance.GetAdoptNetworkingSource() != "" {
@@ -407,7 +415,7 @@ func (r *OGXServerReconciler) cleanupAdoptedServices(ctx context.Context, instan
 
 	for i := range ownedServices.Items {
 		svc := &ownedServices.Items[i]
-		if !shouldDeleteAdoptedResource(svc.GetName(), instance, instance.Name+"-service", svc.GetAnnotations(), svc) {
+		if !shouldDeleteAdoptedResource(instance, svc.GetAnnotations(), svc) {
 			continue
 		}
 		logger.Info("Deleting adopted legacy Service after annotation removal", "service", svc.Name)
@@ -428,7 +436,7 @@ func (r *OGXServerReconciler) cleanupAdoptedIngresses(ctx context.Context, insta
 
 	for i := range ownedIngresses.Items {
 		ing := &ownedIngresses.Items[i]
-		if !shouldDeleteAdoptedResource(ing.GetName(), instance, instance.Name+IngressNameSuffix, ing.GetAnnotations(), ing) {
+		if !shouldDeleteAdoptedResource(instance, ing.GetAnnotations(), ing) {
 			continue
 		}
 		logger.Info("Deleting adopted legacy Ingress after annotation removal", "ingress", ing.Name)
@@ -441,21 +449,15 @@ func (r *OGXServerReconciler) cleanupAdoptedIngresses(ctx context.Context, insta
 }
 
 func shouldDeleteAdoptedResource(
-	resourceName string,
 	instance *ogxiov1beta1.OGXServer,
-	expectedName string,
 	annotations map[string]string,
 	obj metav1.Object,
 ) bool {
 	if !metav1.IsControlledBy(obj, instance) {
 		return false
 	}
-	if _, hasAdopted := annotations[ogxiov1beta1.AdoptedFromAnnotation]; !hasAdopted {
-		return false
-	}
-	// Same-name case: the resource has the same name the kustomize pipeline
-	// would produce, so keep managing it.
-	return resourceName != expectedName
+	_, hasAdopted := annotations[ogxiov1beta1.AdoptedFromAnnotation]
+	return hasAdopted
 }
 
 // --- Condition helpers for adoption ---

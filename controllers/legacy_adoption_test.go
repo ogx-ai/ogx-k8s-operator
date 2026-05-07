@@ -552,6 +552,33 @@ func TestCleanupAdoptedNetworkingOnAnnotationRemoval(t *testing.T) {
 	}, testTimeout, testInterval, "Current instance Service should exist after cleanup")
 }
 
+func TestSelfAdoptionRejectedByController(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	namespace := createTestNamespace(t, "self-adopt")
+
+	instance := NewOGXServerBuilder().
+		WithName("same-name").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		WithAnnotation(ogxiov1beta1.AdoptStorageAnnotation, "same-name").
+		Build()
+
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
+			t.Logf("Cleanup: %v", err)
+		}
+	})
+
+	ReconcileOGXServer(t, instance)
+
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+		Name: instance.Name, Namespace: instance.Namespace,
+	}, instance))
+
+	assertConditionTrue(t, instance, "AdoptionConfigInvalid")
+}
+
 func TestAdoptionRejectsUnexpectedControllerOwner(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	namespace := createTestNamespace(t, "adopt-owner-guard")
