@@ -27,7 +27,7 @@ package controllers
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
 //+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,resourceNames=anyuid,verbs=use
 
-//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
 
 // ConfigMap permissions - controller reads user configmaps and manages operator config configmaps
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch

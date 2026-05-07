@@ -45,10 +45,11 @@ func TestAdoptStorage(t *testing.T) {
 				key := types.NamespacedName{Name: "my-old-llsd-pvc", Namespace: ns}
 				require.Eventually(t, func() bool {
 					return k8sClient.Get(t.Context(), key, pvc) == nil &&
-						metav1.IsControlledBy(pvc, instance)
-				}, testTimeout, testInterval, "PVC should be owned by new instance")
+						pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == "my-old-llsd"
+				}, testTimeout, testInterval, "PVC should have adopted-from label")
 
-				require.Equal(t, "my-old-llsd", pvc.Annotations[ogxiov1beta1.AdoptedFromAnnotation])
+				require.Nil(t, metav1.GetControllerOf(pvc),
+					"Adopted PVC should not have a controller ownerRef")
 				require.NotEmpty(t, pvc.Annotations[ogxiov1beta1.AdoptedAtAnnotation])
 
 				assertConditionTrue(t, instance, "StorageAdopted")
@@ -94,8 +95,8 @@ func TestAdoptStorage(t *testing.T) {
 				key := types.NamespacedName{Name: "idempotent-llsd-pvc", Namespace: ns}
 				require.Eventually(t, func() bool {
 					return k8sClient.Get(t.Context(), key, pvc) == nil &&
-						metav1.IsControlledBy(pvc, instance)
-				}, testTimeout, testInterval, "PVC should be owned by new instance after first reconcile")
+						pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == "idempotent-llsd"
+				}, testTimeout, testInterval, "PVC should have adopted-from label after first reconcile")
 
 				firstVersion := pvc.ResourceVersion
 
@@ -108,7 +109,7 @@ func TestAdoptStorage(t *testing.T) {
 			},
 		},
 		{
-			name: "old Deployment already gone - proceed to ownership transfer",
+			name: "old Deployment already gone - proceed to adoption",
 			setup: func(t *testing.T, ns string) {
 				t.Helper()
 				createLegacyPVC(t, ns, "gone-deploy")
@@ -127,8 +128,11 @@ func TestAdoptStorage(t *testing.T) {
 				key := types.NamespacedName{Name: "gone-deploy-pvc", Namespace: ns}
 				require.Eventually(t, func() bool {
 					return k8sClient.Get(t.Context(), key, pvc) == nil &&
-						metav1.IsControlledBy(pvc, instance)
+						pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == "gone-deploy"
 				}, testTimeout, testInterval, "PVC should be adopted even though Deployment is gone")
+
+				require.Nil(t, metav1.GetControllerOf(pvc),
+					"Adopted PVC should not have a controller ownerRef")
 			},
 		},
 		{
@@ -577,6 +581,55 @@ func TestSelfAdoptionRejectedByController(t *testing.T) {
 	}, instance))
 
 	assertConditionTrue(t, instance, "AdoptionConfigInvalid")
+}
+
+func TestAdoptedPVCDiscoveredByLabelAfterAnnotationRemoval(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	namespace := createTestNamespace(t, "adopt-pvc-label-disc")
+	createLegacyPVC(t, namespace.Name, "disc-legacy")
+
+	instance := NewOGXServerBuilder().
+		WithName("disc-server").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		WithAnnotation(ogxiov1beta1.AdoptStorageAnnotation, "disc-legacy").
+		Build()
+
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
+			t.Logf("Cleanup: %v", err)
+		}
+	})
+
+	// First reconcile adopts the PVC (sets label, strips old ownerRef).
+	ReconcileOGXServer(t, instance)
+	pvc := &corev1.PersistentVolumeClaim{}
+	pvcKey := types.NamespacedName{Name: "disc-legacy-pvc", Namespace: namespace.Name}
+	require.Eventually(t, func() bool {
+		return k8sClient.Get(t.Context(), pvcKey, pvc) == nil &&
+			pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == "disc-legacy"
+	}, testTimeout, testInterval, "PVC should be adopted with label")
+
+	// Remove the annotation and reconcile again.
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+		Name: instance.Name, Namespace: instance.Namespace,
+	}, instance))
+	delete(instance.Annotations, ogxiov1beta1.AdoptStorageAnnotation)
+	require.NoError(t, k8sClient.Update(t.Context(), instance))
+
+	ReconcileOGXServer(t, instance)
+
+	// The adopted PVC should still exist (not garbage collected).
+	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
+		"Adopted PVC must survive annotation removal")
+
+	// No new default PVC should be created — the controller should discover
+	// the adopted PVC by label and keep using it.
+	defaultPVC := &corev1.PersistentVolumeClaim{}
+	defaultKey := types.NamespacedName{Name: "disc-server-pvc", Namespace: namespace.Name}
+	require.True(t, apierrors.IsNotFound(k8sClient.Get(t.Context(), defaultKey, defaultPVC)),
+		"Default PVC should NOT be created when adopted PVC is discovered by label")
 }
 
 func TestAdoptionRejectsUnexpectedControllerOwner(t *testing.T) {

@@ -127,6 +127,8 @@ func manageResource(
 }
 
 // createResource creates a new resource, setting an owner reference only if it's namespace-scoped.
+// PersistentVolumeClaims are intentionally excluded from ownerRef to prevent
+// data loss on CR deletion — PVCs must be cleaned up explicitly by users.
 func createResource(
 	ctx context.Context,
 	cli client.Client,
@@ -135,13 +137,12 @@ func createResource(
 	scheme *runtime.Scheme,
 	gvk schema.GroupVersionKind,
 ) error {
-	// Check if the resource is cluster-scoped (like a ClusterRole) to avoid
-	// incorrectly setting a namespace-bound owner reference on it.
 	isClusterScoped, err := isClusterScoped(cli.RESTMapper(), gvk)
 	if err != nil {
 		return fmt.Errorf("failed to determine resource scope: %w", err)
 	}
-	if !isClusterScoped {
+	skipOwnerRef := isClusterScoped || gvk.Kind == "PersistentVolumeClaim"
+	if !skipOwnerRef {
 		if err := ctrl.SetControllerReference(ownerInstance, obj, scheme); err != nil {
 			return fmt.Errorf("failed to set controller reference for %s: %w", gvk.Kind, err)
 		}

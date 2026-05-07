@@ -154,9 +154,9 @@ func (r *OGXServerReconciler) adoptNetworkingSource(
 	return nil
 }
 
-// adoptStorage transfers ownership of a legacy PVC to this OGXServer CR.
-// If the old Deployment is still running, it is scaled to zero first
-// (requeue is requested to wait for pod termination).
+// adoptStorage detaches a legacy PVC from its old controller and labels it
+// for discovery by this OGXServer. No ownerRef is set on the PVC
+// The Deployment references the PVC by name via GetEffectivePVCName().
 func (r *OGXServerReconciler) adoptStorage(ctx context.Context, instance *ogxiov1beta1.OGXServer, legacyName string) (adoptionResult, error) {
 	logger := log.FromContext(ctx)
 	result := adoptionResult{}
@@ -173,8 +173,8 @@ func (r *OGXServerReconciler) adoptStorage(ctx context.Context, instance *ogxiov
 		return result, fmt.Errorf("failed to get legacy PVC %s: %w", pvcName, err)
 	}
 
-	// Idempotency: already owned by this CR.
-	if metav1.IsControlledBy(pvc, instance) {
+	// Idempotency: check adoption label instead of ownerRef.
+	if pvc.Labels != nil && pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == legacyName {
 		logger.V(1).Info("Legacy PVC already adopted", "pvc", pvcName)
 		SetStorageAdoptedCondition(&instance.Status, true, fmt.Sprintf("PVC %s adopted", pvcName))
 		return result, nil
@@ -192,14 +192,63 @@ func (r *OGXServerReconciler) adoptStorage(ctx context.Context, instance *ogxiov
 		return result, nil
 	}
 
-	// Transfer ownership: remove any existing controller ownerRef, then set ours.
-	if err := r.transferOwnership(ctx, instance, pvc, legacyName); err != nil {
+	// Detach from old controller and label for discovery. No new ownerRef is set.
+	if err := r.detachAndLabelPVC(ctx, instance.Name, pvc, legacyName); err != nil {
 		return result, err
 	}
 
 	SetStorageAdoptedCondition(&instance.Status, true, fmt.Sprintf("PVC %s adopted", pvcName))
 	logger.Info("Successfully adopted legacy PVC", "pvc", pvcName)
 	return result, nil
+}
+
+// detachAndLabelPVC removes the legacy controller ownerRef from the PVC and
+// sets the adopted-from label for server-side discovery. No new ownerRef is
+// added — PVCs must outlive OGXServer deletion.
+func (r *OGXServerReconciler) detachAndLabelPVC(ctx context.Context, instanceName string, pvc *corev1.PersistentVolumeClaim, legacySource string) error {
+	controllerRef := metav1.GetControllerOf(pvc)
+	if controllerRef != nil && !isExpectedLegacyOwnerRef(controllerRef, legacySource) {
+		return fmt.Errorf(
+			"failed to adopt %s: unexpected controller owner %s/%s %q",
+			pvc.Name, controllerRef.APIVersion, controllerRef.Kind, controllerRef.Name,
+		)
+	}
+
+	// Strip old controller ownerRef.
+	ownerRefs := pvc.GetOwnerReferences()
+	filtered := make([]metav1.OwnerReference, 0, len(ownerRefs))
+	for i := range ownerRefs {
+		if ownerRefs[i].Controller != nil && *ownerRefs[i].Controller {
+			continue
+		}
+		filtered = append(filtered, ownerRefs[i])
+	}
+	pvc.SetOwnerReferences(filtered)
+
+	// Set adoption label for server-side discovery, and instance label to
+	// scope the PVC to the specific OGXServer (avoids cross-instance ambiguity
+	// when multiple OGXServers share a namespace).
+	labels := pvc.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[ogxiov1beta1.AdoptedFromLabel] = legacySource
+	labels[instanceLabelKey] = instanceName
+	pvc.SetLabels(labels)
+
+	// Set adoption audit annotation.
+	annotations := pvc.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[ogxiov1beta1.AdoptedAtAnnotation] = metav1.Now().UTC().Format(time.RFC3339)
+	pvc.SetAnnotations(annotations)
+
+	if err := r.Update(ctx, pvc); err != nil {
+		return fmt.Errorf("failed to update %s after adoption: %w", pvc.Name, err)
+	}
+
+	return nil
 }
 
 // adoptNetworking transfers ownership of a legacy Service and Ingress to this OGXServer CR.
@@ -517,6 +566,31 @@ func clearAdoptionConfigInvalidCondition(status *ogxiov1beta1.OGXServerStatus) {
 		Message:            "Adoption annotations are valid",
 		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
 	})
+}
+
+// resolveEffectivePVCName determines the PVC name the reconciler should use:
+//  1. If adopt-storage annotation is present, the adopted PVC name is "{legacyName}-pvc".
+//  2. If the annotation is absent, discover an already-adopted PVC by the AdoptedFromLabel.
+//  3. Otherwise, fall back to the default "{instanceName}-pvc".
+func (r *OGXServerReconciler) resolveEffectivePVCName(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
+	if src := instance.GetAdoptStorageSource(); src != "" && ogxiov1beta1.ValidateAdoptionAnnotation(src) == nil {
+		return src + "-pvc", nil
+	}
+
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	if err := r.List(ctx, pvcList,
+		client.InNamespace(instance.Namespace),
+		client.HasLabels{ogxiov1beta1.AdoptedFromLabel},
+		client.MatchingLabels{instanceLabelKey: instance.Name},
+	); err != nil {
+		return "", fmt.Errorf("failed to list adopted PVCs: %w", err)
+	}
+
+	if len(pvcList.Items) > 0 {
+		return pvcList.Items[0].Name, nil
+	}
+
+	return instance.Name + "-pvc", nil
 }
 
 func isExpectedLegacyOwnerRef(ownerRef *metav1.OwnerReference, legacyName string) bool {

@@ -6542,22 +6542,9 @@ rules:
   - ""
   resources:
   - configmaps
-  verbs:
-  - create
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - persistentvolumeclaims
-  - serviceaccounts
-  - services
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
@@ -6569,6 +6556,19 @@ rules:
   - pods
   verbs:
   - list
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - apps
   resources:

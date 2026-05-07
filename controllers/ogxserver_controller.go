@@ -243,10 +243,10 @@ func (r *OGXServerReconciler) fetchInstance(ctx context.Context, namespacedName 
 
 // determineKindsToExclude returns a list of resource kinds that should be excluded
 // based on the instance specification and adoption annotations.
-func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGXServer) []string {
+func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGXServer, effectivePVCName string) []string {
 	var kinds []string
 
-	if shouldExcludePVC(instance) {
+	if shouldExcludePVC(instance, effectivePVCName) {
 		kinds = append(kinds, "PersistentVolumeClaim")
 	}
 
@@ -267,11 +267,10 @@ func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGX
 	return kinds
 }
 
-func shouldExcludePVC(instance *ogxiov1beta1.OGXServer) bool {
-	// When a valid adopt-storage annotation is present, suppress PVC creation from
-	// the kustomize pipeline to avoid a duplicate empty PVC alongside the adopted one.
-	storageSource := instance.GetAdoptStorageSource()
-	if storageSource != "" && ogxiov1beta1.ValidateAdoptionAnnotation(storageSource) == nil {
+func shouldExcludePVC(instance *ogxiov1beta1.OGXServer, effectivePVCName string) bool {
+	// Suppress PVC creation when the deployment is using an adopted PVC
+	// (either via annotation or discovered by label after annotation removal).
+	if effectivePVCName != instance.Name+"-pvc" {
 		return true
 	}
 
@@ -280,8 +279,14 @@ func shouldExcludePVC(instance *ogxiov1beta1.OGXServer) bool {
 
 // reconcileAllManifestResources applies all manifest-based resources using kustomize.
 func (r *OGXServerReconciler) reconcileAllManifestResources(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	// Resolve the PVC name once — may use annotation or label-based discovery.
+	effectivePVCName, err := r.resolveEffectivePVCName(ctx, instance)
+	if err != nil {
+		return fmt.Errorf("failed to resolve effective PVC name: %w", err)
+	}
+
 	// Build manifest context for Deployment
-	manifestCtx, err := r.buildManifestContext(ctx, instance)
+	manifestCtx, err := r.buildManifestContext(ctx, instance, effectivePVCName)
 	if err != nil {
 		return fmt.Errorf("failed to build manifest context: %w", err)
 	}
@@ -292,7 +297,7 @@ func (r *OGXServerReconciler) reconcileAllManifestResources(ctx context.Context,
 		return fmt.Errorf("failed to render manifests: %w", err)
 	}
 
-	kindsToExclude := r.determineKindsToExclude(instance)
+	kindsToExclude := r.determineKindsToExclude(instance, effectivePVCName)
 	filteredResMap, err := deploy.FilterExcludeKinds(resMap, kindsToExclude)
 	if err != nil {
 		return fmt.Errorf("failed to filter manifests: %w", err)
@@ -425,7 +430,7 @@ func (r *OGXServerReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.
 }
 
 // buildManifestContext creates the manifest context for Deployment using existing helper functions.
-func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*deploy.ManifestContext, error) {
+func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance *ogxiov1beta1.OGXServer, effectivePVCName string) (*deploy.ManifestContext, error) {
 	// Validate distribution configuration
 	if err := r.validateDistribution(instance); err != nil {
 		return nil, err
@@ -437,7 +442,7 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 	}
 
 	container := buildContainerSpec(ctx, r, instance, resolvedImage)
-	podSpec := configurePodStorage(ctx, r, instance, container)
+	podSpec := configurePodStorage(ctx, r, instance, container, effectivePVCName)
 
 	// Get override ConfigMap hash if needed
 	var configMapHash string
@@ -927,9 +932,15 @@ func (r *OGXServerReconciler) updateStorageStatus(ctx context.Context, instance 
 	if instance.Spec.Workload == nil || instance.Spec.Workload.Storage == nil {
 		return
 	}
-	pvc := &corev1.PersistentVolumeClaim{}
-	err := r.Get(ctx, types.NamespacedName{Name: instance.GetEffectivePVCName(), Namespace: instance.Namespace}, pvc)
+
+	pvcName, err := r.resolveEffectivePVCName(ctx, instance)
 	if err != nil {
+		SetStorageReadyCondition(&instance.Status, false, fmt.Sprintf("Failed to resolve PVC name: %v", err))
+		return
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: instance.Namespace}, pvc); err != nil {
 		SetStorageReadyCondition(&instance.Status, false, fmt.Sprintf("Failed to get PVC: %v", err))
 		return
 	}
