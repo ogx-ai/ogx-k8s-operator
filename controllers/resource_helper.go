@@ -129,7 +129,7 @@ func getStartupProbe(instance *ogxiov1beta1.OGXServer) *corev1.Probe {
 }
 
 // buildContainerSpec creates the container specification.
-func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, image string) corev1.Container {
+func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, image string, secretEnvVars []corev1.EnvVar) corev1.Container {
 	workers, workersSet := getEffectiveWorkers(instance)
 	container := corev1.Container{
 		Name:         ogxiov1beta1.DefaultContainerName,
@@ -138,7 +138,7 @@ func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *o
 		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
 		StartupProbe: getStartupProbe(instance),
 	}
-	configureContainerEnvironment(ctx, r, instance, &container)
+	configureContainerEnvironment(ctx, r, instance, &container, secretEnvVars)
 	configureContainerMounts(ctx, r, instance, &container)
 	configureContainerCommands(instance, &container)
 	return container
@@ -220,7 +220,7 @@ func getEffectiveWorkers(instance *ogxiov1beta1.OGXServer) (int32, bool) {
 }
 
 // configureContainerEnvironment sets up environment variables for the container.
-func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container, secretEnvVars []corev1.EnvVar) {
 	mountPath := getMountPath(instance)
 	workers, _ := getEffectiveWorkers(instance)
 
@@ -236,7 +236,6 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 	// Add CA bundle environment variable if any CA bundles are configured
 	// (explicit or auto-detected ODH bundles)
 	if hasAnyCABundle(ctx, r, instance) {
-		// Set SSL_CERT_FILE to point to the managed CA bundle file
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name:  "SSL_CERT_FILE",
 			Value: ManagedCABundleFilePath,
@@ -264,6 +263,10 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 			Name:  "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS",
 			Value: strconv.Itoa(int(*instance.Spec.RegistryRefreshIntervalSeconds)),
 		})
+	// Inject pre-computed secret env vars for provider/storage references.
+	// These are computed once in buildManifestContext to avoid redundant tree walks.
+	if len(secretEnvVars) > 0 {
+		container.Env = append(container.Env, secretEnvVars...)
 	}
 
 	// Finally, add the user provided env vars
@@ -303,8 +306,9 @@ func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxio
 
 // configureContainerCommands sets up container commands and args.
 func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
+	hasOverride := instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
+
+	if hasOverride || hasGeneratedConfig(instance) {
 		container.Command = []string{"/bin/sh", "-c", startupScript}
 		container.Args = []string{}
 	}
@@ -338,8 +342,11 @@ func addStorageVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.C
 }
 
 // addUserConfigVolumeMount adds the user config volume mount to the container if specified.
+// This handles both override config and generated config cases.
 func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
+	hasOverride := instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
+
+	if hasOverride || hasGeneratedConfig(instance) {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
 			MountPath: "/etc/ogx/",
@@ -455,9 +462,21 @@ func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance 
 }
 
 // configureUserConfig handles user configuration setup.
+// It mounts either the user-provided override ConfigMap or the operator-generated ConfigMap.
+// Override config takes precedence over generated config.
 func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	var configMapName, configMapKey string
+
 	overrideConfig := instance.Spec.OverrideConfig
-	if overrideConfig == nil || overrideConfig.Name == "" || overrideConfig.Key == "" {
+	if overrideConfig != nil && overrideConfig.Name != "" && overrideConfig.Key != "" {
+		configMapName = overrideConfig.Name
+		configMapKey = overrideConfig.Key
+	} else if hasGeneratedConfig(instance) {
+		configMapName = instance.Status.ConfigGeneration.ConfigMapName
+		configMapKey = "config.yaml"
+	}
+
+	if configMapName == "" {
 		return
 	}
 
@@ -466,11 +485,11 @@ func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSp
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: overrideConfig.Name,
+					Name: configMapName,
 				},
 				Items: []corev1.KeyToPath{
 					{
-						Key:  overrideConfig.Key,
+						Key:  configMapKey,
 						Path: "config.yaml",
 					},
 				},

@@ -19,7 +19,9 @@ package controllers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -29,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +40,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
@@ -62,6 +66,8 @@ import (
 const (
 	operatorConfigData = "ogx-operator-config"
 	manifestsBasePath  = "manifests/base"
+	managedByLabelKey  = "app.kubernetes.io/managed-by"
+	managedByLabelVal  = "ogx-operator"
 
 	// CA Bundle related constants.
 	DefaultCABundleKey             = "ca-bundle.crt"
@@ -104,6 +110,12 @@ type OGXServerReconciler struct {
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
 	httpClient  *http.Client
+	// OCILabelFetcher fetches OCI image labels for config resolution.
+	// When nil, OCI label resolution is skipped and only embedded configs are used.
+	OCILabelFetcher config.OCILabelFetcher
+	// configResolver resolves base config from OCI labels or embedded configs.
+	// Kept on the reconciler so the OCI config cache persists across reconciliations.
+	configResolver config.ConfigResolver
 
 	// Cached operator namespace used for config refresh during reconciliation.
 	operatorNamespace string
@@ -425,8 +437,12 @@ func (r *OGXServerReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.
 }
 
 // buildManifestContext creates the manifest context for Deployment using existing helper functions.
+//
+// ORDERING: This must run after reconcileConfigMaps, which populates
+// Status.ConfigGeneration in memory. Several helpers (hasGeneratedConfig,
+// configureUserConfig, configureContainerCommands) read that status field
+// to decide whether to mount the generated ConfigMap and inject env vars.
 func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance *ogxiov1beta1.OGXServer, effectivePVCName string) (*deploy.ManifestContext, error) {
-	// Validate distribution configuration
 	if err := r.validateDistribution(instance); err != nil {
 		return nil, err
 	}
@@ -436,25 +452,29 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 		return nil, err
 	}
 
-	container := buildContainerSpec(ctx, r, instance, resolvedImage)
-	podSpec := configurePodStorage(ctx, r, instance, container, effectivePVCName)
-
-	// Get override ConfigMap hash if needed
-	var configMapHash string
-	if r.hasOverrideConfig(instance) {
-		configMapHash, err = r.getConfigMapHash(ctx, instance)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get ConfigMap hash: %w", err)
-		}
+	// Compute secret env vars once; reused for both container env injection
+	// and rollout-triggering secret hash computation.
+	var secretEnvVars []corev1.EnvVar
+	if hasGeneratedConfig(instance) {
+		secretEnvVars = config.CollectSecretRefs(&instance.Spec)
 	}
 
-	// Get CA bundle hash if needed
-	var caBundleHash string
-	if r.hasCACertificates(instance) {
-		caBundleHash, err = r.getCABundleConfigMapHash(ctx, instance)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get CA bundle ConfigMap hash: %w", err)
-		}
+	container := buildContainerSpec(ctx, r, instance, resolvedImage, secretEnvVars)
+	podSpec := configurePodStorage(ctx, r, instance, container, effectivePVCName)
+
+	configMapHash, err := r.resolveConfigMapHash(ctx, instance)
+	if err != nil {
+		return nil, err
+	}
+
+	caBundleHash, err := r.resolveCABundleHash(ctx, instance)
+	if err != nil {
+		return nil, err
+	}
+
+	secretHash, err := r.resolveSecretRefsHash(ctx, instance, secretEnvVars)
+	if err != nil {
+		return nil, err
 	}
 
 	podSpecMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&podSpec)
@@ -462,17 +482,67 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 		return nil, fmt.Errorf("failed to convert pod spec to map: %w", err)
 	}
 
-	pdbSpec := buildPodDisruptionBudgetSpec(instance)
-	hpaSpec := buildHPASpec(instance)
-
 	return &deploy.ManifestContext{
 		ResolvedImage:           resolvedImage,
 		ConfigMapHash:           configMapHash,
 		CABundleHash:            caBundleHash,
+		SecretHash:              secretHash,
 		PodSpec:                 podSpecMap,
-		PodDisruptionBudgetSpec: pdbSpec,
-		HPASpec:                 hpaSpec,
+		PodDisruptionBudgetSpec: buildPodDisruptionBudgetSpec(instance),
+		HPASpec:                 buildHPASpec(instance),
 	}, nil
+}
+
+// hasGeneratedConfig returns true if config generation has produced a ConfigMap.
+func hasGeneratedConfig(instance *ogxiov1beta1.OGXServer) bool {
+	return instance.Status.ConfigGeneration != nil && instance.Status.ConfigGeneration.ConfigMapName != ""
+}
+
+func (r *OGXServerReconciler) resolveConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
+	if r.hasOverrideConfig(instance) {
+		return r.getConfigMapHash(ctx, instance)
+	}
+	if hasGeneratedConfig(instance) {
+		return r.getGeneratedConfigMapHash(ctx, instance)
+	}
+	return "", nil
+}
+
+func (r *OGXServerReconciler) resolveCABundleHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
+	if r.hasCACertificates(instance) {
+		return r.getCABundleConfigMapHash(ctx, instance)
+	}
+	return "", nil
+}
+
+func (r *OGXServerReconciler) resolveSecretRefsHash(ctx context.Context, instance *ogxiov1beta1.OGXServer, envVars []corev1.EnvVar) (string, error) {
+	if !hasGeneratedConfig(instance) || len(envVars) == 0 {
+		return "", nil
+	}
+
+	entries := make([]string, 0, len(envVars))
+	for _, env := range envVars {
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			continue
+		}
+		selector := env.ValueFrom.SecretKeyRef
+		secret := &corev1.Secret{}
+		if err := r.directGet(ctx, types.NamespacedName{Name: selector.Name, Namespace: instance.Namespace}, secret); err != nil {
+			return "", fmt.Errorf("failed to resolve secret %s/%s for env %s: %w", instance.Namespace, selector.Name, env.Name, err)
+		}
+		// Hash the actual secret data value so that metadata-only changes
+		// (label edits, etc.) don't trigger unnecessary pod restarts.
+		valHash := sha256.Sum256(secret.Data[selector.Key])
+		entries = append(entries, fmt.Sprintf("%s=%s/%s@%s", env.Name, selector.Name, selector.Key, hex.EncodeToString(valHash[:8])))
+	}
+
+	if len(entries) == 0 {
+		return "", nil
+	}
+
+	sort.Strings(entries)
+	hash := sha256.Sum256([]byte(strings.Join(entries, "|")))
+	return hex.EncodeToString(hash[:8]), nil
 }
 
 // reconcileResources reconciles all resources for the OGXServer instance.
@@ -562,6 +632,22 @@ func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance 
 		return err
 	}
 
+	// Reconcile operator-generated config (from declarative providers/resources/storage)
+	generated, err := r.reconcileGeneratedConfig(ctx, instance)
+	if err != nil {
+		r.clearConfigGenerationStatus(instance, "ConfigGenerationFailed", err.Error())
+		return fmt.Errorf("failed to reconcile generated config: %w", err)
+	}
+	if generated != nil {
+		r.setConfigGeneratedCondition(instance, true, "ConfigGenerationSucceeded",
+			fmt.Sprintf("Generated config.yaml with %d providers and %d resources", generated.ProviderCount, generated.ResourceCount))
+		r.updateConfigGenerationStatus(instance, generated)
+	} else {
+		// Declarative config generation is no longer active; clear stale status so
+		// rollout logic and pod config mounting do not keep referencing old output.
+		r.clearConfigGenerationStatus(instance, "ConfigGenerationInactive", "Declarative config generation is not active")
+	}
+
 	return r.reconcileManagedCABundle(ctx, instance)
 }
 
@@ -630,6 +716,11 @@ func (r *OGXServerReconciler) SetupWithManager(_ context.Context, mgr ctrl.Manag
 			handler.EnqueueRequestsFromMapFunc(r.mapConfigMapToReconcileRequests),
 			builder.WithPredicates(r.userConfigMapPredicate()),
 		).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.mapSecretToReconcileRequests),
+			builder.WithPredicates(r.userSecretPredicate()),
+		).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&networkingv1.Ingress{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
@@ -679,7 +770,7 @@ func (r *OGXServerReconciler) mapConfigMapToReconcileRequests(ctx context.Contex
 	}
 
 	// Skip operator-managed ConfigMaps — they are handled by Owns().
-	if configMap.Labels["app.kubernetes.io/managed-by"] == "ogx-operator" {
+	if configMap.Labels[managedByLabelKey] == managedByLabelVal {
 		return nil
 	}
 
@@ -753,6 +844,58 @@ func (r *OGXServerReconciler) referencesCACertificateConfigMap(instance *ogxiov1
 	return false
 }
 
+// mapSecretToReconcileRequests maps a user-opted-in Secret change to
+// OGXServer CR(s) that reference that Secret through declarative providers/storage.
+func (r *OGXServerReconciler) mapSecretToReconcileRequests(ctx context.Context, obj client.Object) []reconcile.Request {
+	logger := log.FromContext(ctx)
+
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	var instances ogxiov1beta1.OGXServerList
+	if err := r.List(ctx, &instances, client.InNamespace(secret.Namespace)); err != nil {
+		logger.Error(err, "failed to list OGXServer instances for Secret mapping")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range instances.Items {
+		instance := &instances.Items[i]
+		if r.instanceReferencesSecret(instance, secret.Name, secret.Namespace) {
+			logger.Info("Secret change mapped to OGXServer",
+				"secret", secret.Name, "secretNamespace", secret.Namespace,
+				"instance", instance.Name, "instanceNamespace", instance.Namespace)
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      instance.Name,
+					Namespace: instance.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
+}
+
+func (r *OGXServerReconciler) instanceReferencesSecret(instance *ogxiov1beta1.OGXServer, secretName, secretNamespace string) bool {
+	if secretNamespace != instance.Namespace {
+		return false
+	}
+
+	for _, env := range config.CollectSecretRefs(&instance.Spec) {
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			continue
+		}
+		if env.ValueFrom.SecretKeyRef.Name == secretName {
+			return true
+		}
+	}
+
+	return false
+}
+
 // userConfigMapPredicate returns a predicate that accepts only ConfigMaps with
 // the watch label and rejects operator-managed ConfigMaps (handled by Owns()).
 func (r *OGXServerReconciler) userConfigMapPredicate() predicate.Funcs {
@@ -780,7 +923,39 @@ func isWatchLabeledUserConfigMap(obj client.Object) bool {
 		return false
 	}
 	// Reject operator-managed ConfigMaps — they are handled by Owns().
-	if labels["app.kubernetes.io/managed-by"] == "ogx-operator" {
+	if labels[managedByLabelKey] == managedByLabelVal {
+		return false
+	}
+	return labels[WatchLabelKey] == WatchLabelValue
+}
+
+// userSecretPredicate returns a predicate that accepts only user Secrets with
+// the watch label and rejects operator-managed objects.
+func (r *OGXServerReconciler) userSecretPredicate() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return isWatchLabeledUserSecret(e.Object)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return isWatchLabeledUserSecret(e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return isWatchLabeledUserSecret(e.Object)
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return isWatchLabeledUserSecret(e.Object)
+		},
+	}
+}
+
+// isWatchLabeledUserSecret returns true if the Secret has the watch label
+// and is NOT an operator-managed Secret.
+func isWatchLabeledUserSecret(obj client.Object) bool {
+	labels := obj.GetLabels()
+	if labels == nil {
+		return false
+	}
+	if labels[managedByLabelKey] == managedByLabelVal {
 		return false
 	}
 	return labels[WatchLabelKey] == WatchLabelValue
@@ -1400,10 +1575,10 @@ func (r *OGXServerReconciler) reconcileManagedCABundleConfigMap(ctx context.Cont
 			Name:      managedConfigMapName,
 			Namespace: instance.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "ogx-operator",
-				"app.kubernetes.io/instance":   instance.Name,
-				"app.kubernetes.io/component":  "ca-bundle",
-				WatchLabelKey:                  WatchLabelValue,
+				managedByLabelKey:             managedByLabelVal,
+				"app.kubernetes.io/instance":  instance.Name,
+				"app.kubernetes.io/component": "ca-bundle",
+				WatchLabelKey:                 WatchLabelValue,
 			},
 		},
 		Data: map[string]string{
@@ -1506,6 +1681,8 @@ func NewOGXServerReconciler(ctx context.Context, client client.Client, scheme *r
 
 	imageMappingOverrides := ParseImageMappingOverrides(ctx, configMap.Data)
 
+	ociLabelFetcher := config.NewOCILabelFetcher()
+
 	return &OGXServerReconciler{
 		Client:                client,
 		Scheme:                scheme,
@@ -1513,6 +1690,8 @@ func NewOGXServerReconciler(ctx context.Context, client client.Client, scheme *r
 		ImageMappingOverrides: imageMappingOverrides,
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
+		OCILabelFetcher:       ociLabelFetcher,
+		configResolver:        config.NewDefaultConfigResolver(ociLabelFetcher),
 		operatorNamespace:     operatorNamespace,
 	}, nil
 }

@@ -98,6 +98,11 @@ func newCacheOptions() cache.Options {
 					controllers.WatchLabelKey: controllers.WatchLabelValue,
 				}),
 			},
+			&corev1.Secret{}: {
+				Label: labels.SelectorFromSet(labels.Set{
+					controllers.WatchLabelKey: controllers.WatchLabelValue,
+				}),
+			},
 			&appsv1.Deployment{}:                     managedByFilter,
 			&policyv1.PodDisruptionBudget{}:          managedByFilter,
 			&autoscalingv2.HorizontalPodAutoscaler{}: managedByFilter,

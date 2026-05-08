@@ -5,5 +5,6 @@ kind: Kustomization
 resources:
 - _v1beta1_ogxserver.yaml
 - example-with-configmap.yaml
+- example-with-generated-config.yaml
 - example-with-ca-bundle.yaml
 - example-with-network-config.yaml

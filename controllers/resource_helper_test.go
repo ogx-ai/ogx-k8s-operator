@@ -56,7 +56,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil)
 		assert.Equal(t, ogxiov1beta1.DefaultContainerName, c.Name)
 		assert.Equal(t, "test-image:latest", c.Image)
 		assert.Equal(t, ogxiov1beta1.DefaultServerPort, c.Ports[0].ContainerPort)
@@ -90,7 +90,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil)
 		assert.Equal(t, int32(9000), c.Ports[0].ContainerPort)
 		assert.Equal(t, newDefaultStartupProbe(9000), c.StartupProbe)
 		envNames := make([]string, 0, len(c.Env))

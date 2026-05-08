@@ -34,31 +34,45 @@ func runCreationTestsForDistribution(t *testing.T, distType string) *ogxiov1beta
 		ogxServer = testCreateServerForType(t, distType)
 	})
 
+	requireServer := func(t *testing.T) {
+		t.Helper()
+		if ogxServer == nil {
+			t.Skip("Skipping: OGXServer creation failed")
+		}
+	}
+
 	t.Run("should create PVC if storage is configured", func(t *testing.T) {
+		requireServer(t)
 		testPVCConfiguration(t, ogxServer)
 	})
 
 	t.Run("should handle direct deployment updates", func(t *testing.T) {
+		requireServer(t)
 		testDirectDeploymentUpdates(t, ogxServer)
 	})
 
 	t.Run("should check health status", func(t *testing.T) {
+		requireServer(t)
 		testHealthStatus(t, ogxServer)
 	})
 
 	t.Run("should update deployment through CR", func(t *testing.T) {
+		requireServer(t)
 		testCRDeploymentUpdate(t, ogxServer)
 	})
 
 	t.Run("should update distribution status", func(t *testing.T) {
+		requireServer(t)
 		testDistributionStatus(t, ogxServer)
 	})
 
 	t.Run("should use custom ServiceAccount from workload overrides", func(t *testing.T) {
+		requireServer(t)
 		testServiceAccountOverride(t, ogxServer)
 	})
 
 	t.Run("should apply image mapping overrides from ConfigMap", func(t *testing.T) {
+		requireServer(t)
 		testImageMappingOverrides(t, ogxServer)
 	})
 

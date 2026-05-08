@@ -512,6 +512,72 @@ func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name s
 	}
 }
 
+// logOperatorPodStatus logs operator pod details to diagnose webhook failures
+// caused by pod restarts, OOMKills, or CrashLoopBackOff.
+func logOperatorPodStatus(t *testing.T, testenv *TestEnvironment, operatorNS string) {
+	t.Helper()
+
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList,
+		client.InNamespace(operatorNS),
+		client.MatchingLabels{"control-plane": "controller-manager"})
+	if err != nil {
+		t.Logf("Failed to list operator pods: %v", err)
+		return
+	}
+
+	for _, pod := range podList.Items {
+		t.Logf("Operator pod %s: Phase=%s", pod.Name, pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			t.Logf("  Container %s: Ready=%v, RestartCount=%d", cs.Name, cs.Ready, cs.RestartCount)
+			if cs.LastTerminationState.Terminated != nil {
+				t.Logf("  Last termination: Reason=%s, ExitCode=%d, At=%s",
+					cs.LastTerminationState.Terminated.Reason,
+					cs.LastTerminationState.Terminated.ExitCode,
+					cs.LastTerminationState.Terminated.FinishedAt.String())
+			}
+		}
+	}
+}
+
+// WaitForWebhookReady polls until the webhook service endpoint has at least one ready address.
+// This prevents "connection refused" errors when creating OGXServer resources before
+// the operator's webhook server is accepting connections.
+func WaitForWebhookReady(t *testing.T, testenv *TestEnvironment, operatorNS string, timeout time.Duration) error {
+	t.Helper()
+	t.Log("Waiting for webhook endpoint to become ready...")
+
+	webhookServiceName := "ogx-k8s-operator-webhook-service"
+
+	return wait.PollUntilContextTimeout(testenv.Ctx, generalRetryInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		endpointSliceList := &discoveryv1.EndpointSliceList{}
+		err := testenv.Client.List(ctx, endpointSliceList,
+			client.InNamespace(operatorNS),
+			client.MatchingLabels{"kubernetes.io/service-name": webhookServiceName})
+		if err != nil {
+			t.Logf("Failed to list endpoint slices for webhook service: %v", err)
+			return false, nil
+		}
+
+		if len(endpointSliceList.Items) == 0 {
+			t.Log("No endpoint slices found for webhook service yet")
+			return false, nil
+		}
+
+		for _, slice := range endpointSliceList.Items {
+			for _, endpoint := range slice.Endpoints {
+				if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+					t.Log("Webhook endpoint is ready")
+					return true, nil
+				}
+			}
+		}
+
+		t.Log("Webhook endpoint exists but no ready addresses yet")
+		return false, nil
+	})
+}
+
 // logServiceSpec logs the actual service configuration to debug selector issues.
 func logServiceSpec(t *testing.T, testenv *TestEnvironment, namespace, serviceName string) {
 	t.Helper()
