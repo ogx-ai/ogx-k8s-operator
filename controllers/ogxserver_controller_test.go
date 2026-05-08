@@ -149,6 +149,69 @@ func TestStorageConfiguration(t *testing.T) {
 	}
 }
 
+func TestDefaultPVCLifecycle(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	// --- arrange ---
+	namespace := createTestNamespace(t, "pvc-lifecycle")
+	pvcName := "pvc-test-pvc"
+	pvcKey := types.NamespacedName{Name: pvcName, Namespace: namespace.Name}
+	crKey := types.NamespacedName{Name: "pvc-test", Namespace: namespace.Name}
+
+	// --- act: create OGXServer with storage ---
+	instance := NewOGXServerBuilder().
+		WithName("pvc-test").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+
+	ReconcileOGXServer(t, instance)
+
+	// --- assert: PVC created without ownerRef, Deployment references it ---
+	pvc := AssertPVCExists(t, k8sClient, namespace.Name, pvcName)
+	require.Nil(t, metav1.GetControllerOf(pvc),
+		"Default PVC should not have a controller ownerRef")
+
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, namespace.Name, "pvc-test", deployment)
+	AssertDeploymentUsesPVCStorage(t, deployment, pvcName)
+
+	// --- act: delete OGXServer ---
+	require.NoError(t, k8sClient.Delete(t.Context(), instance))
+	require.Eventually(t, func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(t.Context(), crKey, &ogxiov1beta1.OGXServer{}))
+	}, testTimeout, testInterval, "OGXServer should be deleted")
+
+	// --- assert: PVC survives CR deletion ---
+	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
+		"PVC must survive OGXServer deletion")
+
+	// --- act: recreate OGXServer with same name ---
+	instance = NewOGXServerBuilder().
+		WithName("pvc-test").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		Build()
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
+			t.Logf("Cleanup: %v", err)
+		}
+	})
+
+	ReconcileOGXServer(t, instance)
+
+	// --- assert: PVC reused, Deployment references it ---
+	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
+		"PVC must still exist after recreate")
+	require.Nil(t, metav1.GetControllerOf(pvc),
+		"Reused PVC should still not have a controller ownerRef")
+
+	require.NoError(t, k8sClient.Get(t.Context(), crKey, deployment))
+	AssertDeploymentUsesPVCStorage(t, deployment, pvcName)
+}
+
 func TestConfigMapWatchingFunctionality(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 

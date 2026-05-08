@@ -50,11 +50,8 @@ const (
 	AdoptStorageAnnotation = "ogx.io/adopt-storage"
 	// AdoptNetworkingAnnotation triggers Service/Ingress adoption from a legacy LlamaStackDistribution.
 	AdoptNetworkingAnnotation = "ogx.io/adopt-networking"
-	// AdoptedFromLabel is set on adopted PVCs to record the legacy source.
-	// A label (not annotation) enables server-side filtering via MatchingLabels.
+	// AdoptedFromLabel is set on adopted resources to record the legacy source.
 	AdoptedFromLabel = "ogx.io/adopted-from"
-	// AdoptedFromAnnotation is set on adopted networking resources to record the legacy source.
-	AdoptedFromAnnotation = "ogx.io/adopted-from"
 	// AdoptedAtAnnotation is set on adopted child resources with an RFC 3339 timestamp.
 	AdoptedAtAnnotation = "ogx.io/adopted-at"
 )
