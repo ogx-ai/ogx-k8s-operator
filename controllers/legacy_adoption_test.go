@@ -228,7 +228,7 @@ func TestAdoptNetworking(t *testing.T) {
 				require.Equal(t, instance.Name, svc.Spec.Selector["app.kubernetes.io/instance"],
 					"Service selector should target the new instance")
 
-				require.Equal(t, "old-llsd", svc.Annotations[ogxiov1beta1.AdoptedFromAnnotation])
+				require.Equal(t, "old-llsd", svc.Labels[ogxiov1beta1.AdoptedFromLabel])
 				require.NotEmpty(t, svc.Annotations[ogxiov1beta1.AdoptedAtAnnotation])
 
 				assertConditionTrue(t, instance, "NetworkingAdopted")
@@ -256,7 +256,7 @@ func TestAdoptNetworking(t *testing.T) {
 						metav1.IsControlledBy(ingress, instance)
 				}, testTimeout, testInterval, "Ingress should be owned by new instance")
 
-				require.Equal(t, "old-llsd", ingress.Annotations[ogxiov1beta1.AdoptedFromAnnotation])
+				require.Equal(t, "old-llsd", ingress.Labels[ogxiov1beta1.AdoptedFromLabel])
 				require.NotEmpty(t, ingress.Annotations[ogxiov1beta1.AdoptedAtAnnotation])
 			},
 		},
@@ -583,10 +583,15 @@ func TestSelfAdoptionRejectedByController(t *testing.T) {
 	assertConditionTrue(t, instance, "AdoptionConfigInvalid")
 }
 
-func TestAdoptedPVCDiscoveredByLabelAfterAnnotationRemoval(t *testing.T) {
+func TestAdoptedPVCLifecycle(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
-	namespace := createTestNamespace(t, "adopt-pvc-label-disc")
+	namespace := createTestNamespace(t, "adopt-pvc-lifecycle")
 	createLegacyPVC(t, namespace.Name, "disc-legacy")
+
+	// --- arrange ---
+	pvcKey := types.NamespacedName{Name: "disc-legacy-pvc", Namespace: namespace.Name}
+	defaultKey := types.NamespacedName{Name: "disc-server-pvc", Namespace: namespace.Name}
+	deployKey := types.NamespacedName{Name: "disc-server", Namespace: namespace.Name}
 
 	instance := NewOGXServerBuilder().
 		WithName("disc-server").
@@ -596,22 +601,19 @@ func TestAdoptedPVCDiscoveredByLabelAfterAnnotationRemoval(t *testing.T) {
 		Build()
 
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
-	t.Cleanup(func() {
-		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
-			t.Logf("Cleanup: %v", err)
-		}
-	})
 
-	// First reconcile adopts the PVC (sets label, strips old ownerRef).
+	// --- act: adopt PVC, then remove annotation ---
 	ReconcileOGXServer(t, instance)
+
 	pvc := &corev1.PersistentVolumeClaim{}
-	pvcKey := types.NamespacedName{Name: "disc-legacy-pvc", Namespace: namespace.Name}
 	require.Eventually(t, func() bool {
 		return k8sClient.Get(t.Context(), pvcKey, pvc) == nil &&
 			pvc.Labels[ogxiov1beta1.AdoptedFromLabel] == "disc-legacy"
 	}, testTimeout, testInterval, "PVC should be adopted with label")
 
-	// Remove the annotation and reconcile again.
+	deployment := &appsv1.Deployment{}
+	waitForResource(t, k8sClient, namespace.Name, "disc-server", deployment)
+
 	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
 		Name: instance.Name, Namespace: instance.Namespace,
 	}, instance))
@@ -620,16 +622,55 @@ func TestAdoptedPVCDiscoveredByLabelAfterAnnotationRemoval(t *testing.T) {
 
 	ReconcileOGXServer(t, instance)
 
-	// The adopted PVC should still exist (not garbage collected).
+	// --- assert: adopted PVC discovered by label, Deployment uses it ---
 	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
 		"Adopted PVC must survive annotation removal")
-
-	// No new default PVC should be created — the controller should discover
-	// the adopted PVC by label and keep using it.
-	defaultPVC := &corev1.PersistentVolumeClaim{}
-	defaultKey := types.NamespacedName{Name: "disc-server-pvc", Namespace: namespace.Name}
-	require.True(t, apierrors.IsNotFound(k8sClient.Get(t.Context(), defaultKey, defaultPVC)),
+	require.True(t, apierrors.IsNotFound(k8sClient.Get(t.Context(), defaultKey, &corev1.PersistentVolumeClaim{})),
 		"Default PVC should NOT be created when adopted PVC is discovered by label")
+
+	require.NoError(t, k8sClient.Get(t.Context(), deployKey, deployment))
+	AssertDeploymentUsesPVCStorage(t, deployment, "disc-legacy-pvc")
+
+	// --- act: delete OGXServer ---
+	require.NoError(t, k8sClient.Delete(t.Context(), instance))
+	require.Eventually(t, func() bool {
+		return apierrors.IsNotFound(k8sClient.Get(t.Context(), types.NamespacedName{
+			Name: "disc-server", Namespace: namespace.Name,
+		}, &ogxiov1beta1.OGXServer{}))
+	}, testTimeout, testInterval, "OGXServer should be deleted")
+
+	// --- assert: adopted PVC survives CR deletion with labels intact ---
+	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
+		"Adopted PVC must survive OGXServer deletion")
+	require.Equal(t, "disc-legacy", pvc.Labels[ogxiov1beta1.AdoptedFromLabel],
+		"Adopted-from label must be unchanged after CR deletion")
+	require.Equal(t, "disc-server", pvc.Labels["app.kubernetes.io/instance"],
+		"Instance label must be unchanged after CR deletion")
+
+	// --- act: recreate OGXServer with same name ---
+	instance = NewOGXServerBuilder().
+		WithName("disc-server").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		Build()
+
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
+			t.Logf("Cleanup: %v", err)
+		}
+	})
+
+	ReconcileOGXServer(t, instance)
+
+	// --- assert: adopted PVC discovered, no default PVC created ---
+	require.NoError(t, k8sClient.Get(t.Context(), pvcKey, pvc),
+		"Adopted PVC must still exist after recreate")
+	require.True(t, apierrors.IsNotFound(k8sClient.Get(t.Context(), defaultKey, &corev1.PersistentVolumeClaim{})),
+		"Default PVC should NOT be created when adopted PVC is discovered by label")
+
+	require.NoError(t, k8sClient.Get(t.Context(), deployKey, deployment))
+	AssertDeploymentUsesPVCStorage(t, deployment, "disc-legacy-pvc")
 }
 
 func TestAdoptionRejectsUnexpectedControllerOwner(t *testing.T) {
@@ -666,6 +707,71 @@ func TestAdoptionRejectsUnexpectedControllerOwner(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to adopt")
+}
+
+func TestMultipleAdoptedPVCsReturnsTerminalError(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	namespace := createTestNamespace(t, "adopt-multi-pvc")
+
+	// --- arrange: create two PVCs with matching adoption labels ---
+	for _, pvcName := range []string{"first-pvc", "second-pvc"} {
+		storageSize := resource.MustParse("1Gi")
+		pvc := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pvcName,
+				Namespace: namespace.Name,
+				Labels: map[string]string{
+					ogxiov1beta1.AdoptedFromLabel: "some-legacy",
+					"app.kubernetes.io/instance":  "multi-test",
+				},
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: storageSize,
+					},
+				},
+			},
+		}
+		require.NoError(t, k8sClient.Create(t.Context(), pvc))
+		t.Cleanup(func() {
+			if err := k8sClient.Delete(t.Context(), pvc); err != nil && !apierrors.IsNotFound(err) {
+				t.Logf("Cleanup PVC: %v", err)
+			}
+		})
+	}
+
+	instance := NewOGXServerBuilder().
+		WithName("multi-test").
+		WithNamespace(namespace.Name).
+		WithStorage(DefaultTestStorage()).
+		Build()
+
+	require.NoError(t, k8sClient.Create(t.Context(), instance))
+	t.Cleanup(func() {
+		if err := k8sClient.Delete(t.Context(), instance); err != nil && !apierrors.IsNotFound(err) {
+			t.Logf("Cleanup: %v", err)
+		}
+	})
+
+	// --- act ---
+	reconciler := createTestReconciler()
+	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      instance.Name,
+			Namespace: instance.Namespace,
+		},
+	})
+
+	// --- assert: no error returned (terminal), no requeue ---
+	require.NoError(t, err, "terminal error should not propagate as a reconcile error")
+	require.Zero(t, result.RequeueAfter, "should not requeue on terminal error")
+
+	require.NoError(t, k8sClient.Get(t.Context(), types.NamespacedName{
+		Name: instance.Name, Namespace: instance.Namespace,
+	}, instance))
+	assertConditionTrue(t, instance, "AdoptionConfigInvalid")
 }
 
 // --- Helpers ---

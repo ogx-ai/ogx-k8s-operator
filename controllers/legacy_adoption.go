@@ -288,12 +288,11 @@ func (r *OGXServerReconciler) adoptLegacyService(ctx context.Context, instance *
 		return true, nil
 	}
 
-	// Update selectors to route traffic to new pods.
-	if svc.Spec.Selector == nil {
-		svc.Spec.Selector = make(map[string]string)
+	// Replace selectors to route traffic to new pods.
+	svc.Spec.Selector = map[string]string{
+		ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultLabelValue,
+		instanceLabelKey:             instance.Name,
 	}
-	svc.Spec.Selector[ogxiov1beta1.DefaultLabelKey] = ogxiov1beta1.DefaultLabelValue
-	svc.Spec.Selector[instanceLabelKey] = instance.Name
 
 	if err := r.transferOwnership(ctx, instance, svc, legacyName); err != nil {
 		return false, err
@@ -403,12 +402,18 @@ func (r *OGXServerReconciler) transferOwnership(ctx context.Context, instance *o
 	}
 	obj.SetOwnerReferences(filtered)
 
-	// Set adoption audit annotations.
+	// Set adoption audit label and timestamp annotation.
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[ogxiov1beta1.AdoptedFromLabel] = legacySource
+	obj.SetLabels(labels)
+
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
-	annotations[ogxiov1beta1.AdoptedFromAnnotation] = legacySource
 	annotations[ogxiov1beta1.AdoptedAtAnnotation] = metav1.Now().UTC().Format(time.RFC3339)
 	obj.SetAnnotations(annotations)
 
@@ -458,13 +463,13 @@ func (r *OGXServerReconciler) cleanupAdoptedNetworking(ctx context.Context, inst
 func (r *OGXServerReconciler) cleanupAdoptedServices(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	logger := log.FromContext(ctx)
 	ownedServices := &corev1.ServiceList{}
-	if err := r.List(ctx, ownedServices, client.InNamespace(instance.Namespace)); err != nil {
+	if err := r.List(ctx, ownedServices, client.InNamespace(instance.Namespace), client.HasLabels{ogxiov1beta1.AdoptedFromLabel}); err != nil {
 		return fmt.Errorf("failed to list services for adoption cleanup: %w", err)
 	}
 
 	for i := range ownedServices.Items {
 		svc := &ownedServices.Items[i]
-		if !shouldDeleteAdoptedResource(instance, svc.GetAnnotations(), svc) {
+		if !shouldDeleteAdoptedResource(instance, svc) {
 			continue
 		}
 		logger.Info("Deleting adopted legacy Service after annotation removal", "service", svc.Name)
@@ -479,13 +484,13 @@ func (r *OGXServerReconciler) cleanupAdoptedServices(ctx context.Context, instan
 func (r *OGXServerReconciler) cleanupAdoptedIngresses(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	logger := log.FromContext(ctx)
 	ownedIngresses := &networkingv1.IngressList{}
-	if err := r.List(ctx, ownedIngresses, client.InNamespace(instance.Namespace)); err != nil {
+	if err := r.List(ctx, ownedIngresses, client.InNamespace(instance.Namespace), client.HasLabels{ogxiov1beta1.AdoptedFromLabel}); err != nil {
 		return fmt.Errorf("failed to list ingresses for adoption cleanup: %w", err)
 	}
 
 	for i := range ownedIngresses.Items {
 		ing := &ownedIngresses.Items[i]
-		if !shouldDeleteAdoptedResource(instance, ing.GetAnnotations(), ing) {
+		if !shouldDeleteAdoptedResource(instance, ing) {
 			continue
 		}
 		logger.Info("Deleting adopted legacy Ingress after annotation removal", "ingress", ing.Name)
@@ -499,13 +504,12 @@ func (r *OGXServerReconciler) cleanupAdoptedIngresses(ctx context.Context, insta
 
 func shouldDeleteAdoptedResource(
 	instance *ogxiov1beta1.OGXServer,
-	annotations map[string]string,
 	obj metav1.Object,
 ) bool {
 	if !metav1.IsControlledBy(obj, instance) {
 		return false
 	}
-	_, hasAdopted := annotations[ogxiov1beta1.AdoptedFromAnnotation]
+	_, hasAdopted := obj.GetLabels()[ogxiov1beta1.AdoptedFromLabel]
 	return hasAdopted
 }
 
@@ -586,7 +590,20 @@ func (r *OGXServerReconciler) resolveEffectivePVCName(ctx context.Context, insta
 		return "", fmt.Errorf("failed to list adopted PVCs: %w", err)
 	}
 
-	if len(pvcList.Items) > 0 {
+	if len(pvcList.Items) > 1 {
+		names := make([]string, len(pvcList.Items))
+		for i := range pvcList.Items {
+			names[i] = pvcList.Items[i].Name
+		}
+		msg := fmt.Sprintf("multiple adopted PVCs found for instance %q: %v; remove the %s label from all but one",
+			instance.Name, names, ogxiov1beta1.AdoptedFromLabel)
+		logger := log.FromContext(ctx)
+		logger.Error(nil, msg)
+		SetAdoptionConfigInvalidCondition(&instance.Status, msg)
+		return "", &terminalError{message: msg}
+	}
+
+	if len(pvcList.Items) == 1 {
 		return pvcList.Items[0].Name, nil
 	}
 

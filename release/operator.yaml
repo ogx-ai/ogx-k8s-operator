@@ -10,7 +10,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    cert-manager.io/inject-ca-from: system/serving-cert
+    cert-manager.io/inject-ca-from: ogx-k8s-operator-system/ogx-k8s-operator-serving-cert
     controller-gen.kubebuilder.io/version: v0.17.2
   labels:
     app.kubernetes.io/name: ogx-k8s-operator
@@ -6988,22 +6988,22 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: serving-cert
-  namespace: system
+  name: ogx-k8s-operator-serving-cert
+  namespace: ogx-k8s-operator-system
 spec:
   dnsNames:
   - ogx-k8s-operator-webhook-service.ogx-k8s-operator-system.svc
   - ogx-k8s-operator-webhook-service.ogx-k8s-operator-system.svc.cluster.local
   issuerRef:
     kind: Issuer
-    name: selfsigned-issuer
+    name: ogx-k8s-operator-selfsigned-issuer
   secretName: ogx-k8s-operator-webhook-cert
 ---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: selfsigned-issuer
-  namespace: system
+  name: ogx-k8s-operator-selfsigned-issuer
+  namespace: ogx-k8s-operator-system
 spec:
   selfSigned: {}
 ---
@@ -7011,7 +7011,7 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
   annotations:
-    cert-manager.io/inject-ca-from: system/serving-cert
+    cert-manager.io/inject-ca-from: ogx-k8s-operator-system/ogx-k8s-operator-serving-cert
   labels:
     app.kubernetes.io/name: ogx-k8s-operator
   name: ogx-k8s-operator-validating-webhook-configuration

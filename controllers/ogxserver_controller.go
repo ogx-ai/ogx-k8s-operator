@@ -157,13 +157,8 @@ func (r *OGXServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Reconcile all resources, storing the error for later.
 	reconcileErr := r.reconcileResources(ctx, instance)
 
-	// Handle adoption requeue: not a real error, just needs a delayed retry.
-	var requeueErr *requeueError
-	if errors.As(reconcileErr, &requeueErr) {
-		if statusUpdateErr := r.updateStatus(ctx, instance, nil); statusUpdateErr != nil {
-			logger.Error(statusUpdateErr, "failed to update status during adoption requeue")
-		}
-		return ctrl.Result{RequeueAfter: requeueErr.after}, nil
+	if result, done := r.handleSentinelErrors(ctx, instance, reconcileErr); done {
+		return result, nil
 	}
 
 	// Update the status, passing in any reconciliation error.
@@ -526,6 +521,40 @@ type requeueError struct {
 
 func (e *requeueError) Error() string {
 	return fmt.Sprintf("requeue after %s", e.after)
+}
+
+// terminalError signals a problem that cannot be resolved by retrying.
+// The reconciler sets a status condition and stops without requeueing.
+type terminalError struct {
+	message string
+}
+
+func (e *terminalError) Error() string {
+	return e.message
+}
+
+func (r *OGXServerReconciler) handleSentinelErrors(
+	ctx context.Context, instance *ogxiov1beta1.OGXServer, reconcileErr error,
+) (ctrl.Result, bool) {
+	logger := log.FromContext(ctx)
+
+	var requeueErr *requeueError
+	if errors.As(reconcileErr, &requeueErr) {
+		if statusUpdateErr := r.updateStatus(ctx, instance, nil); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update status during adoption requeue")
+		}
+		return ctrl.Result{RequeueAfter: requeueErr.after}, true
+	}
+
+	var termErr *terminalError
+	if errors.As(reconcileErr, &termErr) {
+		if statusUpdateErr := r.updateStatus(ctx, instance, nil); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update status for terminal error")
+		}
+		return ctrl.Result{}, true
+	}
+
+	return ctrl.Result{}, false
 }
 
 func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {

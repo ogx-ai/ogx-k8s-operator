@@ -173,11 +173,12 @@ func (p AzureProvider) DeriveID() string { return p.deriveOrDefault("remote-azur
 
 // BedrockProvider configures a remote::bedrock inference provider instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.awsRoleArn) || self.awsRoleArn.size() > 0",message="awsRoleArn must not be empty if specified"
-//nolint:lll // kubebuilder marker cannot be split across lines.
 // +kubebuilder:validation:XValidation:rule="!has(self.awsWebIdentityTokenFile) || self.awsWebIdentityTokenFile.size() > 0",message="awsWebIdentityTokenFile must not be empty if specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.awsRoleSessionName) || self.awsRoleSessionName.size() > 0",message="awsRoleSessionName must not be empty if specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.profileName) || self.profileName.size() > 0",message="profileName must not be empty if specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.retryMode) || self.retryMode.size() > 0",message="retryMode must not be empty if specified"
+//
+//nolint:lll // kubebuilder marker cannot be split across lines.
 type BedrockProvider struct {
 	RoutedProviderBase          `json:",inline"`
 	RemoteInferenceCommonConfig `json:",inline"`
