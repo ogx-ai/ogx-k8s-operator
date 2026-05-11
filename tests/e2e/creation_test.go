@@ -144,45 +144,55 @@ func testDirectDeploymentUpdates(t *testing.T, server *ogxiov1beta1.OGXServer) {
 func testCRDeploymentUpdate(t *testing.T, server *ogxiov1beta1.OGXServer) {
 	t.Helper()
 
-	err := TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-		Namespace: server.Namespace,
-		Name:      server.Name,
-	}, server)
-	require.NoError(t, err)
+	testEnvVar := corev1.EnvVar{Name: "E2E_TEST_MARKER", Value: "cr-update-test"}
 
-	if server.Spec.Workload != nil && server.Spec.Workload.Storage != nil {
-		t.Log("Skipping replica scaling test - PVC with ReadWriteOnce can only be attached to one pod at a time")
-		return
-	}
-
-	replicas := int32(2)
-	if server.Spec.Workload == nil {
-		server.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
-	}
-	server.Spec.Workload.Replicas = &replicas
-	err = TestEnv.Client.Update(TestEnv.Ctx, server)
-	require.NoError(t, err)
-
-	err = EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "Deployment",
-	}, server.Name, server.Namespace, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
-		availableReplicas, found, nestedErr := unstructured.NestedInt64(u.Object, "status", "availableReplicas")
-		if !found || nestedErr != nil {
-			return false
+	// Update the CR to add a new env var (retry on conflict)
+	err := wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		latest := &ogxiov1beta1.OGXServer{}
+		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: server.Namespace,
+			Name:      server.Name,
+		}, latest); getErr != nil {
+			return false, getErr
 		}
-		return availableReplicas == 2
+		if latest.Spec.Workload == nil {
+			latest.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+		}
+		if latest.Spec.Workload.Overrides == nil {
+			latest.Spec.Workload.Overrides = &ogxiov1beta1.WorkloadOverrides{}
+		}
+		latest.Spec.Workload.Overrides.Env = append(latest.Spec.Workload.Overrides.Env, testEnvVar)
+		if updateErr := TestEnv.Client.Update(ctx, latest); updateErr != nil {
+			if k8serrors.IsConflict(updateErr) {
+				return false, nil
+			}
+			return false, updateErr
+		}
+		return true, nil
 	})
-	require.NoError(t, err, "Failed to wait for deployment to update replicas")
+	require.NoError(t, err, "Failed to update CR with test env var")
 
-	deployment := &appsv1.Deployment{}
-	err = TestEnv.Client.Get(TestEnv.Ctx, client.ObjectKey{
-		Namespace: server.Namespace,
-		Name:      server.Name,
-	}, deployment)
-	require.NoError(t, err)
-	require.Equal(t, int32(2), deployment.Status.AvailableReplicas, "Deployment should have 2 available replicas")
+	// Verify deployment pod template picks up the new env var
+	err = wait.PollUntilContextTimeout(TestEnv.Ctx, 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		deployment := &appsv1.Deployment{}
+		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: server.Namespace,
+			Name:      server.Name,
+		}, deployment); getErr != nil {
+			return false, getErr
+		}
+		for _, env := range deployment.Spec.Template.Spec.Containers[0].Env {
+			if env.Name == testEnvVar.Name && env.Value == testEnvVar.Value {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	require.NoError(t, err, "Deployment should pick up env var from CR update")
+
+	// Wait for the rolled-out pod to be ready
+	err = WaitForPodsReady(t, TestEnv, server.Namespace, server.Name, ResourceReadyTimeout)
+	require.NoError(t, err, "Pod should be ready after CR update rollout")
 }
 
 func testHealthStatus(t *testing.T, server *ogxiov1beta1.OGXServer) {
