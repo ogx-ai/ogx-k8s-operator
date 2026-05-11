@@ -141,58 +141,58 @@ func testDirectDeploymentUpdates(t *testing.T, server *ogxiov1beta1.OGXServer) {
 	require.Equal(t, originalReplicas, *deployment.Spec.Replicas, "Deployment should be reverted to original state")
 }
 
-func testCRDeploymentUpdate(t *testing.T, server *ogxiov1beta1.OGXServer) {
-	t.Helper()
-
-	testEnvVar := corev1.EnvVar{Name: "E2E_TEST_MARKER", Value: "cr-update-test"}
-
-	// Update the CR to add a new env var (retry on conflict)
-	err := wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+func updateCRReplicas(server *ogxiov1beta1.OGXServer, replicas int32) error {
+	return wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		latest := &ogxiov1beta1.OGXServer{}
-		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+		if err := TestEnv.Client.Get(ctx, client.ObjectKey{
 			Namespace: server.Namespace,
 			Name:      server.Name,
-		}, latest); getErr != nil {
-			return false, getErr
+		}, latest); err != nil {
+			return false, err
 		}
 		if latest.Spec.Workload == nil {
 			latest.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
 		}
-		if latest.Spec.Workload.Overrides == nil {
-			latest.Spec.Workload.Overrides = &ogxiov1beta1.WorkloadOverrides{}
-		}
-		latest.Spec.Workload.Overrides.Env = append(latest.Spec.Workload.Overrides.Env, testEnvVar)
-		if updateErr := TestEnv.Client.Update(ctx, latest); updateErr != nil {
-			if k8serrors.IsConflict(updateErr) {
+		latest.Spec.Workload.Replicas = &replicas
+		if err := TestEnv.Client.Update(ctx, latest); err != nil {
+			if k8serrors.IsConflict(err) {
 				return false, nil
 			}
-			return false, updateErr
+			return false, err
 		}
 		return true, nil
 	})
-	require.NoError(t, err, "Failed to update CR with test env var")
+}
 
-	// Verify deployment pod template picks up the new env var
-	err = wait.PollUntilContextTimeout(TestEnv.Ctx, 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		deployment := &appsv1.Deployment{}
-		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
-			Namespace: server.Namespace,
-			Name:      server.Name,
-		}, deployment); getErr != nil {
-			return false, getErr
+func testCRDeploymentUpdate(t *testing.T, server *ogxiov1beta1.OGXServer) {
+	t.Helper()
+
+	if server.Spec.Workload != nil && server.Spec.Workload.Autoscaling != nil && server.Spec.Workload.Autoscaling.MaxReplicas > 0 {
+		t.Skip("Skipping CR deployment update test when autoscaling is enabled")
+	}
+
+	// Scale to 0 via CR update
+	require.NoError(t, updateCRReplicas(server, 0), "Failed to update CR replicas to 0")
+
+	// Verify deployment scales to 0
+	err := EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment",
+	}, server.Name, server.Namespace, ResourceReadyTimeout, func(u *unstructured.Unstructured) bool {
+		specReplicas, found, nestedErr := unstructured.NestedInt64(u.Object, "spec", "replicas")
+		if !found || nestedErr != nil {
+			return false
 		}
-		for _, env := range deployment.Spec.Template.Spec.Containers[0].Env {
-			if env.Name == testEnvVar.Name && env.Value == testEnvVar.Value {
-				return true, nil
-			}
-		}
-		return false, nil
+		return specReplicas == 0
 	})
-	require.NoError(t, err, "Deployment should pick up env var from CR update")
+	require.NoError(t, err, "Deployment should scale to 0")
 
-	// Wait for the rolled-out pod to be ready
+	// Scale back to 1
+	require.NoError(t, updateCRReplicas(server, 1), "Failed to scale CR back to 1")
+
 	err = WaitForPodsReady(t, TestEnv, server.Namespace, server.Name, ResourceReadyTimeout)
-	require.NoError(t, err, "Pod should be ready after CR update rollout")
+	require.NoError(t, err, "Pod should be ready after scale-up")
 }
 
 func testHealthStatus(t *testing.T, server *ogxiov1beta1.OGXServer) {
