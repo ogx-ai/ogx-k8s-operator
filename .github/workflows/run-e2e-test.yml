@@ -87,6 +87,13 @@ jobs:
           until docker exec kind-registry true 2>/dev/null; do sleep 1; done
           docker push kind-registry:5000/ogx-k8s-operator:latest
 
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager -n cert-manager
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager-webhook -n cert-manager
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager-cainjector -n cert-manager
+
       - name: Deploy operator
         run: |
           # Deploy the operator
