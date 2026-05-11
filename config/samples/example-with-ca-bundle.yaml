@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: llama-stack-config
+  name: ogx-server-config
   labels:
     ogx.io/watch: "true"
 data:
   config.yaml: |
-    # Llama Stack Configuration
+    # OGX Server Configuration
     version: '2'
     image_name: starter
     apis:
@@ -55,7 +55,7 @@ spec:
   distribution:
     name: starter
   overrideConfig:
-    name: llama-stack-config
+    name: ogx-server-config
     key: config.yaml
   tls:
     trust:

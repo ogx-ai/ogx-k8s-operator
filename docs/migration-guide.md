@@ -161,21 +161,21 @@ spec:
 
 To translate `enableNetworkPolicy: false` from the old ConfigMap, set `spec.network.policy.enabled: false` on the CR.
 
-### ConfigMap/Secret Watch Labels
+### ConfigMap/Secret Watch Labels and Namespace Scope
 
-All referenced ConfigMaps and Secrets must have the `ogx.io/watch: "true"` label:
+All referenced ConfigMaps and Secrets must have the `ogx.io/watch: "true"` label, and must be in the same namespace as the OGXServer CR:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-config
+  namespace: <ogx_server_cr_namespace>
   labels:
     ogx.io/watch: "true"
 data:
   config.yaml: |
     ...
-```
 
 ## Upgrade Steps
 
@@ -202,16 +202,19 @@ kubectl delete clusterrole llama-stack-k8s-operator-manager-role
 
 The operand Deployments, CRD, and CRs remain after operator removal.
 
-### Step 2: Delete Orphaned Stateless Resources
+### Step 2: Scale Down and Clean Up Orphaned Stateless Resources
+
+Scale the old deployment to zero (preserving it for rollback) and delete stateless resources that the new operator cannot adopt:
 
 ```bash
-kubectl delete deploy,networkpolicy,sa,rolebinding -l app.kubernetes.io/instance=<name>
+kubectl scale deployment <name> --replicas=0 -n <namespace>
+kubectl delete networkpolicy,sa,rolebinding -l app.kubernetes.io/instance=<name>
 kubectl delete hpa,pdb -l app.kubernetes.io/instance=<name>
 ```
 
-**Keep:** PVC (adopted in Step 4), and optionally Service + Ingress (adopted in Step 5).
+**Keep for now:** The old Deployment (scaled to 0), PVC, Service, Ingress, and the old LlamaStackDistribution CR all remain in place. This makes rollback straightforward — see the [Rollback](#rollback) section.
 
-**Why:** After operator removal, orphaned resources have no active controller. The new operator's `patchResource` safety check skips resources it does not own, so it cannot update or replace them. NetworkPolicy is especially critical: the old policy's `podSelector` targets `app: llama-stack` which no longer matches the new `app: ogx` pods.
+**Why clean up stateless resources?** After operator removal, orphaned resources have no active controller. The new operator's `patchResource` safety check skips resources it does not own, so it cannot update or replace them. NetworkPolicy is especially critical: the old policy's `podSelector` targets `app: llama-stack` which no longer matches the new `app: ogx` pods.
 
 ### Step 3: Install the New OGX Operator
 
@@ -225,17 +228,14 @@ dsc.spec.components.ogx = "Managed"
 kubectl apply -f release/operator.yaml
 ```
 
-### Step 4: Create OGXServer CR with Adopt-Storage Annotation
+### Step 4: Define OGXServer CR
 
-Translate fields from the old LLSD CR into the new OGXServer spec, and include the adoption annotation:
-
+Translate fields from the old LLSD CR into the new OGXServer spec
 ```yaml
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:
   name: my-server
-  annotations:
-    ogx.io/adopt-storage: "<old-llsd-name>"
 spec:
   distribution:
     name: starter
@@ -270,10 +270,33 @@ The operator adopts the orphaned Service + Ingress, replaces Service selectors w
 
 > **Note:** The OGXServer name **must differ** from the old LLSD name. Same-name adoption is rejected at admission time (webhook validation) to prevent resource naming conflicts.
 
-### Step 6: Clean Up Legacy Resources
+### Step 6: Verify and Clean Up Legacy Resources
+
+Once the new OGXServer is `Ready` and verified (see [Verification](#verification)), clean up legacy resources:
 
 ```bash
+# Delete the old LlamaStackDistribution CR (orphan dependents since we already cleaned them up)
+kubectl delete llamastackdistribution <old-llsd-name> -n <namespace> --cascade=orphan
+
+# Delete the old deployment (was scaled to 0 in Step 2)
+kubectl delete deployment <old-llsd-name> -n <namespace>
+
+# Delete the legacy CRD (safe only after all LlamaStackDistribution CRs are removed)
 kubectl delete crd llamastackdistributions.llamastack.io
+```
+
+If you chose **not** to adopt the old PVC (Step 4), delete it now:
+
+```bash
+kubectl delete pvc <old-llsd-name>-pvc -n <namespace>
+```
+
+If you chose **not** to adopt the old Service and Ingress/Route (Step 5), delete them now:
+
+```bash
+kubectl delete svc <old-llsd-name>-service -n <namespace>
+kubectl delete ingress <old-llsd-name> -n <namespace> --ignore-not-found
+kubectl delete route <old-llsd-name> -n <namespace> --ignore-not-found
 ```
 
 ## Verification
@@ -294,22 +317,23 @@ kubectl get ogxs my-server -o jsonpath='{.status.phase}'
 
 ## Rollback
 
-If you need to roll back:
+If you need to roll back before completing Step 6 (legacy cleanup):
 
-1. Remove the `ogx.io/adopt-storage` annotation from the OGXServer CR
-2. Delete the OGXServer CR
-3. Scale the old Deployment back up (it was scaled to zero, not deleted)
-4. Reinstall the old LLS operator
-5. Recreate the old LlamaStackDistribution CR
+1. Delete the OGXServer CR: `kubectl delete ogxserver my-server -n <namespace>`
+2. Scale the old Deployment back up: `kubectl scale deployment <old-llsd-name> --replicas=1 -n <namespace>`
+3. Reinstall the old LLS operator
+4. The old LlamaStackDistribution CR is still present and will be reconciled by the reinstalled operator
+
+If you already completed Step 6 (legacy resources deleted), you must recreate the old LlamaStackDistribution CR manually after reinstalling the old operator.
 
 ## Adoption Annotations
 
-| Annotation / Label | Purpose |
+The following annotations are set by the user on the OGXServer CR to trigger adoption:
+
+| Annotation | Purpose |
 |------------|---------|
-| `ogx.io/adopt-storage` (annotation) | Triggers PVC adoption from the named legacy LLSD |
-| `ogx.io/adopt-networking` (annotation) | Triggers Service/Ingress adoption from the named legacy LLSD |
-| `ogx.io/adopted-from` (label) | Set on all adopted resources (PVC, Service, Ingress) for server-side filtering and discovery |
-| `ogx.io/adopted-at` (annotation) | Set on adopted resources with an RFC 3339 timestamp |
+| `ogx.io/adopt-storage` | Triggers PVC adoption from the named legacy LLSD |
+| `ogx.io/adopt-networking` | Triggers Service/Ingress adoption from the named legacy LLSD |
 
 These annotations are transitional and will be removed in a future release once migration is complete.
 

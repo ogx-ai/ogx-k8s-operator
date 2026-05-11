@@ -289,6 +289,13 @@ func GetSampleCRForDistribution(t *testing.T, distType string) *ogxiov1beta1.OGX
 		t.Fatalf("Unknown distribution type: %s", distType)
 	}
 
+	if server.Spec.Workload != nil {
+		server.Spec.Workload.Autoscaling = nil
+		server.Spec.Workload.Storage = nil
+		server.Spec.Workload.PodDisruptionBudget = nil
+		server.Spec.Workload.TopologySpreadConstraints = nil
+	}
+
 	return server
 }
 

@@ -116,7 +116,7 @@ metadata:
 spec:
   sourceType: grpc
   image: $REGISTRY/$REGISTRY_NAMESPACE/ogx-catalog:$TAG # Your catalog image from Step 3.5
-  displayName: "Llama Stack Operator Catalog (dev)"
+  displayName: "OGX Operator Catalog (dev)"
   publisher: "Red Hat Community"
   updateStrategy:
     registryPoll:
@@ -135,5 +135,5 @@ After applying the `CatalogSource`, allow a few moments for OpenShift to process
 
 1.  Log in to the OpenShift Web Console.
 2.  Navigate to **Operators \> OperatorHub**.
-3.  In the "Catalog Sources" filter, you should see "Llama Stack Operator Catalog" listed.
+3.  In the "Catalog Sources" filter, you should see "OGX Operator Catalog" listed.
 4.  Filter by this catalog, and your OGX K8s operator should appear, ready for installation.
