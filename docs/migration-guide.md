@@ -176,6 +176,7 @@ metadata:
 data:
   config.yaml: |
     ...
+```
 
 ## Upgrade Steps
 
@@ -200,23 +201,9 @@ kubectl delete clusterrole llama-stack-k8s-operator-manager-role
 > **Warning:** Do NOT run `kubectl delete -f release/operator.yaml` — that file includes the CRD,
 > and deleting a CRD cascade-deletes all its CRs and their owned resources (PVCs, Deployments, etc.).
 
-The operand Deployments, CRD, and CRs remain after operator removal.
+The operand Deployments, CRD, and CRs remain after operator removal. The old workload keeps running — no downtime yet.
 
-### Step 2: Scale Down and Clean Up Orphaned Stateless Resources
-
-Scale the old deployment to zero (preserving it for rollback) and delete stateless resources that the new operator cannot adopt:
-
-```bash
-kubectl scale deployment <name> --replicas=0 -n <namespace>
-kubectl delete networkpolicy,sa,rolebinding -l app.kubernetes.io/instance=<name>
-kubectl delete hpa,pdb -l app.kubernetes.io/instance=<name>
-```
-
-**Keep for now:** The old Deployment (scaled to 0), PVC, Service, Ingress, and the old LlamaStackDistribution CR all remain in place. This makes rollback straightforward — see the [Rollback](#rollback) section.
-
-**Why clean up stateless resources?** After operator removal, orphaned resources have no active controller. The new operator's `patchResource` safety check skips resources it does not own, so it cannot update or replace them. NetworkPolicy is especially critical: the old policy's `podSelector` targets `app: llama-stack` which no longer matches the new `app: ogx` pods.
-
-### Step 3: Install the New OGX Operator
+### Step 2: Install the New OGX Operator
 
 **Via meta-operator:**
 ```bash
@@ -228,9 +215,10 @@ dsc.spec.components.ogx = "Managed"
 kubectl apply -f release/operator.yaml
 ```
 
-### Step 4: Define OGXServer CR
+### Step 3: Define the OGXServer CR
 
-Translate fields from the old LLSD CR into the new OGXServer spec
+Translate fields from the old LLSD CR into the new OGXServer spec. See [Spec Changes](#spec-changes) above for the field mapping.
+
 ```yaml
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
@@ -251,13 +239,25 @@ spec:
           value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
 ```
 
-The operator adopts the orphaned PVC (strips old ownerRef, labels it for discovery) and creates a new Deployment that mounts the adopted PVC. The PVC intentionally has **no** ownerReference to the OGXServer — it survives CR deletion and must be cleaned up manually. Expect ~30-60s until the new pod is ready.
+> **Note:** The OGXServer name **must differ** from the old LLSD name. Same-name adoption is rejected by the validating webhook to prevent resource naming conflicts.
 
-> **Warning:** If multiple PVCs with the `ogx.io/adopted-from` label are found for the same instance, the controller sets an `AdoptionConfigInvalid` condition and stops reconciling (terminal error — no requeue). Remove the label from all but one PVC to resolve.
+#### Adopting Existing PVC (Optional)
 
-### Step 5 (Optional): Adopt Networking
+To preserve existing data by adopting the PVC from the old LlamaStackDistribution:
 
-Add the networking adoption annotation to preserve ClusterIP / external endpoint:
+```yaml
+metadata:
+  annotations:
+    ogx.io/adopt-storage: "<old-llsd-name>"
+```
+
+The operator strips the old ownerRef from the PVC and labels it for discovery. The adopted PVC intentionally has **no** ownerReference to the OGXServer — it survives CR deletion and must be cleaned up manually.
+
+> **Warning:** If multiple PVCs with matching adoption labels are found for the same instance, the controller sets an `AdoptionConfigInvalid` condition and stops reconciling. Remove the conflicting label to resolve.
+
+#### Adopting Existing Service and Ingress (Optional)
+
+To preserve ClusterIP / external endpoints:
 
 ```yaml
 metadata:
@@ -268,38 +268,15 @@ metadata:
 
 The operator adopts the orphaned Service + Ingress, replaces Service selectors with new pod labels (`app: ogx`, `app.kubernetes.io/instance: <name>`), and sets ownerReferences.
 
-> **Note:** The OGXServer name **must differ** from the old LLSD name. Same-name adoption is rejected at admission time (webhook validation) to prevent resource naming conflicts.
-
-### Step 6: Verify and Clean Up Legacy Resources
-
-Once the new OGXServer is `Ready` and verified (see [Verification](#verification)), clean up legacy resources:
+### Step 4: Apply the OGXServer CR
 
 ```bash
-# Delete the old LlamaStackDistribution CR (orphan dependents since we already cleaned them up)
-kubectl delete llamastackdistribution <old-llsd-name> -n <namespace> --cascade=orphan
-
-# Delete the old deployment (was scaled to 0 in Step 2)
-kubectl delete deployment <old-llsd-name> -n <namespace>
-
-# Delete the legacy CRD (safe only after all LlamaStackDistribution CRs are removed)
-kubectl delete crd llamastackdistributions.llamastack.io
+kubectl apply -f ogxserver.yaml
 ```
 
-If you chose **not** to adopt the old PVC (Step 4), delete it now:
+Expect ~30–60s until the new pod is ready.
 
-```bash
-kubectl delete pvc <old-llsd-name>-pvc -n <namespace>
-```
-
-If you chose **not** to adopt the old Service and Ingress/Route (Step 5), delete them now:
-
-```bash
-kubectl delete svc <old-llsd-name>-service -n <namespace>
-kubectl delete ingress <old-llsd-name> -n <namespace> --ignore-not-found
-kubectl delete route <old-llsd-name> -n <namespace> --ignore-not-found
-```
-
-## Verification
+### Step 5: Verify
 
 ```bash
 # Check the new CRD is registered
@@ -315,31 +292,49 @@ kubectl get ogxs my-server -o jsonpath='{.status.conditions}'
 kubectl get ogxs my-server -o jsonpath='{.status.phase}'
 ```
 
+Wait until the OGXServer phase is `Ready` before proceeding to cleanup.
+
+### Step 6: Clean Up Legacy Resources
+
+Once the new OGXServer is verified healthy, remove legacy resources.
+
+Delete the old LlamaStackDistribution CR. Kubernetes will cascade-delete its owned resources (Deployment, NetworkPolicy, ServiceAccount, RoleBinding, HPA, PDB):
+
+```bash
+kubectl delete llamastackdistribution <old-llsd-name> -n <namespace>
+```
+
+If you adopted the PVC or Service/Ingress (Step 3), those resources now have new ownerRefs and are **not** affected by this deletion.
+
+If you chose **not** to adopt the old PVC, delete it manually:
+
+```bash
+kubectl delete pvc <old-llsd-name>-pvc -n <namespace>
+```
+
+If you chose **not** to adopt the old Service and Ingress/Route, delete them manually:
+
+```bash
+kubectl delete svc <old-llsd-name>-service -n <namespace>
+kubectl delete ingress <old-llsd-name> -n <namespace> --ignore-not-found
+kubectl delete route <old-llsd-name> -n <namespace> --ignore-not-found
+```
+
+Finally, once all LlamaStackDistribution CRs have been removed, delete the legacy CRD:
+
+```bash
+kubectl delete crd llamastackdistributions.llamastack.io
+```
+
 ## Rollback
 
-If you need to roll back before completing Step 6 (legacy cleanup):
+If something goes wrong before completing Step 6 (legacy cleanup), rollback is straightforward because the old resources are still in place:
 
 1. Delete the OGXServer CR: `kubectl delete ogxserver my-server -n <namespace>`
-2. Scale the old Deployment back up: `kubectl scale deployment <old-llsd-name> --replicas=1 -n <namespace>`
-3. Reinstall the old LLS operator
-4. The old LlamaStackDistribution CR is still present and will be reconciled by the reinstalled operator
+2. Reinstall the old LLS operator
+3. The old LlamaStackDistribution CR is still present and will be reconciled by the reinstalled operator
 
 If you already completed Step 6 (legacy resources deleted), you must recreate the old LlamaStackDistribution CR manually after reinstalling the old operator.
-
-## Adoption Annotations
-
-The following annotations are set by the user on the OGXServer CR to trigger adoption:
-
-| Annotation | Purpose |
-|------------|---------|
-| `ogx.io/adopt-storage` | Triggers PVC adoption from the named legacy LLSD |
-| `ogx.io/adopt-networking` | Triggers Service/Ingress adoption from the named legacy LLSD |
-
-These annotations are transitional and will be removed in a future release once migration is complete.
-
-**Constraints:**
-- The annotation value **must not** equal the OGXServer CR name (same-name adoption is rejected by the validating webhook).
-- The annotation value must be a valid DNS subdomain name (lowercase alphanumeric, `-`, max 253 chars).
 
 ## NetworkPolicy Impact
 
