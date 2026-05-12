@@ -25,9 +25,10 @@
 
 ### D-003: New Short Name
 
-- **Decision**: `ogxs`
-- **Rationale**: Follows the pattern of `{kind-abbreviation}` short names. `ogx` alone could conflict with future resource types in the same API group.
+- **Decision**: `ogxserver`
+- **Rationale**: Matches the singular resource name, which is the most intuitive short name for users. Avoids the ambiguity of an abbreviation.
 - **Alternatives considered**:
+  - `ogxs` — shorter but less intuitive than the singular form
   - `ogx` — simpler but may collide if the API group later adds more Kinds
 
 ### D-004: New Resource Plural

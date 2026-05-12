@@ -116,7 +116,7 @@ Network policies are enabled by default per-CR. Configure via `spec.network.poli
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:
-  name: my-ogxs
+  name: my-ogxserver
 spec:
   distribution:
     name: starter

@@ -20,8 +20,6 @@ spec:
     kind: OGXServer
     listKind: OGXServerList
     plural: ogxservers
-    shortNames:
-    - ogxs
     singular: ogxserver
   scope: Namespaced
   versions:
@@ -6706,7 +6704,7 @@ metadata:
     app.kubernetes.io/name: ogx-k8s-operator
     rbac.authorization.k8s.io/aggregate-to-admin: "true"
     rbac.authorization.k8s.io/aggregate-to-edit: "true"
-  name: ogx-k8s-operator-ogxs-editor-role
+  name: ogx-k8s-operator-ogxserver-editor-role
 rules:
 - apiGroups:
   - ogx.io
@@ -6733,7 +6731,7 @@ metadata:
   labels:
     app.kubernetes.io/name: ogx-k8s-operator
     rbac.authorization.k8s.io/aggregate-to-view: "true"
-  name: ogx-k8s-operator-ogxs-viewer-role
+  name: ogx-k8s-operator-ogxserver-viewer-role
 rules:
 - apiGroups:
   - ogx.io

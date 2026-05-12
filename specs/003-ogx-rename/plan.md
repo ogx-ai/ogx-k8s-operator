@@ -64,8 +64,8 @@ controllers/
 config/
 ├── crd/bases/ogx.io_ogxservers.yaml   # REGENERATE
 ├── crd/patches/cainjection_in_ogxservers.yaml  # RENAME
-├── rbac/ogxs_editor_role.yaml     # RENAME from llsd_editor_role.yaml
-├── rbac/ogxs_viewer_role.yaml     # RENAME from llsd_viewer_role.yaml
+├── rbac/ogxserver_editor_role.yaml     # RENAME from llsd_editor_role.yaml
+├── rbac/ogxserver_viewer_role.yaml     # RENAME from llsd_viewer_role.yaml
 ├── samples/_v1beta1_ogxserver.yaml  # RENAME + restructure to new schema
 └── samples/example-*.yaml         # MODIFY: new apiVersion, Kind, spec shape
 ```
@@ -216,5 +216,5 @@ Scaling old Deployment to zero (not deleting) preserves a rollback path: remove 
 - Clean-install startup time unchanged (SC-002)
 - Migration guide enables unassisted migration (SC-003)
 - No residual legacy naming in operator-owned artifacts (SC-005)
-- `kubectl get ogxs` returns new resources (SC-006)
+- `kubectl get ogxserver` returns new resources (SC-006)
 - PVC adoption downtime under 90 seconds (SC-009)

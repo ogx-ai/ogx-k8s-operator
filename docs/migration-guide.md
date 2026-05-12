@@ -14,7 +14,7 @@ This is a **breaking change**. There is no coexistence period and no conversion 
 | API Version | `v1alpha1` | `v1beta1` |
 | Kind | `LlamaStackDistribution` | `OGXServer` |
 | Plural | `llamastackdistributions` | `ogxservers` |
-| Short Name | `llsd` | `ogxs` |
+| Short Name | `llsd` | `ogxserver` |
 | Container Name | `llama-stack` | `ogx` |
 | App Label | `app: llama-stack` | `app: ogx` |
 | Managed-by | `llama-stack-operator` | `ogx-operator` |
@@ -34,7 +34,7 @@ This is a **breaking change**. There is no coexistence period and no conversion 
 
 | Old | New |
 |-----|-----|
-| `kubectl get llsd` | `kubectl get ogxs` |
+| `kubectl get llsd` | `kubectl get ogxserver` |
 | `kubectl get llamastackdistributions` | `kubectl get ogxservers` |
 
 ## Spec Changes
@@ -283,13 +283,13 @@ Expect ~30–60s until the new pod is ready.
 kubectl get crd ogxservers.ogx.io
 
 # List OGXServer resources
-kubectl get ogxs
+kubectl get ogxserver
 
 # Check conditions for adoption status
-kubectl get ogxs my-server -o jsonpath='{.status.conditions}'
+kubectl get ogxserver my-server -o jsonpath='{.status.conditions}'
 
 # Verify the server is ready
-kubectl get ogxs my-server -o jsonpath='{.status.phase}'
+kubectl get ogxserver my-server -o jsonpath='{.status.phase}'
 ```
 
 Wait until the OGXServer phase is `Ready` before proceeding to cleanup.

@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ogxs-viewer-role
+  name: ogxserver-viewer-role
   labels:
     rbac.authorization.k8s.io/aggregate-to-view: "true"
 rules:
