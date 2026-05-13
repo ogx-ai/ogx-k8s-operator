@@ -55,7 +55,7 @@ spec:
         - name: GOMEMLIMIT
           value: "800MiB"
         - name: OPERATOR_VERSION
-          value: "latest"
+          value: "0.10.0"
         image: controller:latest
         imagePullPolicy: Always
         name: manager
@@ -63,7 +63,7 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
-              - "ALL"
+            - "ALL"
         livenessProbe:
           httpGet:
             path: /healthz
