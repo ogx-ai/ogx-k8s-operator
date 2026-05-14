@@ -85,19 +85,19 @@ func testOGXServerWithCABundle(t *testing.T) {
 	err = verifyCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
-	err = verifyOGXServerCABundleConfig(t, ogxTestNS, "ogxserver-with-config")
+	err = verifyOGXServerCABundleConfig(t, ogxTestNS, "ogxserver-with-ca-bundle")
 	require.NoError(t, err)
 
-	err = waitForDeploymentCreation(t, ogxTestNS, "ogxserver-with-config", 3*time.Minute)
+	err = waitForDeploymentCreation(t, ogxTestNS, "ogxserver-with-ca-bundle", 3*time.Minute)
 	require.NoError(t, err, "OGXServer deployment should be created by operator")
 
-	err = WaitForPodsReady(t, TestEnv, ogxTestNS, "ogxserver-with-config", 5*time.Minute)
+	err = WaitForPodsReady(t, TestEnv, ogxTestNS, "ogxserver-with-ca-bundle", 5*time.Minute)
 	require.NoError(t, err, "OGXServer pods should be running and ready")
 
-	err = verifyCertificateMounts(t, ogxTestNS, "ogxserver-with-config")
+	err = verifyCertificateMounts(t, ogxTestNS, "ogxserver-with-ca-bundle")
 	require.NoError(t, err, "Certificate volumes should be mounted correctly")
 
-	err = verifyEnvironmentVariables(t, ogxTestNS, "ogxserver-with-config")
+	err = verifyEnvironmentVariables(t, ogxTestNS, "ogxserver-with-ca-bundle")
 	require.NoError(t, err, "Environment variables should be set correctly")
 }
 
@@ -106,7 +106,7 @@ func testTLSCleanup(t *testing.T) {
 
 	server := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ogxserver-with-config",
+			Name:      "ogxserver-with-ca-bundle",
 			Namespace: ogxTestNS,
 		},
 	}
@@ -119,7 +119,7 @@ func testTLSCleanup(t *testing.T) {
 		Group:   "apps",
 		Version: "v1",
 		Kind:    "Deployment",
-	}, "ogxserver-with-config", ogxTestNS, ResourceReadyTimeout)
+	}, "ogxserver-with-ca-bundle", ogxTestNS, ResourceReadyTimeout)
 	require.NoError(t, err, "OGXServer deployment should be deleted")
 }
 
