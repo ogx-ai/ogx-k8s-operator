@@ -36,7 +36,7 @@ import (
 // Constants for validation limits.
 const (
 	// FSGroup is the filesystem group ID for the pod.
-	// This is the default group ID for the llama-stack server.
+	// This is the default group ID for the ogx server.
 	FSGroup = int64(1001)
 	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
 	instanceLabelKey = "app.kubernetes.io/instance"
@@ -64,26 +64,26 @@ func getManagedCABundleConfigMapName(instance *ogxiov1beta1.OGXServer) string {
 var startupScript = `
 set -e
 
-# Determine which CLI to use based on llama-stack version
+# Determine which CLI to use based on ogx version
 VERSION_CODE=$(python -c "
 import sys
 from importlib.metadata import version
 from packaging import version as pkg_version
 
 try:
-    llama_version = version('llama_stack')
-    print(f'Detected llama-stack version: {llama_version}', file=sys.stderr)
+    ogx_version = version('ogx')
+    print(f'Detected ogx version: {ogx_version}', file=sys.stderr)
 
-    v = pkg_version.parse(llama_version)
+    v = pkg_version.parse(ogx_version)
     # Use base_version to ignore pre-release/post-release/dev suffixes
     # This ensures that 0.3.0rc2, 0.3.0alpha1, etc. are treated as 0.3.0
     base_v = pkg_version.parse(v.base_version)
 
     if base_v < pkg_version.parse('0.2.17'):
-        print('Using legacy module path (llama_stack.distribution.server.server)', file=sys.stderr)
+        print('Using legacy module path (ogx.distribution.server.server)', file=sys.stderr)
         print(0)
     elif base_v < pkg_version.parse('0.3.0'):
-        print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
+        print('Using core module path (ogx.core.server.server)', file=sys.stderr)
         print(1)
     else:
         print('Using uvicorn CLI command', file=sys.stderr)
@@ -93,19 +93,19 @@ except Exception as e:
     print(2)
 ")
 
-PORT=${LLS_PORT:-8321}
-WORKERS=${LLS_WORKERS:-1}
+PORT=${OGX_PORT:-8321}
+WORKERS=${OGX_WORKERS:-1}
 
 # Execute the appropriate CLI based on version
 case $VERSION_CODE in
-    0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/config.yaml ;;
-    1) python3 -m llama_stack.core.server.server /etc/llama-stack/config.yaml ;;
-    2) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+    0) python3 -m ogx.distribution.server.server --config /etc/ogx/config.yaml ;;
+    1) python3 -m ogx.core.server.server /etc/ogx/config.yaml ;;
+    2) exec uvicorn ogx.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
     *) echo "Invalid version code: $VERSION_CODE, using uvicorn CLI command"; \
-       exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+       exec uvicorn ogx.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
 esac`
 
-const llamaStackConfigPath = "/etc/llama-stack/config.yaml"
+const ogxConfigPath = "/etc/ogx/config.yaml"
 
 // getHealthProbe returns the health probe handler for the container.
 func getHealthProbe(instance *ogxiov1beta1.OGXServer) corev1.ProbeHandler {
@@ -246,16 +246,16 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 	// Always provide worker/port/config env for uvicorn; workers default to 1 when unspecified.
 	container.Env = append(container.Env,
 		corev1.EnvVar{
-			Name:  "LLS_WORKERS",
+			Name:  "OGX_WORKERS",
 			Value: strconv.Itoa(int(workers)),
 		},
 		corev1.EnvVar{
-			Name:  "LLS_PORT",
+			Name:  "OGX_PORT",
 			Value: strconv.Itoa(int(getContainerPort(instance))),
 		},
 		corev1.EnvVar{
-			Name:  "LLAMA_STACK_CONFIG",
-			Value: llamaStackConfigPath,
+			Name:  "OGX_CONFIG",
+			Value: ogxConfigPath,
 		},
 	)
 
@@ -298,10 +298,6 @@ func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxio
 func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
 	// Override the container entrypoint to use the custom config file if user config is specified
 	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
-		// Override the container entrypoint to use the custom config file instead of the default
-		// template. The script will determine the llama-stack version and use the appropriate module
-		// path to start the server.
-
 		container.Command = []string{"/bin/sh", "-c", startupScript}
 		container.Args = []string{}
 	}
@@ -339,7 +335,7 @@ func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev
 	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
-			MountPath: "/etc/llama-stack/",
+			MountPath: "/etc/ogx/",
 			ReadOnly:  true,
 		})
 	}
