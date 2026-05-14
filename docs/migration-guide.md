@@ -23,6 +23,14 @@ This is a **breaking change**. There is no coexistence period and no conversion 
 | Mount Path | `/.llama` | `/.ogx` |
 | Leader Election ID | `81d5736e.llamastack.io` | `54e06e98.ogx.io` |
 
+### Environment Variables
+
+| Old | New | Notes |
+|-----|-----|-------|
+| `LLS_PORT` | `OGX_PORT` | Container port for the server |
+| `LLS_WORKERS` | `OGX_WORKERS` | Number of uvicorn worker processes |
+| `LLAMA_STACK_CONFIG` | `OGX_CONFIG` | Path to the server config file |
+
 ### Status Field Changes
 
 | Old Path | New Path |
