@@ -56,7 +56,7 @@ func generatedConfigMapName(crName, contentHash string) string {
 func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*config.GeneratedConfig, error) {
 	logger := log.FromContext(ctx)
 
-	if r.hasOverrideConfig(instance) || !r.hasDeclarativeConfig(instance) {
+	if instance.HasOverrideConfig() || !instance.HasDeclarativeConfig() {
 		return nil, nil
 	}
 
@@ -163,14 +163,6 @@ func (r *OGXServerReconciler) ensureGeneratedConfigMap(ctx context.Context, inst
 	}
 	logger.Info("created generated ConfigMap", "name", name)
 	return nil
-}
-
-// hasDeclarativeConfig returns true if any declarative config fields are set.
-func (r *OGXServerReconciler) hasDeclarativeConfig(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.Providers != nil ||
-		instance.Spec.Resources != nil ||
-		instance.Spec.Storage != nil ||
-		len(instance.Spec.DisabledAPIs) > 0
 }
 
 func (r *OGXServerReconciler) buildGeneratedConfigMap(instance *ogxiov1beta1.OGXServer, name, configYAML string) *corev1.ConfigMap {

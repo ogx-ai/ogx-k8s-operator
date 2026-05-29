@@ -1,0 +1,19 @@
+version: "2"
+# TODO: fix missing `distro_name`
+distro_name: starter
+apis:
+  - inference
+providers:
+  inference:
+    - provider_id: remote-vllm
+      provider_type: remote::vllm
+      config:
+        url: https://my-vllm:8000
+# TODO: fix `models` at root level
+registered_resources:
+  models:
+    - model_id: llama3
+      model_type: llm
+      provider_id: remote-vllm
+server:
+  port: 8321

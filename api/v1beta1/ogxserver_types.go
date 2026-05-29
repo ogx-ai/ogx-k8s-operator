@@ -632,6 +632,22 @@ func init() { //nolint:gochecknoinits
 	SchemeBuilder.Register(&OGXServer{}, &OGXServerList{})
 }
 
+// HasOverrideConfig returns true if the instance references an override ConfigMap.
+func (r *OGXServer) HasOverrideConfig() bool {
+	return r.Spec.OverrideConfig != nil &&
+		r.Spec.OverrideConfig.Name != "" &&
+		r.Spec.OverrideConfig.Key != ""
+}
+
+// HasDeclarativeConfig returns true if any declarative config fields are set
+// (providers, resources, storage, or disabledAPIs).
+func (r *OGXServer) HasDeclarativeConfig() bool {
+	return r.Spec.Providers != nil ||
+		r.Spec.Resources != nil ||
+		r.Spec.Storage != nil ||
+		len(r.Spec.DisabledAPIs) > 0
+}
+
 // GetAdoptStorageSource returns the legacy LLSD name from the adopt-storage annotation, or empty string.
 func (r *OGXServer) GetAdoptStorageSource() string {
 	if r.Annotations == nil {

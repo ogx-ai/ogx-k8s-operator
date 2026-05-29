@@ -121,13 +121,6 @@ type OGXServerReconciler struct {
 	operatorNamespace string
 }
 
-// hasOverrideConfig checks if the instance references an override ConfigMap.
-func (r *OGXServerReconciler) hasOverrideConfig(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.OverrideConfig != nil &&
-		instance.Spec.OverrideConfig.Name != "" &&
-		instance.Spec.OverrideConfig.Key != ""
-}
-
 // hasCACertificates checks if the instance has TLS trust CA certificates configured.
 func (r *OGXServerReconciler) hasCACertificates(instance *ogxiov1beta1.OGXServer) bool {
 	return instance.Spec.TLS != nil && instance.Spec.TLS.Trust != nil && len(instance.Spec.TLS.Trust.CACertificates) > 0
@@ -499,7 +492,7 @@ func hasGeneratedConfig(instance *ogxiov1beta1.OGXServer) bool {
 }
 
 func (r *OGXServerReconciler) resolveConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
-	if r.hasOverrideConfig(instance) {
+	if instance.HasOverrideConfig() {
 		return r.getConfigMapHash(ctx, instance)
 	}
 	if hasGeneratedConfig(instance) {
@@ -652,7 +645,7 @@ func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance 
 }
 
 func (r *OGXServerReconciler) reconcileOverrideAndCABundleConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
-	if r.hasOverrideConfig(instance) {
+	if instance.HasOverrideConfig() {
 		if err := r.reconcileOverrideConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile override ConfigMap: %w", err)
 		}
@@ -812,7 +805,7 @@ func (r *OGXServerReconciler) instanceReferencesConfigMap(
 	instance *ogxiov1beta1.OGXServer, cmName, cmNamespace string,
 ) bool {
 	// Override config ConfigMap (always in the CR namespace).
-	if r.hasOverrideConfig(instance) &&
+	if instance.HasOverrideConfig() &&
 		instance.Spec.OverrideConfig.Name == cmName &&
 		instance.Namespace == cmNamespace {
 		return true
@@ -1192,7 +1185,7 @@ func (r *OGXServerReconciler) updateDistributionConfig(instance *ogxiov1beta1.OG
 func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	logger := log.FromContext(ctx)
 
-	if !r.hasOverrideConfig(instance) {
+	if !instance.HasOverrideConfig() {
 		logger.V(1).Info("No override ConfigMap specified, skipping")
 		return nil
 	}
@@ -1288,7 +1281,7 @@ func (r *OGXServerReconciler) reconcileCABundleConfigMap(ctx context.Context, in
 
 // getConfigMapHash calculates a hash of the ConfigMap data to detect changes.
 func (r *OGXServerReconciler) getConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
-	if !r.hasOverrideConfig(instance) {
+	if !instance.HasOverrideConfig() {
 		return "", nil
 	}
 

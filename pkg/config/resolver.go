@@ -31,6 +31,22 @@ const (
 	OCIConfigLabel = "com.ogx.distribution.configs"
 )
 
+// EmbeddedDistributionNames returns the names of all embedded distributions
+// by listing subdirectories under the embedded configs filesystem.
+func EmbeddedDistributionNames() ([]string, error) {
+	entries, err := embeddedConfigs.ReadDir("configs")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read embedded configs: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
 // OCILabelFetcher fetches OCI image labels for a given image reference.
 // Returns the label map, or an error if the image is inaccessible.
 type OCILabelFetcher func(imageRef string) (map[string]string, error)
