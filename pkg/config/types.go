@@ -55,6 +55,7 @@ type ConfigModel struct {
 // BaseConfig represents the parsed base config.yaml structure.
 type BaseConfig struct {
 	Version   string                      `yaml:"version"`
+	DistroName string                     `yaml:"distro_name,omitempty"`
 	ImageName string                      `yaml:"image_name,omitempty"`
 	APIs      []string                    `yaml:"apis,omitempty"`
 	Providers map[string][]ConfigProvider `yaml:"providers,omitempty"`

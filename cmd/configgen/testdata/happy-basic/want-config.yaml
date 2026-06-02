@@ -1,5 +1,4 @@
 version: "2"
-# TODO: fix missing `distro_name`
 distro_name: starter
 apis:
   - inference

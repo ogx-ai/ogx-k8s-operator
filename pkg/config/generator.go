@@ -106,8 +106,11 @@ func buildFinalConfig(
 	cfg := make(map[string]interface{})
 
 	cfg["version"] = base.Version
-	if base.ImageName != "" {
-		cfg["image_name"] = base.ImageName
+	switch {
+	case spec.Distribution.Name != "":
+		cfg["distro_name"] = spec.Distribution.Name
+	case spec.Distribution.Image != "":
+		cfg["distro_name"] = spec.Distribution.Image
 	}
 	if len(apis) > 0 {
 		cfg["apis"] = apis
