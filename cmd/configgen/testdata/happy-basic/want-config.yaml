@@ -8,7 +8,6 @@ providers:
       provider_type: remote::vllm
       config:
         url: https://my-vllm:8000
-# TODO: fix `models` at root level
 registered_resources:
   models:
     - model_id: llama3

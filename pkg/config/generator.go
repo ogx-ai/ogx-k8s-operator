@@ -119,7 +119,9 @@ func buildFinalConfig(
 		cfg["providers"] = serializeProviders(providers)
 	}
 	if len(models) > 0 {
-		cfg["models"] = serializeModels(models)
+		cfg["registered_resources"] = map[string]any{
+			"models": serializeModels(models),
+		}
 	}
 	cfg["server"] = buildServerSection(base, spec)
 	buildStorageSection(cfg, storage, base)
