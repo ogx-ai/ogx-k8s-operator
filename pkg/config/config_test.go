@@ -45,10 +45,6 @@ providers:
     provider_type: remote::vllm
     config:
       url: http://vllm:8000
-models:
-- model_id: llama3
-  provider_id: remote-vllm
-  model_type: llm
 `,
 			check: func(t *testing.T, cfg *BaseConfig) {
 				t.Helper()
@@ -484,10 +480,6 @@ providers:
     provider_type: remote::vllm
     config:
       url: http://default:8000
-models:
-- model_id: default-model
-  provider_id: default-vllm
-  model_type: llm
 `
 
 	spec := &ogxiov1beta1.OGXServerSpec{
@@ -718,22 +710,6 @@ func TestMergeStorage(t *testing.T) {
 	}
 	if kv["type"] != "kv_redis" {
 		t.Errorf("expected user storage to override, got %v", kv["type"])
-	}
-}
-
-func TestMergeModels(t *testing.T) {
-	base := []ConfigModel{{ModelID: "base-model", ProviderID: "p1"}}
-	user := []ConfigModel{{ModelID: "user-model", ProviderID: "p2"}}
-
-	result := MergeModels(base, user)
-	if len(result) != 1 || result[0].ModelID != "user-model" {
-		t.Errorf("expected user models to replace base, got %v", result)
-	}
-
-	// nil user returns base
-	result = MergeModels(base, nil)
-	if len(result) != 1 || result[0].ModelID != "base-model" {
-		t.Errorf("expected base when user is nil, got %v", result)
 	}
 }
 

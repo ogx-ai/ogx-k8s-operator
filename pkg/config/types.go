@@ -52,14 +52,22 @@ type ConfigModel struct {
 	ContextLength *int   `yaml:"context_length,omitempty"`
 }
 
+// RegisteredResources represents the registered_resources section of config.yaml.
+type RegisteredResources struct {
+	Models       []interface{} `yaml:"models,omitempty"`
+	ToolGroups   []interface{} `yaml:"tool_groups,omitempty"`
+	VectorStores []interface{} `yaml:"vector_stores,omitempty"`
+}
+
 // BaseConfig represents the parsed base config.yaml structure.
 type BaseConfig struct {
-	Version   string                      `yaml:"version"`
-	DistroName string                     `yaml:"distro_name,omitempty"`
-	ImageName string                      `yaml:"image_name,omitempty"`
-	APIs      []string                    `yaml:"apis,omitempty"`
-	Providers map[string][]ConfigProvider `yaml:"providers,omitempty"`
-	Models    []ConfigModel               `yaml:"models,omitempty"`
-	Server    map[string]interface{}      `yaml:"server,omitempty"`
-	Storage   map[string]interface{}      `yaml:"storage,omitempty"`
+	Version             string                      `yaml:"version"`
+	DistroName          string                      `yaml:"distro_name,omitempty"`
+	ImageName           string                      `yaml:"image_name,omitempty"`
+	APIs                []string                    `yaml:"apis,omitempty"`
+	Providers           map[string][]ConfigProvider `yaml:"providers,omitempty"`
+	RegisteredResources *RegisteredResources        `yaml:"registered_resources,omitempty"`
+	VectorStores        map[string]interface{}      `yaml:"vector_stores,omitempty"`
+	Server              map[string]interface{}      `yaml:"server,omitempty"`
+	Storage             map[string]interface{}      `yaml:"storage,omitempty"`
 }

@@ -51,9 +51,6 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*G
 		return nil, fmt.Errorf("failed to expand resources: %w", err)
 	}
 
-	// Merge models
-	mergedModels := MergeModels(baseConfig.Models, userModels)
-
 	// Apply storage configuration
 	userStorage := ApplyStorage(spec.Storage)
 	mergedStorage := MergeStorage(baseConfig.Storage, userStorage)
@@ -62,7 +59,7 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*G
 	mergedAPIs := MergeAPIs(baseConfig.APIs, spec.DisabledAPIs)
 
 	// Build the final config.yaml structure
-	finalConfig := buildFinalConfig(baseConfig, mergedProviders, mergedModels, mergedStorage, mergedAPIs, spec)
+	finalConfig := buildFinalConfig(baseConfig, mergedProviders, userModels, mergedStorage, mergedAPIs, spec)
 
 	// Serialize to YAML
 	configYAML, err := yaml.Marshal(finalConfig)
@@ -79,7 +76,7 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*G
 
 	// Count providers and resources
 	providerCount := countProviders(mergedProviders)
-	resourceCount := len(mergedModels)
+	resourceCount := len(userModels)
 
 	// Parse config version — defaulted indicates a non-numeric version string
 	configVersion, configVersionParsed := parseConfigVersion(baseConfig.Version)
@@ -118,10 +115,9 @@ func buildFinalConfig(
 	if len(providers) > 0 {
 		cfg["providers"] = serializeProviders(providers)
 	}
-	if len(models) > 0 {
-		cfg["registered_resources"] = map[string]any{
-			"models": serializeModels(models),
-		}
+	cfg["registered_resources"] = buildRegisteredResources(base, models)
+	if base.VectorStores != nil {
+		cfg["vector_stores"] = base.VectorStores
 	}
 	cfg["server"] = buildServerSection(base, spec)
 	buildStorageSection(cfg, storage, base)
@@ -168,16 +164,27 @@ func serializeModels(models []ConfigModel) []interface{} {
 	return list
 }
 
+func buildRegisteredResources(base *BaseConfig, userModels []ConfigModel) *RegisteredResources {
+	rr := &RegisteredResources{}
+	if base.RegisteredResources != nil {
+		rr.Models = base.RegisteredResources.Models
+		rr.ToolGroups = base.RegisteredResources.ToolGroups
+		rr.VectorStores = base.RegisteredResources.VectorStores
+	}
+	if len(userModels) > 0 {
+		rr.Models = serializeModels(userModels)
+	}
+	return rr
+}
+
 func buildServerSection(base *BaseConfig, spec *ogxiov1beta1.OGXServerSpec) map[string]interface{} {
 	server := make(map[string]interface{})
+	for k, v := range base.Server {
+		server[k] = v
+	}
 	if spec.Network != nil && spec.Network.Port != 0 {
 		server["port"] = spec.Network.Port
-	} else if base.Server != nil {
-		if port, ok := base.Server["port"]; ok {
-			server["port"] = port
-		}
-	}
-	if len(server) == 0 {
+	} else if _, hasPort := server["port"]; !hasPort {
 		server["port"] = ogxiov1beta1.DefaultServerPort
 	}
 	return server

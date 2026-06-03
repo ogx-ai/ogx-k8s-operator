@@ -56,15 +56,6 @@ func MergeProviders(base map[string][]ConfigProvider, user map[string][]ConfigPr
 	return merged
 }
 
-// MergeModels replaces base models with user models when specified.
-func MergeModels(base []ConfigModel, user []ConfigModel) []ConfigModel {
-	if user == nil {
-		return base
-	}
-	// User models replace base models entirely when specified
-	return user
-}
-
 // MergeStorage merges user storage config over base storage.
 // Strategy: full replacement when user storage is specified.
 func MergeStorage(base map[string]interface{}, user map[string]interface{}) map[string]interface{} {
