@@ -18,23 +18,30 @@ limitations under the License.
 // generation pipeline outside of Kubernetes. Given an OGXServer CR, it:
 //
 //  1. Optionally validates the CR (webhook, schema, and CEL validation).
-//  2. Resolves a base config (optionally provided as a CLI arg, otherwise follows standard resolution).
+//  2. Resolves a base config from -base, or via OCI labels on distribution.image.
 //  3. Expands providers/resources/storage from the spec.
 //  4. Outputs the metadata, env var mappings, and config.yaml that the OGX server would receive at runtime.
 //
 // Usage:
 //
-//	configgen <ogxserver.yaml> [-base <config.yaml>] [-output-config] [-validate]
+//	configgen <ogxserver.yaml> [-base <config.yaml>] [-crd-path <dir>] [-distributions-path <file>] [-output-config] [-validate]
+//
+// Notes:
+//   - spec.baseConfig cannot be dereferenced by the CLI; pass that file with -base.
+//   - spec.distribution.name-only CRs also need -base, since image resolution happens in the operator.
+//   - -validate uses distributions.json to validate spec.distribution.name.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
@@ -78,7 +85,7 @@ func run(opts options) (*config.GeneratedConfig, error) {
 	}
 
 	if opts.validate {
-		if validateErr := validateCR(server, opts.crdPath); validateErr != nil {
+		if validateErr := validateCR(server, opts.crdPath, opts.distributionsPath); validateErr != nil {
 			return nil, fmt.Errorf("failed to validate CR:\n%w", validateErr)
 		}
 	}
@@ -96,31 +103,34 @@ func run(opts options) (*config.GeneratedConfig, error) {
 }
 
 type options struct {
-	crPath       string
-	basePath     string
-	crdPath      string
-	outputConfig bool
-	validate     bool
+	crPath            string
+	basePath          string
+	crdPath           string
+	distributionsPath string
+	outputConfig      bool
+	validate          bool
 }
 
 func parseFlags() options {
-	basePath := flag.String("base", "", "path to base config.yaml (omit to use embedded config for the CR's distribution name)")
+	basePath := flag.String("base", "", "path to base config.yaml (omit to resolve via OCI labels on spec.distribution.image)")
 	crdPath := flag.String("crd-path", "config/crd/bases", "path to CRD bases directory (used with -validate)")
+	distributionsPath := flag.String("distributions-path", "distributions.json", "path to distributions.json for validating spec.distribution.name")
 	outputConfig := flag.Bool("output-config", false, "print only the generated config YAML (no metadata or env vars)")
 	validate := flag.Bool("validate", false, "validate the CR against the CRD schema, CEL rules, and webhook logic (requires KUBEBUILDER_ASSETS)")
 	flag.Parse()
 
 	crPath := flag.Arg(0)
 	if crPath == "" {
-		log.Fatal("usage: configgen <ogxserver.yaml> [-base <config.yaml>] [-crd-path <dir>] [-output-config] [-validate]")
+		log.Fatal("usage: configgen <ogxserver.yaml> [-base <config.yaml>] [-crd-path <dir>] [-distributions-path <file>] [-output-config] [-validate]")
 	}
 
 	return options{
-		crPath:       crPath,
-		basePath:     *basePath,
-		crdPath:      *crdPath,
-		outputConfig: *outputConfig,
-		validate:     *validate,
+		crPath:            crPath,
+		basePath:          *basePath,
+		crdPath:           *crdPath,
+		distributionsPath: *distributionsPath,
+		outputConfig:      *outputConfig,
+		validate:          *validate,
 	}
 }
 
@@ -148,7 +158,7 @@ func loadCR(path string) (*ogxiov1beta1.OGXServer, error) {
 	return server, nil
 }
 
-func validateCR(server *ogxiov1beta1.OGXServer, crdPath string) error {
+func validateCR(server *ogxiov1beta1.OGXServer, crdPath, distributionsPath string) error {
 	assets := os.Getenv("KUBEBUILDER_ASSETS")
 	if assets == "" {
 		return errors.New("failed to find KUBEBUILDER_ASSETS: not set; run: make envtest && export KUBEBUILDER_ASSETS=$(bin/setup-envtest use 1.31.0 --bin-dir bin -p path)")
@@ -166,16 +176,15 @@ func validateCR(server *ogxiov1beta1.OGXServer, crdPath string) error {
 	}
 
 	// Webhook validation (in-process, no server needed)
-	distNames, distErr := config.EmbeddedDistributionNames()
-	if distErr != nil {
-		errs = append(errs, fmt.Sprintf("webhook: failed to read embedded distributions: %s", distErr))
-	} else {
-		validator := &ogxiov1beta1.OGXServerValidator{
-			EmbeddedDistributionNames: distNames,
-		}
-		if _, err := validator.ValidateCreate(context.Background(), server); err != nil {
-			errs = append(errs, fmt.Sprintf("webhook: %s", err))
-		}
+	knownDistNames, err := loadKnownDistributionNames(server, distributionsPath)
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("webhook: %s", err))
+	}
+	validator := &ogxiov1beta1.OGXServerValidator{
+		KnownDistributionNames: knownDistNames,
+	}
+	if _, err := validator.ValidateCreate(context.Background(), server); err != nil {
+		errs = append(errs, fmt.Sprintf("webhook: %s", err))
 	}
 
 	if len(errs) > 0 {
@@ -247,9 +256,38 @@ func printFullOutput(g *config.GeneratedConfig) {
 	}
 }
 
+func loadKnownDistributionNames(server *ogxiov1beta1.OGXServer, distributionsPath string) ([]string, error) {
+	if server.Spec.Distribution.Name == "" {
+		return nil, nil
+	}
+
+	data, err := readFile(distributionsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read distributions file %q: %w", distributionsPath, err)
+	}
+
+	var distributionImages map[string]string
+	if err := json.Unmarshal(data, &distributionImages); err != nil {
+		return nil, fmt.Errorf("failed to parse distributions file %q: %w", distributionsPath, err)
+	}
+
+	names := make([]string, 0, len(distributionImages))
+	for name := range distributionImages {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 func resolveBaseConfig(basePath string, spec *ogxiov1beta1.OGXServerSpec) ([]byte, error) {
 	if basePath != "" {
 		return readFile(basePath)
+	}
+	if spec.BaseConfig != nil {
+		return nil, errors.New("configgen cannot read spec.baseConfig from Kubernetes; pass -base with the ConfigMap's config.yaml contents")
+	}
+	if spec.Distribution.Image == "" {
+		return nil, errors.New("configgen requires spec.distribution.image or -base because named distributions are resolved by the operator")
 	}
 	resolver := config.NewDefaultConfigResolver(config.NewOCILabelFetcher())
 	return resolver.Resolve(spec.Distribution.Image, spec.Distribution.Name)

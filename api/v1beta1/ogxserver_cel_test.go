@@ -662,6 +662,14 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 			},
 			wantError: "overrideConfig and disabledAPIs are mutually exclusive",
 		},
+		{
+			name: "overrideConfig with baseConfig is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
+				o.Spec.BaseConfig = &ConfigMapKeyRef{Name: "base-config", Key: "config.yaml"}
+			},
+			wantError: "overrideConfig and baseConfig are mutually exclusive",
+		},
 	}
 
 	for _, tt := range tests {

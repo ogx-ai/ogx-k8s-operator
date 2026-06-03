@@ -111,10 +111,10 @@ type OGXServerReconciler struct {
 	ClusterInfo *cluster.ClusterInfo
 	httpClient  *http.Client
 	// OCILabelFetcher fetches OCI image labels for config resolution.
-	// When nil, OCI label resolution is skipped and only embedded configs are used.
+	// When nil, OCI label resolution is disabled.
 	OCILabelFetcher config.OCILabelFetcher
-	// configResolver resolves base config from OCI labels or embedded configs.
-	// Kept on the reconciler so the OCI config cache persists across reconciliations.
+	// configResolver resolves base config from OCI labels. Kept on the reconciler
+	// so the OCI config cache persists across reconciliations.
 	configResolver config.ConfigResolver
 
 	// Cached operator namespace used for config refresh during reconciliation.
@@ -278,7 +278,11 @@ func shouldExcludePVC(instance *ogxiov1beta1.OGXServer, effectivePVCName string)
 }
 
 // reconcileAllManifestResources applies all manifest-based resources using kustomize.
-func (r *OGXServerReconciler) reconcileAllManifestResources(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+func (r *OGXServerReconciler) reconcileAllManifestResources(
+	ctx context.Context,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+) error {
 	// Resolve the PVC name once — may use annotation or label-based discovery.
 	effectivePVCName, err := r.resolveEffectivePVCName(ctx, instance)
 	if err != nil {
@@ -286,7 +290,7 @@ func (r *OGXServerReconciler) reconcileAllManifestResources(ctx context.Context,
 	}
 
 	// Build manifest context for Deployment
-	manifestCtx, err := r.buildManifestContext(ctx, instance, effectivePVCName)
+	manifestCtx, err := r.buildManifestContext(ctx, instance, runtimeConfig, effectivePVCName)
 	if err != nil {
 		return fmt.Errorf("failed to build manifest context: %w", err)
 	}
@@ -431,11 +435,14 @@ func (r *OGXServerReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.
 
 // buildManifestContext creates the manifest context for Deployment using existing helper functions.
 //
-// ORDERING: This must run after reconcileConfigMaps, which populates
-// Status.ConfigGeneration in memory. Several helpers (hasGeneratedConfig,
-// configureUserConfig, configureContainerCommands) read that status field
-// to decide whether to mount the generated ConfigMap and inject env vars.
-func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance *ogxiov1beta1.OGXServer, effectivePVCName string) (*deploy.ManifestContext, error) {
+// buildManifestContext builds the desired pod/deployment inputs for the
+// current reconcile pass using the resolved runtime config reference.
+func (r *OGXServerReconciler) buildManifestContext(
+	ctx context.Context,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	effectivePVCName string,
+) (*deploy.ManifestContext, error) {
 	if err := r.validateDistribution(instance); err != nil {
 		return nil, err
 	}
@@ -448,14 +455,14 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 	// Compute secret env vars once; reused for both container env injection
 	// and rollout-triggering secret hash computation.
 	var secretEnvVars []corev1.EnvVar
-	if hasGeneratedConfig(instance) {
+	if runtimeConfig != nil && runtimeConfig.Generated {
 		secretEnvVars = config.CollectSecretRefs(&instance.Spec)
 	}
 
-	container := buildContainerSpec(ctx, r, instance, resolvedImage, secretEnvVars)
-	podSpec := configurePodStorage(ctx, r, instance, container, effectivePVCName)
+	container := buildContainerSpec(ctx, r, instance, resolvedImage, runtimeConfig, secretEnvVars)
+	podSpec := configurePodStorage(ctx, r, instance, runtimeConfig, container, effectivePVCName)
 
-	configMapHash, err := r.resolveConfigMapHash(ctx, instance)
+	configMapHash, err := r.resolveConfigMapHash(ctx, instance, runtimeConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +472,7 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 		return nil, err
 	}
 
-	secretHash, err := r.resolveSecretRefsHash(ctx, instance, secretEnvVars)
+	secretHash, err := r.resolveSecretRefsHash(ctx, instance, runtimeConfig, secretEnvVars)
 	if err != nil {
 		return nil, err
 	}
@@ -486,19 +493,18 @@ func (r *OGXServerReconciler) buildManifestContext(ctx context.Context, instance
 	}, nil
 }
 
-// hasGeneratedConfig returns true if config generation has produced a ConfigMap.
-func hasGeneratedConfig(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Status.ConfigGeneration != nil && instance.Status.ConfigGeneration.ConfigMapName != ""
-}
-
-func (r *OGXServerReconciler) resolveConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
-	if instance.HasOverrideConfig() {
+func (r *OGXServerReconciler) resolveConfigMapHash(
+	ctx context.Context,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+) (string, error) {
+	if runtimeConfig == nil {
+		return "", nil
+	}
+	if !runtimeConfig.Generated {
 		return r.getConfigMapHash(ctx, instance)
 	}
-	if hasGeneratedConfig(instance) {
-		return r.getGeneratedConfigMapHash(ctx, instance)
-	}
-	return "", nil
+	return r.getGeneratedConfigMapHashByName(ctx, instance.Namespace, runtimeConfig.ConfigMapName)
 }
 
 func (r *OGXServerReconciler) resolveCABundleHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
@@ -508,8 +514,13 @@ func (r *OGXServerReconciler) resolveCABundleHash(ctx context.Context, instance 
 	return "", nil
 }
 
-func (r *OGXServerReconciler) resolveSecretRefsHash(ctx context.Context, instance *ogxiov1beta1.OGXServer, envVars []corev1.EnvVar) (string, error) {
-	if !hasGeneratedConfig(instance) || len(envVars) == 0 {
+func (r *OGXServerReconciler) resolveSecretRefsHash(
+	ctx context.Context,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	envVars []corev1.EnvVar,
+) (string, error) {
+	if runtimeConfig == nil || !runtimeConfig.Generated || len(envVars) == 0 {
 		return "", nil
 	}
 
@@ -539,6 +550,8 @@ func (r *OGXServerReconciler) resolveSecretRefsHash(ctx context.Context, instanc
 }
 
 // reconcileResources reconciles all resources for the OGXServer instance.
+//
+//nolint:cyclop // Reconcile orchestration intentionally sequences several independent subsystems.
 func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	// Run adoption logic before manifest reconciliation so that adopted
 	// resources are available for the kustomize pipeline to reference.
@@ -551,14 +564,38 @@ func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *
 	}
 
 	// Reconcile ConfigMaps first
-	if err := r.reconcileConfigMaps(ctx, instance); err != nil {
+	generated, err := r.reconcileConfigMaps(ctx, instance)
+	if err != nil {
+		if instance.HasDeclarativeConfig() || instance.Status.ConfigGeneration != nil {
+			r.setConfigGeneratedCondition(instance, false, "ConfigGenerationFailed", err.Error())
+		}
 		return err
 	}
 
+	pendingGeneratedConfigMapName := ""
+	if generated != nil {
+		pendingGeneratedConfigMapName = generatedConfigMapName(instance.Name, generated.ContentHash)
+	}
+	runtimeConfig := resolveRuntimeConfigRef(instance, pendingGeneratedConfigMapName)
+
 	// Reconcile all manifest-based resources including Deployment, PVC, ServiceAccount, Service, NetworkPolicy.
 	// NetworkPolicy ingress rules are configured via the kustomize transformer plugin.
-	if err := r.reconcileAllManifestResources(ctx, instance); err != nil {
+	if err := r.reconcileAllManifestResources(ctx, instance, runtimeConfig); err != nil {
+		if generated != nil {
+			r.setConfigGeneratedCondition(instance, false, "ConfigGenerationFailed", err.Error())
+		}
 		return err
+	}
+
+	if generated != nil {
+		r.setConfigGeneratedCondition(instance, true, "ConfigGenerationSucceeded",
+			fmt.Sprintf("Generated config.yaml with %d providers and %d resources", generated.ProviderCount, generated.ResourceCount))
+		r.updateConfigGenerationStatus(instance, generated)
+		if err := r.cleanupOldGeneratedConfigMaps(ctx, instance, pendingGeneratedConfigMapName); err != nil {
+			log.FromContext(ctx).Error(err, "failed to clean up old generated ConfigMaps")
+		}
+	} else {
+		r.clearConfigGenerationStatus(instance, "ConfigGenerationInactive", "Declarative config generation is not active")
 	}
 
 	// Reconcile Ingress for external access (not part of kustomize manifests)
@@ -620,31 +657,31 @@ func (r *OGXServerReconciler) handleSentinelErrors(
 	return ctrl.Result{}, false
 }
 
-func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+func (r *OGXServerReconciler) reconcileConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*config.GeneratedConfig, error) {
 	if err := r.reconcileOverrideAndCABundleConfigMaps(ctx, instance); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Reconcile operator-generated config (from declarative providers/resources/storage)
 	generated, err := r.reconcileGeneratedConfig(ctx, instance)
 	if err != nil {
-		r.clearConfigGenerationStatus(instance, "ConfigGenerationFailed", err.Error())
-		return fmt.Errorf("failed to reconcile generated config: %w", err)
-	}
-	if generated != nil {
-		r.setConfigGeneratedCondition(instance, true, "ConfigGenerationSucceeded",
-			fmt.Sprintf("Generated config.yaml with %d providers and %d resources", generated.ProviderCount, generated.ResourceCount))
-		r.updateConfigGenerationStatus(instance, generated)
-	} else {
-		// Declarative config generation is no longer active; clear stale status so
-		// rollout logic and pod config mounting do not keep referencing old output.
-		r.clearConfigGenerationStatus(instance, "ConfigGenerationInactive", "Declarative config generation is not active")
+		return nil, fmt.Errorf("failed to reconcile generated config: %w", err)
 	}
 
-	return r.reconcileManagedCABundle(ctx, instance)
+	if err := r.reconcileManagedCABundle(ctx, instance); err != nil {
+		return nil, err
+	}
+
+	return generated, nil
 }
 
 func (r *OGXServerReconciler) reconcileOverrideAndCABundleConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	if instance.Spec.BaseConfig != nil {
+		if err := r.reconcileBaseConfigMap(ctx, instance); err != nil {
+			return fmt.Errorf("failed to reconcile base ConfigMap: %w", err)
+		}
+	}
+
 	if instance.HasOverrideConfig() {
 		if err := r.reconcileOverrideConfigMap(ctx, instance); err != nil {
 			return fmt.Errorf("failed to reconcile override ConfigMap: %w", err)
@@ -801,12 +838,21 @@ func (r *OGXServerReconciler) mapConfigMapToReconcileRequests(ctx context.Contex
 
 // instanceReferencesConfigMap checks if an OGXServer instance references
 // a ConfigMap with the given name and namespace.
+//
+//nolint:cyclop // Aggregates multiple independent ConfigMap reference sources.
 func (r *OGXServerReconciler) instanceReferencesConfigMap(
 	instance *ogxiov1beta1.OGXServer, cmName, cmNamespace string,
 ) bool {
 	// Override config ConfigMap (always in the CR namespace).
 	if instance.HasOverrideConfig() &&
 		instance.Spec.OverrideConfig.Name == cmName &&
+		instance.Namespace == cmNamespace {
+		return true
+	}
+
+	// Declarative base config ConfigMap (always in the CR namespace).
+	if instance.Spec.BaseConfig != nil &&
+		instance.Spec.BaseConfig.Name == cmName &&
 		instance.Namespace == cmNamespace {
 		return true
 	}
@@ -1226,6 +1272,41 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 		"namespace", configMap.Namespace,
 		"key", instance.Spec.OverrideConfig.Key,
 		"dataKeys", len(configMap.Data))
+	return nil
+}
+
+// reconcileBaseConfigMap validates that the referenced declarative base ConfigMap exists.
+func (r *OGXServerReconciler) reconcileBaseConfigMap(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	logger := log.FromContext(ctx)
+
+	if instance.Spec.BaseConfig == nil {
+		logger.V(1).Info("No base ConfigMap specified, skipping")
+		return nil
+	}
+
+	ref := instance.Spec.BaseConfig
+	logger.V(1).Info("Validating referenced base ConfigMap exists",
+		"configMapName", ref.Name,
+		"configMapKey", ref.Key,
+		"configMapNamespace", instance.Namespace)
+
+	if _, err := r.readReferencedConfigMapKey(ctx, instance.Namespace, *ref); err != nil {
+		if k8serrors.IsNotFound(err) {
+			logger.Error(err, "Referenced base ConfigMap not found",
+				"configMapName", ref.Name,
+				"configMapNamespace", instance.Namespace)
+			return fmt.Errorf("failed to find referenced base ConfigMap %s/%s", instance.Namespace, ref.Name)
+		}
+		if errors.Is(err, errReferencedConfigMapKeyNotFound) {
+			return fmt.Errorf("failed to find base ConfigMap key '%s' in ConfigMap %s/%s", ref.Key, instance.Namespace, ref.Name)
+		}
+		return fmt.Errorf("failed to fetch base ConfigMap %s/%s: %w", instance.Namespace, ref.Name, err)
+	}
+
+	logger.V(1).Info("Base ConfigMap found and validated",
+		"configMap", ref.Name,
+		"namespace", instance.Namespace,
+		"key", ref.Key)
 	return nil
 }
 

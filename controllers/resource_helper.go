@@ -47,6 +47,32 @@ var (
 	defaultHPACPUUtilization = int32(80) //nolint:mnd // standard HPA default
 )
 
+type runtimeConfigRef struct {
+	ConfigMapName string
+	ConfigMapKey  string
+	Generated     bool
+}
+
+func resolveRuntimeConfigRef(instance *ogxiov1beta1.OGXServer, pendingGeneratedConfigMapName string) *runtimeConfigRef {
+	if overrideConfig := instance.Spec.OverrideConfig; overrideConfig != nil &&
+		overrideConfig.Name != "" && overrideConfig.Key != "" {
+		return &runtimeConfigRef{
+			ConfigMapName: overrideConfig.Name,
+			ConfigMapKey:  overrideConfig.Key,
+		}
+	}
+
+	if pendingGeneratedConfigMapName != "" {
+		return &runtimeConfigRef{
+			ConfigMapName: pendingGeneratedConfigMapName,
+			ConfigMapKey:  generatedConfigKeyName,
+			Generated:     true,
+		}
+	}
+
+	return nil
+}
+
 // Probes configuration.
 const (
 	startupProbeInitialDelaySeconds = 15 // Time to wait before the first probe
@@ -129,7 +155,14 @@ func getStartupProbe(instance *ogxiov1beta1.OGXServer) *corev1.Probe {
 }
 
 // buildContainerSpec creates the container specification.
-func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, image string, secretEnvVars []corev1.EnvVar) corev1.Container {
+func buildContainerSpec(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	image string,
+	runtimeConfig *runtimeConfigRef,
+	secretEnvVars []corev1.EnvVar,
+) corev1.Container {
 	workers, workersSet := getEffectiveWorkers(instance)
 	container := corev1.Container{
 		Name:         ogxiov1beta1.DefaultContainerName,
@@ -139,8 +172,8 @@ func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *o
 		StartupProbe: getStartupProbe(instance),
 	}
 	configureContainerEnvironment(ctx, r, instance, &container, secretEnvVars)
-	configureContainerMounts(ctx, r, instance, &container)
-	configureContainerCommands(instance, &container)
+	configureContainerMounts(ctx, r, instance, runtimeConfig, &container)
+	configureContainerCommands(instance, runtimeConfig, &container)
 	return container
 }
 
@@ -276,12 +309,20 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 }
 
 // configureContainerMounts sets up volume mounts for the container.
-func configureContainerMounts(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+func configureContainerMounts(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	container *corev1.Container,
+) {
 	// Add volume mount for storage
 	addStorageVolumeMount(instance, container)
 
-	// Add ConfigMap volume mount if user config is specified
-	addUserConfigVolumeMount(instance, container)
+	// Mount the final runtime config when it comes from overrideConfig or
+	// operator-generated config. spec.baseConfig is an input to generation only
+	// and is never mounted into the pod directly.
+	addRuntimeConfigVolumeMount(runtimeConfig, container)
 
 	// Add CA bundle volume mount if TLS config is specified or auto-detected
 	addCABundleVolumeMount(ctx, r, instance, container)
@@ -305,10 +346,8 @@ func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxio
 }
 
 // configureContainerCommands sets up container commands and args.
-func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	hasOverride := instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
-
-	if hasOverride || hasGeneratedConfig(instance) {
+func configureContainerCommands(instance *ogxiov1beta1.OGXServer, runtimeConfig *runtimeConfigRef, container *corev1.Container) {
+	if runtimeConfig != nil {
 		container.Command = []string{"/bin/sh", "-c", startupScript}
 		container.Args = []string{}
 	}
@@ -341,12 +380,11 @@ func addStorageVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.C
 	})
 }
 
-// addUserConfigVolumeMount adds the user config volume mount to the container if specified.
-// This handles both override config and generated config cases.
-func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	hasOverride := instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != ""
-
-	if hasOverride || hasGeneratedConfig(instance) {
+// addRuntimeConfigVolumeMount mounts the final runtime config.yaml into the pod.
+// The mounted ConfigMap comes from either spec.overrideConfig or the operator's
+// generated ConfigMap. spec.baseConfig is not mounted directly.
+func addRuntimeConfigVolumeMount(runtimeConfig *runtimeConfigRef, container *corev1.Container) {
+	if runtimeConfig != nil {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
 			MountPath: "/etc/ogx/",
@@ -389,7 +427,14 @@ func createCABundleVolume(managedConfigMapName string) corev1.Volume {
 }
 
 // configurePodStorage configures the pod storage and returns the complete pod spec.
-func configurePodStorage(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container corev1.Container, effectivePVCName string) corev1.PodSpec {
+func configurePodStorage(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	container corev1.Container,
+	effectivePVCName string,
+) corev1.PodSpec {
 	fsGroup := FSGroup
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
@@ -404,8 +449,8 @@ func configurePodStorage(ctx context.Context, r *OGXServerReconciler, instance *
 	// Configure TLS CA bundle (with auto-detection support)
 	configureTLSCABundle(ctx, r, instance, &podSpec)
 
-	// Configure user config
-	configureUserConfig(instance, &podSpec)
+	// Configure the final runtime config volume.
+	configureRuntimeConfigVolume(runtimeConfig, &podSpec)
 
 	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
 	configurePodOverrides(instance, &podSpec)
@@ -461,22 +506,11 @@ func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance 
 	podSpec.Volumes = append(podSpec.Volumes, volume)
 }
 
-// configureUserConfig handles user configuration setup.
-// It mounts either the user-provided override ConfigMap or the operator-generated ConfigMap.
-// Override config takes precedence over generated config.
-func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
-	var configMapName, configMapKey string
-
-	overrideConfig := instance.Spec.OverrideConfig
-	if overrideConfig != nil && overrideConfig.Name != "" && overrideConfig.Key != "" {
-		configMapName = overrideConfig.Name
-		configMapKey = overrideConfig.Key
-	} else if hasGeneratedConfig(instance) {
-		configMapName = instance.Status.ConfigGeneration.ConfigMapName
-		configMapKey = "config.yaml"
-	}
-
-	if configMapName == "" {
+// configureRuntimeConfigVolume adds the ConfigMap volume that provides the
+// runtime config.yaml consumed by the container. Override config takes
+// precedence over generated config, and spec.baseConfig is never mounted.
+func configureRuntimeConfigVolume(runtimeConfig *runtimeConfigRef, podSpec *corev1.PodSpec) {
+	if runtimeConfig == nil {
 		return
 	}
 
@@ -485,11 +519,11 @@ func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSp
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: configMapName,
+					Name: runtimeConfig.ConfigMapName,
 				},
 				Items: []corev1.KeyToPath{
 					{
-						Key:  configMapKey,
+						Key:  runtimeConfig.ConfigMapKey,
 						Path: "config.yaml",
 					},
 				},

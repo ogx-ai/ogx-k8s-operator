@@ -23,7 +23,9 @@ import (
 	"strings"
 	"testing"
 
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -74,14 +76,31 @@ func loadTestCase(t *testing.T, dir string) testCase {
 
 	return testCase{
 		opts: options{
-			crPath:   crPath,
-			basePath: basePath,
-			crdPath:  "../../config/crd/bases",
-			validate: os.Getenv("KUBEBUILDER_ASSETS") != "",
+			crPath:            crPath,
+			basePath:          basePath,
+			crdPath:           "../../config/crd/bases",
+			distributionsPath: "../../distributions.json",
+			validate:          os.Getenv("KUBEBUILDER_ASSETS") != "",
 		},
 		wantErr:    strings.TrimSpace(readOptionalFile(t, filepath.Join(dir, "want-err"))),
 		wantConfig: readOptionalFile(t, filepath.Join(dir, "want-config.yaml")),
 	}
+}
+
+func TestLoadKnownDistributionNames(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "distributions.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"starter":"img-a","postgres-demo":"img-b"}`), 0o600))
+
+	server := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+		},
+	}
+
+	names, err := loadKnownDistributionNames(server, path)
+	require.NoError(t, err)
+	require.Equal(t, []string{"postgres-demo", "starter"}, names)
 }
 
 func (tc testCase) assert(t *testing.T, generated *config.GeneratedConfig, runErr error) {

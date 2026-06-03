@@ -17,99 +17,65 @@ limitations under the License.
 package config
 
 import (
-	"embed"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
-//go:embed configs/*/config.yaml
-var embeddedConfigs embed.FS
-
 const (
-	// OCIConfigLabel is the OCI image label containing the base64-encoded config.yaml.
-	OCIConfigLabel = "com.ogx.distribution.configs"
+	// OCIConfigListLabel is the OCI metadata label listing available config filenames.
+	OCIConfigListLabel = "com.ogx.distribution.configs"
+	// OCIDefaultConfigLabel identifies which config filename is the runtime default.
+	OCIDefaultConfigLabel = "com.ogx.distribution.default-config"
+	// OCIConfigLabelPrefix prefixes the per-file base64-encoded config labels.
+	OCIConfigLabelPrefix = "com.ogx.config."
 )
-
-// EmbeddedDistributionNames returns the names of all embedded distributions
-// by listing subdirectories under the embedded configs filesystem.
-func EmbeddedDistributionNames() ([]string, error) {
-	entries, err := embeddedConfigs.ReadDir("configs")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read embedded configs: %w", err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
-		}
-	}
-	return names, nil
-}
 
 // OCILabelFetcher fetches OCI image labels for a given image reference.
 // Returns the label map, or an error if the image is inaccessible.
 type OCILabelFetcher func(imageRef string) (map[string]string, error)
 
-// ConfigResolver resolves a distribution's base config.yaml content.
+// ConfigResolver resolves a distribution's base config.yaml content from OCI labels.
 type ConfigResolver interface {
 	// Resolve returns the base config for the given distribution.
-	// imageRef is the resolved container image reference (may be empty).
-	// distributionName is the named distribution (may be empty for direct image refs).
+	// imageRef is the resolved container image reference.
+	// distributionName is accepted for compatibility with existing callers.
 	Resolve(imageRef string, distributionName string) ([]byte, error)
 }
 
-// DefaultConfigResolver implements a two-tier resolution strategy:
-// 1. Try OCI image label (com.ogx.distribution.configs) from the resolved image
-// 2. Fall back to embedded configs from pkg/config/configs/.
+// DefaultConfigResolver resolves base config content from OCI image labels.
 type DefaultConfigResolver struct {
-	fs           embed.FS
 	cache        *ociConfigCache
 	labelFetcher OCILabelFetcher
-	// lastOCIErr stores the last OCI resolution error when falling back to embedded.
-	// Callers can check this via LastOCIError() for diagnostic logging.
-	lastOCIErr error
 }
 
-// NewDefaultConfigResolver creates a resolver with OCI-first, embedded-fallback strategy.
-// If labelFetcher is nil, OCI resolution is skipped and only embedded configs are used.
+// NewDefaultConfigResolver creates a resolver backed by OCI label lookups.
 func NewDefaultConfigResolver(labelFetcher OCILabelFetcher) *DefaultConfigResolver {
 	return &DefaultConfigResolver{
-		fs:           embeddedConfigs,
 		cache:        newOCIConfigCache(),
 		labelFetcher: labelFetcher,
 	}
 }
 
-func (r *DefaultConfigResolver) Resolve(imageRef string, distributionName string) ([]byte, error) {
-	r.lastOCIErr = nil
-
-	// Try OCI label first if we have an image reference and a label fetcher
-	if imageRef != "" && r.labelFetcher != nil {
-		data, ociErr := r.resolveFromOCI(imageRef)
-		if ociErr == nil && len(data) > 0 {
-			return data, nil
-		}
-		r.lastOCIErr = ociErr
+func (r *DefaultConfigResolver) Resolve(imageRef string, _ string) ([]byte, error) {
+	if imageRef == "" {
+		return nil, errors.New("failed to resolve base config from OCI labels: distribution image reference is empty")
 	}
-
-	// Fall back to embedded config
-	if distributionName == "" {
-		return nil, fmt.Errorf("failed to resolve config: OCI label %q not found on image %q and no distribution name for embedded fallback", OCIConfigLabel, imageRef)
+	if r.labelFetcher == nil {
+		return nil, fmt.Errorf("failed to resolve base config from OCI labels for %q: OCI label fetcher is not configured", imageRef)
 	}
-	return r.resolveFromEmbedded(distributionName)
-}
-
-// LastOCIError returns the error from the last OCI resolution attempt that
-// fell back to embedded config. Returns nil if OCI was not attempted or succeeded.
-func (r *DefaultConfigResolver) LastOCIError() error {
-	return r.lastOCIErr
+	return r.resolveFromOCI(imageRef)
 }
 
 func (r *DefaultConfigResolver) resolveFromOCI(imageRef string) ([]byte, error) {
-	// Check cache first
-	if data, ok := r.cache.get(imageRef); ok {
-		return data, nil
+	// Cache only digest-pinned references. Mutable tags (for example :latest)
+	// must be refetched so updated OCI labels are observed without a restart.
+	if shouldCacheOCIConfig(imageRef) {
+		if data, ok := r.cache.get(imageRef); ok {
+			return data, nil
+		}
 	}
 
 	labels, err := r.labelFetcher(imageRef)
@@ -117,28 +83,30 @@ func (r *DefaultConfigResolver) resolveFromOCI(imageRef string) ([]byte, error) 
 		return nil, fmt.Errorf("failed to fetch OCI labels for %q: %w", imageRef, err)
 	}
 
-	labelValue, ok := labels[OCIConfigLabel]
-	if !ok || labelValue == "" {
-		return nil, fmt.Errorf("failed to find OCI label %q on image %q", OCIConfigLabel, imageRef)
+	defaultConfigName, ok := labels[OCIDefaultConfigLabel]
+	if !ok || defaultConfigName == "" {
+		return nil, fmt.Errorf("failed to find OCI label %q on image %q", OCIDefaultConfigLabel, imageRef)
 	}
 
+	configLabel := OCIConfigLabelPrefix + defaultConfigName
+	labelValue, ok := labels[configLabel]
+	if !ok || labelValue == "" {
+		return nil, fmt.Errorf("failed to find OCI label %q on image %q (available configs: %q)", configLabel, imageRef, labels[OCIConfigListLabel])
+	}
 	data, err := base64.StdEncoding.DecodeString(labelValue)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64 config from OCI label on %q: %w", imageRef, err)
+		return nil, fmt.Errorf("failed to decode base64 config from OCI label %q on %q: %w", configLabel, imageRef, err)
 	}
 
-	// Cache the result
-	r.cache.set(imageRef, data)
+	if shouldCacheOCIConfig(imageRef) {
+		r.cache.set(imageRef, data)
+	}
 
 	return data, nil
 }
 
-func (r *DefaultConfigResolver) resolveFromEmbedded(distributionName string) ([]byte, error) {
-	data, err := r.fs.ReadFile(fmt.Sprintf("configs/%s/config.yaml", distributionName))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read embedded config for distribution %q: %w", distributionName, err)
-	}
-	return data, nil
+func shouldCacheOCIConfig(imageRef string) bool {
+	return strings.Contains(imageRef, "@sha256:")
 }
 
 const maxOCICacheEntries = 64

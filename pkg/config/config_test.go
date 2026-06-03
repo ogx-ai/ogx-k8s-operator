@@ -25,7 +25,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
-func TestParseBaseConfig(t *testing.T) { //nolint:cyclop // table-driven test with inline assertions
+func TestParseBaseConfig(t *testing.T) { //nolint:cyclop,gocognit // table-driven test with inline assertions
 	tests := []struct {
 		name    string
 		input   string
@@ -35,6 +35,7 @@ func TestParseBaseConfig(t *testing.T) { //nolint:cyclop // table-driven test wi
 		{
 			name: "valid base config",
 			input: `version: '2'
+distro_name: starter
 image_name: starter
 apis:
 - inference
@@ -45,11 +46,19 @@ providers:
     provider_type: remote::vllm
     config:
       url: http://vllm:8000
+registered_resources:
+  models:
+  - model_id: llama3
+    provider_id: remote-vllm
+    model_type: llm
 `,
 			check: func(t *testing.T, cfg *BaseConfig) {
 				t.Helper()
 				if cfg.Version != "2" {
 					t.Errorf("expected version '2', got %q", cfg.Version)
+				}
+				if cfg.DistroName != "starter" {
+					t.Errorf("expected distro_name 'starter', got %q", cfg.DistroName)
 				}
 				if cfg.ImageName != "starter" {
 					t.Errorf("expected image_name 'starter', got %q", cfg.ImageName)
@@ -65,6 +74,13 @@ providers:
 				}
 				if cfg.Providers["inference"][0].ProviderID != "remote-vllm" {
 					t.Errorf("expected provider_id 'remote-vllm', got %q", cfg.Providers["inference"][0].ProviderID)
+				}
+				if cfg.RegisteredResources == nil || len(cfg.RegisteredResources.Models) != 1 {
+					t.Fatalf("expected 1 registered resource model, got %+v", cfg.RegisteredResources)
+				}
+				firstModel, ok := cfg.RegisteredResources.Models[0].(map[string]interface{})
+				if !ok || firstModel["model_id"] != "llama3" {
+					t.Errorf("expected registered resource model 'llama3', got %+v", cfg.RegisteredResources.Models[0])
 				}
 			},
 		},
@@ -470,6 +486,7 @@ func TestCollectSecretRefs_StoragePostgres(t *testing.T) {
 
 func TestGenerateConfig_Basic(t *testing.T) {
 	baseConfig := `version: '2'
+distro_name: remote-vllm
 image_name: remote-vllm
 apis:
 - inference
@@ -480,9 +497,16 @@ providers:
     provider_type: remote::vllm
     config:
       url: http://default:8000
+models:
+- model_id: default-model
+  provider_id: default-vllm
+  model_type: llm
+vector_stores:
+  default_provider_id: faiss
 `
 
 	spec := &ogxiov1beta1.OGXServerSpec{
+		Distribution: ogxiov1beta1.DistributionSpec{Name: "remote-vllm"},
 		Providers: &ogxiov1beta1.ProvidersSpec{
 			Inference: &ogxiov1beta1.InferenceProvidersSpec{
 				Remote: &ogxiov1beta1.InferenceRemoteProviders{
@@ -521,6 +545,15 @@ providers:
 	if generated.ConfigVersion != 2 {
 		t.Errorf("expected config version 2, got %d", generated.ConfigVersion)
 	}
+	if !strings.Contains(generated.ConfigYAML, "distro_name: remote-vllm") {
+		t.Errorf("expected generated config to preserve distro_name, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "registered_resources:") {
+		t.Errorf("expected generated config to use registered_resources, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "vector_stores:") {
+		t.Errorf("expected generated config to preserve unrelated top-level sections, got:\n%s", generated.ConfigYAML)
+	}
 }
 
 func TestGenerateConfig_DisabledAPIs(t *testing.T) {
@@ -547,6 +580,26 @@ providers:
 
 	if generated.ConfigYAML == "" {
 		t.Error("expected non-empty ConfigYAML")
+	}
+}
+
+func TestGenerateConfig_DisabledAPIs_AllRemoved(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{
+		DisabledAPIs: []string{"inference"},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(generated.ConfigYAML, "apis:") {
+		t.Errorf("expected apis section to be removed when all APIs are disabled, got:\n%s", generated.ConfigYAML)
 	}
 }
 
@@ -579,54 +632,19 @@ providers:
 	}
 }
 
-func TestEmbeddedConfigResolver(t *testing.T) {
+func TestDefaultConfigResolver_EmptyImage(t *testing.T) {
 	resolver := NewDefaultConfigResolver(nil)
-
-	// "starter" should be an embedded config
-	data, err := resolver.Resolve("", "starter")
-	if err != nil {
-		t.Fatalf("failed to resolve 'starter' config: %v", err)
-	}
-	if len(data) == 0 {
-		t.Error("expected non-empty config data for 'starter'")
-	}
-
-	// Parse it to verify it's valid
-	cfg, err := ParseBaseConfig(data)
-	if err != nil {
-		t.Fatalf("failed to parse embedded starter config: %v", err)
-	}
-	if cfg.Version == "" {
-		t.Error("expected non-empty version in starter config")
-	}
-}
-
-func TestEmbeddedConfigResolver_UnknownDistribution(t *testing.T) {
-	resolver := NewDefaultConfigResolver(nil)
-	_, err := resolver.Resolve("", "nonexistent-distro")
+	_, err := resolver.Resolve("", "starter")
 	if err == nil {
-		t.Error("expected error for unknown distribution")
+		t.Error("expected error for empty image reference")
 	}
 }
 
-func TestEmbeddedConfigResolver_EmptyDistributionName(t *testing.T) {
+func TestDefaultConfigResolver_NoFetcher(t *testing.T) {
 	resolver := NewDefaultConfigResolver(nil)
-	_, err := resolver.Resolve("some-image:latest", "")
+	_, err := resolver.Resolve("starter:latest", "starter")
 	if err == nil {
-		t.Error("expected error for empty distribution name with embedded resolver")
-	}
-}
-
-func TestDefaultConfigResolver_FallsBackToEmbedded(t *testing.T) {
-	resolver := NewDefaultConfigResolver(nil)
-
-	// With nil fetcher, should fall back to embedded config
-	data, err := resolver.Resolve("", "starter")
-	if err != nil {
-		t.Fatalf("expected fallback to embedded, got error: %v", err)
-	}
-	if len(data) == 0 {
-		t.Error("expected non-empty config from embedded fallback")
+		t.Error("expected error when OCI fetcher is not configured")
 	}
 }
 
@@ -634,7 +652,7 @@ func TestDefaultConfigResolver_NoImageNoDistribution(t *testing.T) {
 	resolver := NewDefaultConfigResolver(nil)
 	_, err := resolver.Resolve("", "")
 	if err == nil {
-		t.Error("expected error when both image and distribution are empty")
+		t.Error("expected error when image is empty")
 	}
 }
 
@@ -642,7 +660,8 @@ func TestDefaultConfigResolver_OCILabelUsed(t *testing.T) {
 	expectedConfig := "version: '2'\nimage_name: from-oci\n"
 	fetcher := func(imageRef string) (map[string]string, error) {
 		return map[string]string{
-			OCIConfigLabel: "dmVyc2lvbjogJzInCmltYWdlX25hbWU6IGZyb20tb2NpCg==", // base64 of expectedConfig
+			OCIDefaultConfigLabel:                "config.yaml",
+			OCIConfigLabelPrefix + "config.yaml": "dmVyc2lvbjogJzInCmltYWdlX25hbWU6IGZyb20tb2NpCg==", // base64 of expectedConfig
 		}, nil
 	}
 
@@ -656,33 +675,34 @@ func TestDefaultConfigResolver_OCILabelUsed(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigResolver_OCIFetchFails_FallsBackToEmbedded(t *testing.T) {
+func TestDefaultConfigResolver_OCIFetchFails(t *testing.T) {
 	fetcher := func(imageRef string) (map[string]string, error) {
 		return nil, errors.New("failed to connect: network error")
 	}
 
 	resolver := NewDefaultConfigResolver(fetcher)
-	data, err := resolver.Resolve("unreachable-image:v1", "starter")
+	_, err := resolver.Resolve("unreachable-image:v1", "starter")
 	if err != nil {
-		t.Fatalf("expected fallback to embedded when OCI fails, got error: %v", err)
+		if !strings.Contains(err.Error(), "failed to connect") {
+			t.Fatalf("expected OCI fetch failure, got: %v", err)
+		}
+		return
 	}
-	if len(data) == 0 {
-		t.Error("expected non-empty config from embedded fallback")
-	}
+	t.Fatal("expected error when OCI fetch fails")
 }
 
-func TestDefaultConfigResolver_OCILabelMissing_FallsBackToEmbedded(t *testing.T) {
+func TestDefaultConfigResolver_OCILabelMissing(t *testing.T) {
 	fetcher := func(imageRef string) (map[string]string, error) {
 		return map[string]string{"unrelated-label": "value"}, nil
 	}
 
 	resolver := NewDefaultConfigResolver(fetcher)
-	data, err := resolver.Resolve("my-image:latest", "starter")
-	if err != nil {
-		t.Fatalf("expected fallback to embedded when label missing, got error: %v", err)
+	_, err := resolver.Resolve("my-image:latest", "starter")
+	if err == nil {
+		t.Fatal("expected error when OCI labels are missing")
 	}
-	if len(data) == 0 {
-		t.Error("expected non-empty config from embedded fallback")
+	if !strings.Contains(err.Error(), OCIDefaultConfigLabel) {
+		t.Fatalf("expected missing default-config label error, got %v", err)
 	}
 }
 

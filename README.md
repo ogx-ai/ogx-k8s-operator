@@ -105,6 +105,7 @@ To enable the `inline::milvus` local vector storage provider, set `ENABLE_INLINE
 The operator supports two ways to provide OGX `config.yaml`:
 
 1. **Declarative generation from CR fields** (recommended) via:
+   - `spec.baseConfig` (optional base config input)
    - `spec.providers`
    - `spec.resources`
    - `spec.storage`
@@ -113,12 +114,16 @@ The operator supports two ways to provide OGX `config.yaml`:
 
 When declarative fields are present and `spec.overrideConfig` is not set, the operator:
 
-- Resolves base config from OCI label `com.ogx.distribution.configs` (with embedded fallback)
+- Resolves base config from `spec.baseConfig` when set, otherwise from OCI labels `com.ogx.distribution.default-config` + `com.ogx.config.<filename>`
 - Generates a final `config.yaml`
 - Creates immutable ConfigMap `${name}-config-${hash}`
 - Mounts that config to `/etc/ogx/config.yaml`
 - Injects required secret-based env vars from provider/storage secret refs
 - Rolls the Deployment when referenced config/secret inputs change
+
+The mounted runtime config always comes from either `spec.overrideConfig` or the
+generated ConfigMap. `spec.baseConfig` is only used as an input to generation
+and is never mounted into the pod directly.
 
 Example declarative OGXServer:
 

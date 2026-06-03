@@ -444,6 +444,7 @@ type WorkloadSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabledAPIs)",message="overrideConfig and disabledAPIs are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.baseConfig)",message="overrideConfig and baseConfig are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference)",message="inference cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo)",message="vector_io cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime)",message="tool_runtime cannot be both in providers and disabledAPIs"
@@ -494,8 +495,16 @@ type OGXServerSpec struct {
 	// Monitoring configures Prometheus monitoring and observability.
 	// +optional
 	Monitoring *MonitoringSpec `json:"monitoring,omitempty"`
+	// BaseConfig references a ConfigMap key containing the base config.yaml used
+	// as the starting point for declarative config generation.
+	// When set, this takes precedence over OCI label resolution.
+	// Mutually exclusive with overrideConfig.
+	// The ConfigMap must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +optional
+	BaseConfig *ConfigMapKeyRef `json:"baseConfig,omitempty"`
 	// OverrideConfig references a ConfigMap key containing a full config.yaml override.
-	// Mutually exclusive with providers, resources, storage, and disabledAPIs.
+	// Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.
 	// The ConfigMap must be in the same namespace as the OGXServer
 	// and must have the label ogx.io/watch: "true".
 	// +optional
@@ -547,7 +556,7 @@ type VersionInfo struct {
 type ResolvedDistributionStatus struct {
 	// Image is the resolved container image reference (with digest when available).
 	Image string `json:"image,omitempty"`
-	// ConfigSource indicates the config origin: "embedded" or "oci-label".
+	// ConfigSource indicates the base config origin (for example "configmap" or "oci-label").
 	ConfigSource string `json:"configSource,omitempty"`
 	// ConfigHash is the SHA256 hash of the base config used.
 	ConfigHash string `json:"configHash,omitempty"`

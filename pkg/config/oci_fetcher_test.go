@@ -50,7 +50,7 @@ type ociImageConfig struct {
 }
 
 type ociManifest struct {
-	SchemaVersion int `json:"schemaVersion"`
+	SchemaVersion int    `json:"schemaVersion"`
 	MediaType     string `json:"mediaType"`
 	Config        struct {
 		MediaType string `json:"mediaType"`
@@ -122,8 +122,10 @@ func TestFetchOCILabels_WithConfigLabel(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte(configYAML))
 
 	reg.pushImage("distro/test", "v1", map[string]string{
-		OCIConfigLabel: encoded,
-		"unrelated":    "value",
+		OCIDefaultConfigLabel:                "config.yaml",
+		OCIConfigListLabel:                   "config.yaml",
+		OCIConfigLabelPrefix + "config.yaml": encoded,
+		"unrelated":                          "value",
 	})
 
 	labels, err := fetchOCILabels(fmt.Sprintf("%s/distro/test:v1", host))
@@ -131,8 +133,8 @@ func TestFetchOCILabels_WithConfigLabel(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if labels[OCIConfigLabel] != encoded {
-		t.Errorf("expected label %q = %q, got %q", OCIConfigLabel, encoded, labels[OCIConfigLabel])
+	if labels[OCIConfigLabelPrefix+"config.yaml"] != encoded {
+		t.Errorf("expected label %q = %q, got %q", OCIConfigLabelPrefix+"config.yaml", encoded, labels[OCIConfigLabelPrefix+"config.yaml"])
 	}
 }
 
@@ -171,7 +173,9 @@ func TestResolverWithRealOCIFetch(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte(configYAML))
 
 	reg.pushImage("distro/starter", "latest", map[string]string{
-		OCIConfigLabel: encoded,
+		OCIDefaultConfigLabel:                "config.yaml",
+		OCIConfigListLabel:                   "config.yaml",
+		OCIConfigLabelPrefix + "config.yaml": encoded,
 	})
 
 	resolver := NewDefaultConfigResolver(fetchOCILabels)
@@ -184,7 +188,7 @@ func TestResolverWithRealOCIFetch(t *testing.T) {
 	}
 }
 
-func TestResolverOCIFallsBackWhenLabelMissing(t *testing.T) {
+func TestResolverOCIReportsMissingLabel(t *testing.T) {
 	reg, host := setupTestRegistryWithImages(t)
 
 	reg.pushImage("distro/nolabel", "v1", map[string]string{
@@ -192,12 +196,9 @@ func TestResolverOCIFallsBackWhenLabelMissing(t *testing.T) {
 	})
 
 	resolver := NewDefaultConfigResolver(fetchOCILabels)
-	data, err := resolver.Resolve(fmt.Sprintf("%s/distro/nolabel:v1", host), "starter")
-	if err != nil {
-		t.Fatalf("expected fallback to embedded, got error: %v", err)
-	}
-	if len(data) == 0 {
-		t.Error("expected non-empty config from embedded fallback")
+	_, err := resolver.Resolve(fmt.Sprintf("%s/distro/nolabel:v1", host), "starter")
+	if err == nil {
+		t.Fatal("expected missing label error")
 	}
 }
 
@@ -218,22 +219,50 @@ func TestResolverCachesOCIResult(t *testing.T) {
 	fetcher := func(imageRef string) (map[string]string, error) {
 		callCount++
 		return map[string]string{
-			OCIConfigLabel: base64.StdEncoding.EncodeToString([]byte("version: '2'\nimage_name: cached\n")),
+			OCIDefaultConfigLabel:                "config.yaml",
+			OCIConfigLabelPrefix + "config.yaml": base64.StdEncoding.EncodeToString([]byte("version: '2'\nimage_name: cached\n")),
 		}, nil
 	}
 
 	resolver := NewDefaultConfigResolver(fetcher)
+	imageRef := "test-image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-	_, err := resolver.Resolve("test-image:v1", "")
+	_, err := resolver.Resolve(imageRef, "")
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
-	_, err = resolver.Resolve("test-image:v1", "")
+	_, err = resolver.Resolve(imageRef, "")
 	if err != nil {
 		t.Fatalf("second resolve: %v", err)
 	}
 
 	if callCount != 1 {
 		t.Errorf("expected fetcher called once (cached), called %d times", callCount)
+	}
+}
+
+func TestResolverDoesNotCacheMutableTagResult(t *testing.T) {
+	callCount := 0
+	fetcher := func(imageRef string) (map[string]string, error) {
+		callCount++
+		return map[string]string{
+			OCIDefaultConfigLabel:                "config.yaml",
+			OCIConfigLabelPrefix + "config.yaml": base64.StdEncoding.EncodeToString([]byte("version: '2'\nimage_name: mutable\n")),
+		}, nil
+	}
+
+	resolver := NewDefaultConfigResolver(fetcher)
+
+	_, err := resolver.Resolve("test-image:latest", "")
+	if err != nil {
+		t.Fatalf("first resolve: %v", err)
+	}
+	_, err = resolver.Resolve("test-image:latest", "")
+	if err != nil {
+		t.Fatalf("second resolve: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected fetcher called twice for mutable tag, called %d times", callCount)
 	}
 }

@@ -18,13 +18,14 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
-	"github.com/go-logr/logr"
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +44,8 @@ const (
 	generatedConfigKeyName = "config.yaml"
 )
 
+var errReferencedConfigMapKeyNotFound = errors.New("failed to find referenced ConfigMap key")
+
 // generatedConfigMapName returns the name for a generated ConfigMap.
 func generatedConfigMapName(crName, contentHash string) string {
 	return fmt.Sprintf("%s-config-%s", crName, contentHash)
@@ -51,8 +54,9 @@ func generatedConfigMapName(crName, contentHash string) string {
 // reconcileGeneratedConfig handles the full config generation lifecycle:
 // 1. Generate config.yaml from spec + base config
 // 2. Create/verify the ConfigMap with content-hash name
-// 3. Clean up old ConfigMaps beyond retention limit
 // Returns the generated config result, or nil if no config generation is needed.
+// Cleanup of old generated ConfigMaps happens after the Deployment reconcile
+// succeeds so in-flight rollouts keep their referenced inputs.
 func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*config.GeneratedConfig, error) {
 	logger := log.FromContext(ctx)
 
@@ -87,26 +91,27 @@ func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, inst
 		return nil, err
 	}
 
-	if err := r.cleanupOldGeneratedConfigMaps(ctx, instance, configMapName); err != nil {
-		logger.Error(err, "failed to clean up old generated ConfigMaps")
-	}
-
 	return generated, nil
 }
 
-// resolveBaseConfig resolves the base config.yaml from OCI labels or embedded configs.
-// Returns nil data (no error) when neither image nor distribution name is available.
+// resolveBaseConfig resolves the base config.yaml from a referenced ConfigMap or
+// OCI labels on the resolved distribution image.
 func (r *OGXServerReconciler) resolveBaseConfig(ctx context.Context, instance *ogxiov1beta1.OGXServer) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
+	if ref := instance.Spec.BaseConfig; ref != nil {
+		data, err := r.readReferencedConfigMapKey(ctx, instance.Namespace, *ref)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve base config from ConfigMap %s/%s[%s]: %w", instance.Namespace, ref.Name, ref.Key, err)
+		}
+		logger.V(1).Info("resolved base config", "source", "configmap", "configMap", ref.Name, "key", ref.Key)
+		return data, nil
+	}
+
 	distributionName := instance.Spec.Distribution.Name
 	resolvedImage, resolveErr := r.resolveImage(instance.Spec.Distribution)
-
-	if distributionName == "" && resolvedImage == "" {
-		if resolveErr != nil {
-			logger.V(1).Info("skipping generated config because distribution name and image are unset", "error", resolveErr)
-		}
-		return nil, nil
+	if resolveErr != nil {
+		return nil, fmt.Errorf("failed to resolve distribution image: %w", resolveErr)
 	}
 
 	resolver := r.configResolver
@@ -115,23 +120,26 @@ func (r *OGXServerReconciler) resolveBaseConfig(ctx context.Context, instance *o
 	}
 	data, err := resolver.Resolve(resolvedImage, distributionName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve base config: %w", err)
+		return nil, fmt.Errorf("failed to resolve base config from OCI labels: %w", err)
 	}
 
-	r.logConfigResolutionSource(logger, resolver, resolvedImage, distributionName)
+	logger.V(1).Info("resolved base config", "distribution", distributionName, "image", resolvedImage, "source", "oci")
 	return data, nil
 }
 
-func (r *OGXServerReconciler) logConfigResolutionSource(logger logr.Logger, resolver config.ConfigResolver, resolvedImage, distributionName string) {
-	source := "embedded"
-	if dr, ok := resolver.(*config.DefaultConfigResolver); ok {
-		if ociErr := dr.LastOCIError(); ociErr != nil {
-			logger.V(1).Info("OCI config resolution failed, using embedded fallback", "error", ociErr, "image", resolvedImage)
-		} else if resolvedImage != "" && r.OCILabelFetcher != nil {
-			source = "oci"
-		}
+func (r *OGXServerReconciler) readReferencedConfigMapKey(
+	ctx context.Context, namespace string, ref ogxiov1beta1.ConfigMapKeyRef,
+) ([]byte, error) {
+	configMap := &corev1.ConfigMap{}
+	if err := r.directGet(ctx, client.ObjectKey{Name: ref.Name, Namespace: namespace}, configMap); err != nil {
+		return nil, err
 	}
-	logger.V(1).Info("resolved base config", "distribution", distributionName, "image", resolvedImage, "source", source)
+
+	data, ok := configMap.Data[ref.Key]
+	if !ok {
+		return nil, fmt.Errorf("failed to find referenced ConfigMap key %q: %w", ref.Key, errReferencedConfigMapKeyNotFound)
+	}
+	return []byte(data), nil
 }
 
 // ensureGeneratedConfigMap creates the generated ConfigMap if it doesn't already exist.
@@ -185,6 +193,8 @@ func (r *OGXServerReconciler) buildGeneratedConfigMap(instance *ogxiov1beta1.OGX
 }
 
 // cleanupOldGeneratedConfigMaps deletes generated ConfigMaps beyond the retention limit.
+//
+//nolint:cyclop // Orchestrates protection, retention, and deletion rules for generated ConfigMaps.
 func (r *OGXServerReconciler) cleanupOldGeneratedConfigMaps(ctx context.Context, instance *ogxiov1beta1.OGXServer, currentName string) error {
 	logger := log.FromContext(ctx)
 
@@ -205,48 +215,104 @@ func (r *OGXServerReconciler) cleanupOldGeneratedConfigMaps(ctx context.Context,
 		return nil
 	}
 
+	protectedNames, err := r.referencedRuntimeConfigMapNames(ctx, instance, currentName)
+	if err != nil {
+		return fmt.Errorf("failed to determine referenced generated ConfigMaps: %w", err)
+	}
+
+	protectedCount := 0
+	for i := range cmList.Items {
+		if _, ok := protectedNames[cmList.Items[i].Name]; ok {
+			protectedCount++
+		}
+	}
+
 	// Sort by creation timestamp (oldest first)
 	sort.Slice(cmList.Items, func(i, j int) bool {
 		return cmList.Items[i].CreationTimestamp.Before(&cmList.Items[j].CreationTimestamp)
 	})
 
-	// Filter out the current ConfigMap before computing the delete set so that
-	// skipping it doesn't leave more ConfigMaps than the retention limit.
-	var candidates []corev1.ConfigMap
-	for i := range cmList.Items {
-		if cmList.Items[i].Name != currentName {
-			candidates = append(candidates, cmList.Items[i])
-		}
+	minimumToKeep := configMapRetention
+	if protectedCount > minimumToKeep {
+		minimumToKeep = protectedCount
 	}
 
-	// +1 because currentName (excluded above) also counts toward retention
-	deleteCount := len(candidates) - (configMapRetention - 1)
-	for i := 0; i < deleteCount; i++ {
-		cm := &candidates[i]
+	deleteCount := len(cmList.Items) - minimumToKeep
+	for i := range cmList.Items {
+		if deleteCount == 0 {
+			break
+		}
+		cm := &cmList.Items[i]
+		if _, ok := protectedNames[cm.Name]; ok {
+			continue
+		}
 		if err := r.Delete(ctx, cm); err != nil && !k8serrors.IsNotFound(err) {
 			logger.Error(err, "failed to delete old generated ConfigMap", "name", cm.Name)
 		} else {
 			logger.V(1).Info("deleted old generated ConfigMap", "name", cm.Name)
+			deleteCount--
 		}
 	}
 
 	return nil
 }
 
-// getGeneratedConfigMapHash returns a hash for the generated ConfigMap for rollout detection.
-func (r *OGXServerReconciler) getGeneratedConfigMapHash(ctx context.Context, instance *ogxiov1beta1.OGXServer) (string, error) {
-	if instance.Status.ConfigGeneration == nil || instance.Status.ConfigGeneration.ConfigMapName == "" {
-		return "", nil
-	}
+func (r *OGXServerReconciler) getGeneratedConfigMapHashByName(ctx context.Context, namespace, name string) (string, error) {
 	cm := &corev1.ConfigMap{}
 	err := r.directGet(ctx, client.ObjectKey{
-		Name:      instance.Status.ConfigGeneration.ConfigMapName,
-		Namespace: instance.Namespace,
+		Name:      name,
+		Namespace: namespace,
 	}, cm)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s-%s", cm.ResourceVersion, cm.Name), nil
+}
+
+func (r *OGXServerReconciler) referencedRuntimeConfigMapNames(
+	ctx context.Context,
+	instance *ogxiov1beta1.OGXServer,
+	currentName string,
+) (map[string]struct{}, error) {
+	protected := map[string]struct{}{currentName: {}}
+	if instance.Status.ConfigGeneration != nil && instance.Status.ConfigGeneration.ConfigMapName != "" {
+		protected[instance.Status.ConfigGeneration.ConfigMapName] = struct{}{}
+	}
+
+	deployment := &appsv1.Deployment{}
+	if err := r.Get(ctx, client.ObjectKey{Name: instance.Name, Namespace: instance.Namespace}, deployment); err != nil {
+		if !k8serrors.IsNotFound(err) {
+			return nil, err
+		}
+	} else {
+		collectRuntimeConfigMapRefs(protected, deployment.Spec.Template.Spec.Volumes)
+	}
+
+	rsList := &appsv1.ReplicaSetList{}
+	if err := r.List(
+		ctx,
+		rsList,
+		client.InNamespace(instance.Namespace),
+		client.MatchingLabels{instanceLabelKey: instance.Name},
+	); err != nil {
+		return nil, err
+	}
+	for i := range rsList.Items {
+		collectRuntimeConfigMapRefs(protected, rsList.Items[i].Spec.Template.Spec.Volumes)
+	}
+
+	return protected, nil
+}
+
+func collectRuntimeConfigMapRefs(protected map[string]struct{}, volumes []corev1.Volume) {
+	for i := range volumes {
+		if volumes[i].Name != "user-config" || volumes[i].ConfigMap == nil {
+			continue
+		}
+		if name := volumes[i].ConfigMap.Name; name != "" {
+			protected[name] = struct{}{}
+		}
+	}
 }
 
 // updateConfigGenerationStatus updates the status with config generation details.

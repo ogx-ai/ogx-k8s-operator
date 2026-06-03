@@ -828,7 +828,8 @@ _Appears in:_
 | `tls` _[TLSClientConfig](#tlsclientconfig)_ | TLS configures outbound TLS trust anchors and client identity for<br />connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
 | `monitoring` _[MonitoringSpec](#monitoringspec)_ | Monitoring configures Prometheus monitoring and observability. |  |  |
-| `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabledAPIs.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `baseConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | BaseConfig references a ConfigMap key containing the base config.yaml used<br />as the starting point for declarative config generation.<br />When set, this takes precedence over OCI label resolution.<br />Mutually exclusive with overrideConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
 #### OGXServerStatus
 
@@ -1028,7 +1029,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `image` _string_ | Image is the resolved container image reference (with digest when available). |  |  |
-| `configSource` _string_ | ConfigSource indicates the config origin: "embedded" or "oci-label". |  |  |
+| `configSource` _string_ | ConfigSource indicates the base config origin (for example "configmap" or "oci-label"). |  |  |
 | `configHash` _string_ | ConfigHash is the SHA256 hash of the base config used. |  |  |
 
 #### ResourcesSpec

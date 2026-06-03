@@ -635,7 +635,7 @@ func TestCollectValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := &OGXServerValidator{EmbeddedDistributionNames: knownNames}
+			v := &OGXServerValidator{KnownDistributionNames: knownNames}
 			errs := v.collectValidationErrors(tt.server)
 			if len(errs) != tt.wantErrs {
 				t.Errorf("collectValidationErrors() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)

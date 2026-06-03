@@ -11,7 +11,7 @@ The operator can generate server `config.yaml` from declarative CR fields:
 - `spec.storage`
 - `spec.disabledAPIs`
 
-When this mode is active, the operator resolves a base config (OCI image label first, embedded fallback), merges your CR values, writes an immutable generated ConfigMap, and mounts it into the server pod.
+When this mode is active, the operator resolves a base config from `spec.baseConfig` when provided, otherwise from OCI image labels, merges your CR values, writes an immutable generated ConfigMap, and mounts it into the server pod.
 
 ## Precedence Rules
 
@@ -21,6 +21,8 @@ The operator supports two config modes:
 2. **Generated mode**: declarative CR fields generate `config.yaml`.
 
 If `spec.overrideConfig` is set, it takes precedence over generated mode.
+The mounted runtime config always comes from `spec.overrideConfig` or the
+generated ConfigMap; `spec.baseConfig` is only an input to generation.
 
 ## Required Resource Labels and Namespace Scope
 
@@ -41,8 +43,8 @@ This label allows the operator to watch changes and trigger reconciliation.
 
 ## How It Works
 
-1. Resolve base config from OCI label `com.ogx.distribution.configs` on the resolved distribution image.
-2. If OCI label is unavailable, fall back to embedded configs shipped with the operator.
+1. If `spec.baseConfig` is set, read that ConfigMap key as the base config.
+2. Otherwise, resolve base config from OCI labels `com.ogx.distribution.default-config` and `com.ogx.config.<default-config-filename>` on the resolved distribution image.
 3. Expand providers/resources/storage from CR spec.
 4. Merge with base config:
    - providers: user values replace base per API type
@@ -92,6 +94,21 @@ Apply a ready-to-use sample from this repository:
 ```bash
 kubectl apply -f config/samples/example-with-generated-config.yaml
 ```
+
+## `configgen` CLI
+
+The `configgen` CLI runs the same generation pipeline outside Kubernetes.
+
+```bash
+configgen <ogxserver.yaml> -base <config.yaml> [-distributions-path distributions.json] [-output-config] [-validate]
+```
+
+Notes:
+
+- If the CR uses `spec.baseConfig`, pass that file with `-base`.
+- If the CR only sets `spec.distribution.name`, pass `-base` as well; image
+  resolution for named distributions happens in the operator.
+- `-validate` uses `distributions.json` to validate `spec.distribution.name`.
 
 ## Storage Example (Postgres)
 

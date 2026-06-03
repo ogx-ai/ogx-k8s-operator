@@ -68,6 +68,29 @@ spec:
           spec:
             description: OGXServerSpec defines the desired state of OGXServer.
             properties:
+              baseConfig:
+                description: |-
+                  BaseConfig references a ConfigMap key containing the base config.yaml used
+                  as the starting point for declarative config generation.
+                  When set, this takes precedence over OCI label resolution.
+                  Mutually exclusive with overrideConfig.
+                  The ConfigMap must be in the same namespace as the OGXServer
+                  and must have the label ogx.io/watch: "true".
+                properties:
+                  key:
+                    description: Key is the key within the ConfigMap.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                    type: string
+                  name:
+                    description: Name is the name of the ConfigMap.
+                    minLength: 1
+                    type: string
+                required:
+                - key
+                - name
+                type: object
               disabledAPIs:
                 description: |-
                   DisabledAPIs lists API names to remove from the generated config.
@@ -576,7 +599,7 @@ spec:
               overrideConfig:
                 description: |-
                   OverrideConfig references a ConfigMap key containing a full config.yaml override.
-                  Mutually exclusive with providers, resources, storage, and disabledAPIs.
+                  Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.
                   The ConfigMap must be in the same namespace as the OGXServer
                   and must have the label ogx.io/watch: "true".
                 properties:
@@ -6278,6 +6301,8 @@ spec:
               rule: '!has(self.overrideConfig) || !has(self.storage)'
             - message: overrideConfig and disabledAPIs are mutually exclusive
               rule: '!has(self.overrideConfig) || !has(self.disabledAPIs)'
+            - message: overrideConfig and baseConfig are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.baseConfig)'
             - message: inference cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''inference'') || !has(self.providers.inference)'
@@ -6452,8 +6477,8 @@ spec:
                       used.
                     type: string
                   configSource:
-                    description: 'ConfigSource indicates the config origin: "embedded"
-                      or "oci-label".'
+                    description: ConfigSource indicates the base config origin (for
+                      example "configmap" or "oci-label").
                     type: string
                   image:
                     description: Image is the resolved container image reference (with
