@@ -55,7 +55,6 @@ type ConfigModel struct {
 // RegisteredResources represents the registered_resources section of config.yaml.
 type RegisteredResources struct {
 	Models       []interface{} `yaml:"models,omitempty"`
-	ToolGroups   []interface{} `yaml:"tool_groups,omitempty"`
 	VectorStores []interface{} `yaml:"vector_stores,omitempty"`
 }
 

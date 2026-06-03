@@ -168,7 +168,6 @@ func buildRegisteredResources(base *BaseConfig, userModels []ConfigModel) *Regis
 	rr := &RegisteredResources{}
 	if base.RegisteredResources != nil {
 		rr.Models = base.RegisteredResources.Models
-		rr.ToolGroups = base.RegisteredResources.ToolGroups
 		rr.VectorStores = base.RegisteredResources.VectorStores
 	}
 	if len(userModels) > 0 {
