@@ -3580,7 +3580,7 @@ spec:
                 type: integer
               resources:
                 description: |-
-                  Resources declares models and tools to register.
+                  Resources declares models to register.
                   Mutually exclusive with overrideConfig.
                 properties:
                   models:
@@ -3618,14 +3618,6 @@ spec:
                       - message: quantization must not be empty if specified
                         rule: '!has(self.quantization) || self.quantization.size()
                           > 0'
-                    minItems: 1
-                    type: array
-                  tools:
-                    description: Tools are tool group names to register with the toolRuntime
-                      provider.
-                    items:
-                      minLength: 1
-                      type: string
                     minItems: 1
                     type: array
                 type: object

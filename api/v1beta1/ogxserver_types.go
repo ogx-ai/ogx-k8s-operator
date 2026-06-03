@@ -142,17 +142,12 @@ type ModelConfig struct {
 	Quantization string `json:"quantization,omitempty"`
 }
 
-// ResourcesSpec defines declarative registration of models and tools.
+// ResourcesSpec defines declarative registration of models.
 type ResourcesSpec struct {
 	// Models to register with inference providers.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	Models []ModelConfig `json:"models,omitempty"`
-	// Tools are tool group names to register with the toolRuntime provider.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:MinLength=1
-	Tools []string `json:"tools,omitempty"`
 }
 
 // KVStorageSpec configures the key-value storage backend.
@@ -465,7 +460,7 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Providers *ProvidersSpec `json:"providers,omitempty"`
-	// Resources declares models and tools to register.
+	// Resources declares models to register.
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Resources *ResourcesSpec `json:"resources,omitempty"`
