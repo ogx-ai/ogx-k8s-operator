@@ -43,3 +43,10 @@ package controllers
 
 // HorizontalPodAutoscaler permissions - controller creates and manages HPAs for server pods
 //+kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+
+// Monitoring permissions - controller creates and manages ServiceMonitors and PrometheusRules
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
+
+// CRD discovery - controller checks for monitoring.coreos.com CRD availability
+//+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
