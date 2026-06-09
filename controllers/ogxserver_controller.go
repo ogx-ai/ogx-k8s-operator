@@ -93,18 +93,9 @@ const (
 )
 
 // OGXServerReconciler reconciles an OGXServer object.
-//
-// ConfigMap handling:
-// Operator-managed ConfigMaps (CA bundles) have the managed-by label and are watched
-// via Owns(). User-referenced ConfigMaps and the operator config ConfigMap are read
-// via a direct (non-cached) API client during reconciliation, with periodic requeue
-// (5 minutes) for eventual consistency.
 type OGXServerReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	// DirectClient is a non-cached API client for reading ConfigMaps that
-	// lack operator labels (user-referenced and operator config ConfigMaps).
-	DirectClient client.Reader
 	// Image mapping overrides
 	ImageMappingOverrides map[string]string
 	// Cluster info
@@ -144,8 +135,6 @@ func (r *OGXServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	ctx = logr.NewContext(ctx, logger)
 
 	// Refresh image mapping overrides from the operator config ConfigMap.
-	// This reads via the direct (non-cached) API client so it always gets full data,
-	// even though the informer cache strips ConfigMap data to save memory.
 	r.refreshOperatorConfig(ctx)
 
 	// Fetch the OGXServer instance
@@ -190,8 +179,7 @@ func (r *OGXServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 }
 
-// refreshOperatorConfig re-reads the operator config ConfigMap via the direct
-// API client and updates image mapping overrides.
+// refreshOperatorConfig re-reads the operator config ConfigMap and updates image mapping overrides.
 func (r *OGXServerReconciler) refreshOperatorConfig(ctx context.Context) {
 	logger := log.FromContext(ctx)
 
@@ -207,7 +195,7 @@ func (r *OGXServerReconciler) refreshOperatorConfig(ctx context.Context) {
 	}
 
 	configMap := &corev1.ConfigMap{}
-	if err := r.directGet(ctx, types.NamespacedName{
+	if err := r.Get(ctx, types.NamespacedName{
 		Name:      operatorConfigData,
 		Namespace: operatorNamespace,
 	}, configMap); err != nil {
@@ -216,15 +204,6 @@ func (r *OGXServerReconciler) refreshOperatorConfig(ctx context.Context) {
 	}
 
 	r.ImageMappingOverrides = ParseImageMappingOverrides(ctx, configMap.Data)
-}
-
-// directGet reads an object via the DirectClient (non-cached) if set, otherwise
-// falls back to the cached client. This allows tests to work without a separate client.
-func (r *OGXServerReconciler) directGet(ctx context.Context, key types.NamespacedName, obj client.Object) error {
-	if r.DirectClient != nil {
-		return r.DirectClient.Get(ctx, key, obj)
-	}
-	return r.Get(ctx, key, obj)
 }
 
 // fetchInstance retrieves the OGXServer instance.
@@ -531,7 +510,7 @@ func (r *OGXServerReconciler) resolveSecretRefsHash(
 		}
 		selector := env.ValueFrom.SecretKeyRef
 		secret := &corev1.Secret{}
-		if err := r.directGet(ctx, types.NamespacedName{Name: selector.Name, Namespace: instance.Namespace}, secret); err != nil {
+		if err := r.Get(ctx, types.NamespacedName{Name: selector.Name, Namespace: instance.Namespace}, secret); err != nil {
 			return "", fmt.Errorf("failed to resolve secret %s/%s for env %s: %w", instance.Namespace, selector.Name, env.Name, err)
 		}
 		// Hash the actual secret data value so that metadata-only changes
@@ -1243,9 +1222,8 @@ func (r *OGXServerReconciler) reconcileOverrideConfigMap(ctx context.Context, in
 		"configMapKey", instance.Spec.OverrideConfig.Key,
 		"configMapNamespace", configMapNamespace)
 
-	// Read via direct client — user ConfigMaps lack operator labels
 	configMap := &corev1.ConfigMap{}
-	err := r.directGet(ctx, types.NamespacedName{
+	err := r.Get(ctx, types.NamespacedName{
 		Name:      instance.Spec.OverrideConfig.Name,
 		Namespace: configMapNamespace,
 	}, configMap)
@@ -1326,7 +1304,7 @@ func (r *OGXServerReconciler) reconcileCABundleConfigMap(ctx context.Context, in
 			"configMapNamespace", instance.Namespace)
 
 		configMap := &corev1.ConfigMap{}
-		err := r.directGet(ctx, types.NamespacedName{
+		err := r.Get(ctx, types.NamespacedName{
 			Name:      ref.Name,
 			Namespace: instance.Namespace,
 		}, configMap)
@@ -1369,7 +1347,7 @@ func (r *OGXServerReconciler) getConfigMapHash(ctx context.Context, instance *og
 	configMapNamespace := instance.Namespace
 
 	configMap := &corev1.ConfigMap{}
-	err := r.directGet(ctx, types.NamespacedName{
+	err := r.Get(ctx, types.NamespacedName{
 		Name:      instance.Spec.OverrideConfig.Name,
 		Namespace: configMapNamespace,
 	}, configMap)
@@ -1492,7 +1470,7 @@ func (r *OGXServerReconciler) gatherExplicitCABundle(ctx context.Context, instan
 
 	for _, ref := range instance.Spec.TLS.Trust.CACertificates {
 		configMap := &corev1.ConfigMap{}
-		err := r.directGet(ctx, types.NamespacedName{
+		err := r.Get(ctx, types.NamespacedName{
 			Name:      ref.Name,
 			Namespace: instance.Namespace,
 		}, configMap)
@@ -1703,7 +1681,7 @@ func (r *OGXServerReconciler) detectODHTrustedCABundle(ctx context.Context, inst
 	logger := log.FromContext(ctx)
 
 	configMap := &corev1.ConfigMap{}
-	err := r.directGet(ctx, types.NamespacedName{
+	err := r.Get(ctx, types.NamespacedName{
 		Name:      odhTrustedCABundleConfigMap,
 		Namespace: instance.Namespace,
 	}, configMap)
@@ -1741,37 +1719,25 @@ func (r *OGXServerReconciler) detectODHTrustedCABundle(ctx context.Context, inst
 }
 
 // NewOGXServerReconciler creates a new reconciler with default image mappings.
-func NewOGXServerReconciler(ctx context.Context, client client.Client, scheme *runtime.Scheme,
-	clusterInfo *cluster.ClusterInfo, directClient client.Reader) (*OGXServerReconciler, error) {
-	operatorNamespace, err := deploy.GetOperatorNamespace()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get operator namespace: %w", err)
-	}
-
-	configMap, err := initializeOperatorConfigMap(ctx, client, operatorNamespace)
-	if err != nil {
-		return nil, err
-	}
-
-	imageMappingOverrides := ParseImageMappingOverrides(ctx, configMap.Data)
-
+func NewOGXServerReconciler(cachedClient client.Client, scheme *runtime.Scheme,
+	clusterInfo *cluster.ClusterInfo, imageMappingOverrides map[string]string,
+	operatorNamespace string) *OGXServerReconciler {
 	ociLabelFetcher := config.NewOCILabelFetcher()
 
 	return &OGXServerReconciler{
-		Client:                client,
+		Client:                cachedClient,
 		Scheme:                scheme,
-		DirectClient:          directClient,
 		ImageMappingOverrides: imageMappingOverrides,
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		OCILabelFetcher:       ociLabelFetcher,
 		configResolver:        config.NewDefaultConfigResolver(ociLabelFetcher),
 		operatorNamespace:     operatorNamespace,
-	}, nil
+	}
 }
 
-// initializeOperatorConfigMap gets or creates the operator config ConfigMap.
-func initializeOperatorConfigMap(ctx context.Context, c client.Client, operatorNamespace string) (*corev1.ConfigMap, error) {
+// InitializeOperatorConfigMap gets or creates the operator config ConfigMap.
+func InitializeOperatorConfigMap(ctx context.Context, c client.Client, operatorNamespace string) (*corev1.ConfigMap, error) {
 	configMap := &corev1.ConfigMap{}
 	configMapName := types.NamespacedName{
 		Name:      operatorConfigData,

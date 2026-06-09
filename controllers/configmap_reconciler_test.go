@@ -35,7 +35,7 @@ func TestReconcileConfigMaps_DoesNotMutateStatusWhenInactive(t *testing.T) {
 
 	r := &OGXServerReconciler{
 		Client:       k8sClient,
-		DirectClient: k8sClient,
+
 		Scheme:       scheme,
 	}
 
@@ -75,7 +75,7 @@ func TestReconcileGeneratedConfig_HappyPath(t *testing.T) {
 
 	r := &OGXServerReconciler{
 		Client:         k8sClient,
-		DirectClient:   k8sClient,
+
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(fetcher),
 		ClusterInfo: &cluster.ClusterInfo{
@@ -128,7 +128,7 @@ func TestReconcileGeneratedConfig_SkippedWhenOverrideSet(t *testing.T) {
 
 	r := &OGXServerReconciler{
 		Client:         k8sClient,
-		DirectClient:   k8sClient,
+
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(nil),
 		ClusterInfo: &cluster.ClusterInfo{
@@ -181,7 +181,7 @@ func TestReconcileGeneratedConfig_UsesBaseConfigMap(t *testing.T) {
 
 	r := &OGXServerReconciler{
 		Client:       k8sClient,
-		DirectClient: k8sClient,
+
 		Scheme:       scheme,
 	}
 
@@ -222,7 +222,7 @@ func TestReconcileConfigMaps_LeavesStatusUnchangedWhenInactive(t *testing.T) {
 
 	r := &OGXServerReconciler{
 		Client:       k8sClient,
-		DirectClient: k8sClient,
+
 		Scheme:       scheme,
 	}
 
@@ -319,7 +319,7 @@ func TestCleanupOldGeneratedConfigMaps_KeepsReferencedReplicaSetConfig(t *testin
 
 	r := &OGXServerReconciler{
 		Client:       k8sClient,
-		DirectClient: k8sClient,
+
 		Scheme:       scheme,
 	}
 	instance := &ogxiov1beta1.OGXServer{
@@ -347,7 +347,7 @@ func TestReconcileResources_DoesNotAdvanceConfigGenerationStatusOnSecretHashFail
 
 	r := &OGXServerReconciler{
 		Client:         k8sClient,
-		DirectClient:   k8sClient,
+
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(fetcher),
 		ClusterInfo: &cluster.ClusterInfo{

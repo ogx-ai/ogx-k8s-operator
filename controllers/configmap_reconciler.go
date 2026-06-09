@@ -131,7 +131,7 @@ func (r *OGXServerReconciler) readReferencedConfigMapKey(
 	ctx context.Context, namespace string, ref ogxiov1beta1.ConfigMapKeyRef,
 ) ([]byte, error) {
 	configMap := &corev1.ConfigMap{}
-	if err := r.directGet(ctx, client.ObjectKey{Name: ref.Name, Namespace: namespace}, configMap); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: ref.Name, Namespace: namespace}, configMap); err != nil {
 		return nil, err
 	}
 
@@ -259,7 +259,7 @@ func (r *OGXServerReconciler) cleanupOldGeneratedConfigMaps(ctx context.Context,
 
 func (r *OGXServerReconciler) getGeneratedConfigMapHashByName(ctx context.Context, namespace, name string) (string, error) {
 	cm := &corev1.ConfigMap{}
-	err := r.directGet(ctx, client.ObjectKey{
+	err := r.Get(ctx, client.ObjectKey{
 		Name:      name,
 		Namespace: namespace,
 	}, cm)
