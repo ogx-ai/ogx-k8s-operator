@@ -102,7 +102,7 @@ func (r *OGXServerReconciler) resolveBaseConfig(ctx context.Context, instance *o
 	if ref := instance.Spec.BaseConfig; ref != nil {
 		data, err := r.readReferencedConfigMapKey(ctx, instance.Namespace, *ref)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve base config from ConfigMap %s/%s[%s]: %w", instance.Namespace, ref.Name, ref.Key, err)
+			return nil, &terminalError{message: fmt.Sprintf("failed to resolve base config from ConfigMap %s/%s[%s]: %v", instance.Namespace, ref.Name, ref.Key, err)}
 		}
 		logger.V(1).Info("resolved base config", "source", "configmap", "configMap", ref.Name, "key", ref.Key)
 		return data, nil
