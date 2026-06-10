@@ -302,9 +302,20 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 		container.Env = append(container.Env, secretEnvVars...)
 	}
 
-	// Finally, add the user provided env vars
+	// Apply user-provided env vars, letting them override operator defaults.
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
-		container.Env = append(container.Env, instance.Spec.Workload.Overrides.Env...)
+		overrides := make(map[string]corev1.EnvVar, len(instance.Spec.Workload.Overrides.Env))
+		for _, e := range instance.Spec.Workload.Overrides.Env {
+			overrides[e.Name] = e
+		}
+		deduped := make([]corev1.EnvVar, 0, len(container.Env))
+		for _, e := range container.Env {
+			if _, ok := overrides[e.Name]; ok {
+				continue
+			}
+			deduped = append(deduped, e)
+		}
+		container.Env = append(deduped, instance.Spec.Workload.Overrides.Env...)
 	}
 }
 

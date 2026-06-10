@@ -132,6 +132,43 @@ func TestBuildContainerSpec(t *testing.T) {
 	})
 }
 
+func TestContainerEnvVarDedup(t *testing.T) {
+	instance := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Overrides: &ogxiov1beta1.WorkloadOverrides{
+					Env: []corev1.EnvVar{
+						{Name: "OGX_WORKERS", Value: "99"},
+						{Name: "MY_CUSTOM_VAR", Value: "custom"},
+					},
+				},
+			},
+		},
+	}
+	c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
+
+	envMap := make(map[string]int)
+	for _, e := range c.Env {
+		envMap[e.Name]++
+	}
+
+	if envMap["OGX_WORKERS"] != 1 {
+		t.Errorf("expected OGX_WORKERS to appear exactly once, got %d", envMap["OGX_WORKERS"])
+	}
+	if envMap["MY_CUSTOM_VAR"] != 1 {
+		t.Errorf("expected MY_CUSTOM_VAR to appear, got %d", envMap["MY_CUSTOM_VAR"])
+	}
+
+	// Verify the user override wins
+	for _, e := range c.Env {
+		if e.Name == "OGX_WORKERS" {
+			assert.Equal(t, "99", e.Value, "user override should take precedence over operator default")
+			break
+		}
+	}
+}
+
 func TestResolveImage(t *testing.T) {
 	clusterInfo := setupTestClusterInfo(map[string]string{"ollama": "ollama-image:latest"})
 	cases := []struct {
