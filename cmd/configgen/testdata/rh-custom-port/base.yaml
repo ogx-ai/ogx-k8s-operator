@@ -1,0 +1,236 @@
+version: 2
+image_name: rh
+apis:
+- responses
+- batches
+- inference
+- tool_runtime
+- vector_io
+- files
+- file_processors
+providers:
+  inference:
+  - provider_id: ${env.VLLM_URL:+vllm-inference}
+    provider_type: remote::vllm
+    config:
+      base_url: ${env.VLLM_URL:=}
+      max_tokens: ${env.VLLM_MAX_TOKENS:=4096}
+      api_token: ${env.VLLM_API_TOKEN:=fake}
+      tls_verify: ${env.VLLM_TLS_VERIFY:=true}
+      refresh_models: ${env.VLLM_REFRESH_MODELS:=false}
+  - provider_id: ${env.VLLM_EMBEDDING_URL:+vllm-embedding}
+    provider_type: remote::vllm
+    config:
+      base_url: ${env.VLLM_EMBEDDING_URL:=}
+      max_tokens: ${env.VLLM_EMBEDDING_MAX_TOKENS:=4096}
+      api_token: ${env.VLLM_EMBEDDING_API_TOKEN:=fake}
+      tls_verify: ${env.VLLM_EMBEDDING_TLS_VERIFY:=true}
+      refresh_models: ${env.VLLM_EMBEDDING_REFRESH_MODELS:=false}
+  - provider_id: ${env.AWS_BEARER_TOKEN_BEDROCK:+bedrock}
+    provider_type: remote::bedrock
+    config:
+      api_key: ${env.AWS_BEARER_TOKEN_BEDROCK:=}
+      region_name: ${env.AWS_DEFAULT_REGION:=us-east-2}
+  - provider_id: ${env.WATSONX_API_KEY:+watsonx}
+    provider_type: remote::watsonx
+    config:
+      base_url: ${env.WATSONX_BASE_URL:=https://us-south.ml.cloud.ibm.com}
+      api_key: ${env.WATSONX_API_KEY:=}
+      project_id: ${env.WATSONX_PROJECT_ID:=}
+  - provider_id: ${env.AZURE_API_KEY:+azure}
+    provider_type: remote::azure
+    config:
+      api_key: ${env.AZURE_API_KEY:=}
+      api_base: ${env.AZURE_API_BASE:=}
+      api_version: ${env.AZURE_API_VERSION:=}
+      api_type: ${env.AZURE_API_TYPE:=}
+  - provider_id: ${env.VERTEX_AI_PROJECT:+vertexai}
+    provider_type: remote::vertexai
+    config:
+      project: ${env.VERTEX_AI_PROJECT:=}
+  - provider_id: ${env.OPENAI_API_KEY:+openai}
+    provider_type: remote::openai
+    config:
+      api_key: ${env.OPENAI_API_KEY:=}
+      base_url: ${env.OPENAI_BASE_URL:=https://api.openai.com/v1}
+  - provider_id: ${env.ENABLE_GEMINI:+gemini}
+    provider_type: remote::gemini
+    config:
+      api_key: ${env.GEMINI_API_KEY:=}
+      access_token: ${env.GEMINI_ACCESS_TOKEN:=}
+      project: ${env.GEMINI_AI_PROJECT:=}
+  vector_io:
+  - provider_id: ${env.MILVUS_ENDPOINT:+milvus-remote}
+    provider_type: remote::milvus
+    config:
+      uri: ${env.MILVUS_ENDPOINT:=}
+      token: ${env.MILVUS_TOKEN:=}
+      secure: ${env.MILVUS_SECURE:=}
+      consistency_level: ${env.MILVUS_CONSISTENCY_LEVEL:=}
+      ca_pem_path: ${env.MILVUS_CA_PEM_PATH:=}
+      client_pem_path: ${env.MILVUS_CLIENT_PEM_PATH:=}
+      client_key_path: ${env.MILVUS_CLIENT_KEY_PATH:=}
+      persistence:
+        backend: kv_default
+        namespace: vector_io::milvus_remote
+  - provider_id: ${env.ENABLE_PGVECTOR:+pgvector}
+    provider_type: remote::pgvector
+    config:
+      host: ${env.PGVECTOR_HOST:=localhost}
+      port: ${env.PGVECTOR_PORT:=5432}
+      db: ${env.PGVECTOR_DB:=}
+      user: ${env.PGVECTOR_USER:=}
+      password: ${env.PGVECTOR_PASSWORD:=}
+      persistence:
+        backend: kv_default
+        namespace: vector_io::pgvector
+  - provider_id: ${env.ENABLE_QDRANT:+qdrant-remote}
+    provider_type: remote::qdrant
+    config:
+      location: ${env.QDRANT_LOCATION:=}
+      url: ${env.QDRANT_URL:=}
+      port: ${env.QDRANT_PORT:=6333}
+      grpc_port: ${env.QDRANT_GRPC_PORT:=6334}
+      prefer_grpc: ${env.QDRANT_PREFER_GRPC:=false}
+      https: ${env.QDRANT_HTTPS:=}
+      api_key: ${env.QDRANT_API_KEY:=}
+      prefix: ${env.QDRANT_PREFIX:=}
+      timeout: ${env.QDRANT_TIMEOUT:=}
+      host: ${env.QDRANT_HOST:=}
+      persistence:
+        backend: kv_default
+        namespace: vector_io::qdrant_remote
+  responses:
+  - provider_id: meta-reference
+    provider_type: inline::builtin
+    config:
+      persistence:
+        agent_state:
+          backend: kv_default
+          namespace: agents::meta_reference
+        responses:
+          backend: sql_default
+          table_name: agents_responses
+          max_write_queue_size: 10000
+          num_writers: 4
+  tool_runtime:
+  - provider_id: brave-search
+    provider_type: remote::brave-search
+    config:
+      api_key: ${env.BRAVE_SEARCH_API_KEY:=}
+      max_results: 3
+  - provider_id: tavily-search
+    provider_type: remote::tavily-search
+    config:
+      api_key: ${env.TAVILY_SEARCH_API_KEY:=}
+      max_results: 3
+  - provider_id: file-search
+    provider_type: inline::file-search
+    config: {}
+  - provider_id: model-context-protocol
+    provider_type: remote::model-context-protocol
+    config: {}
+  files:
+  - provider_id: meta-reference-files
+    provider_type: inline::localfs
+    config:
+      storage_dir: /opt/app-root/src/.ogx/distributions/rh/files
+      metadata_store:
+        backend: sql_default
+        table_name: files_metadata
+  - provider_id: ${env.ENABLE_S3:+s3}
+    provider_type: remote::s3
+    config:
+      bucket_name: ${env.S3_BUCKET_NAME:=}
+      region: ${env.AWS_DEFAULT_REGION:=us-east-1}
+      aws_access_key_id: ${env.AWS_ACCESS_KEY_ID:=}
+      aws_secret_access_key: ${env.AWS_SECRET_ACCESS_KEY:=}
+      endpoint_url: ${env.S3_ENDPOINT_URL:=}
+      auto_create_bucket: ${env.S3_AUTO_CREATE_BUCKET:=false}
+      metadata_store:
+        backend: sql_default
+        table_name: files_metadata
+  file_processors:
+  - provider_id: pypdf
+    provider_type: inline::pypdf
+    config: {}
+  batches:
+  - provider_id: reference
+    provider_type: inline::reference
+    config:
+      sqlstore:
+        table_name: batches
+        backend: sql_default
+storage:
+  backends:
+    kv_default:
+      type: kv_postgres
+      host: ${env.POSTGRES_HOST:=localhost}
+      port: ${env.POSTGRES_PORT:=5432}
+      db: ${env.POSTGRES_DB:=ogx}
+      user: ${env.POSTGRES_USER:=ogx}
+      password: ${env.POSTGRES_PASSWORD:=ogx}
+      table_name: ${env.POSTGRES_TABLE_NAME:=ogx_kvstore}
+    sql_default:
+      type: sql_postgres
+      host: ${env.POSTGRES_HOST:=localhost}
+      port: ${env.POSTGRES_PORT:=5432}
+      db: ${env.POSTGRES_DB:=ogx}
+      user: ${env.POSTGRES_USER:=ogx}
+      password: ${env.POSTGRES_PASSWORD:=ogx}
+  stores:
+    metadata:
+      backend: kv_default
+      namespace: registry
+    inference:
+      table_name: inference_store
+      backend: sql_default
+      max_write_queue_size: 10000
+      num_writers: 4
+    conversations:
+      table_name: openai_conversations
+      backend: sql_default
+    prompts:
+      namespace: prompts
+      backend: kv_default
+    connectors:
+      table_name: connectors
+      backend: sql_default
+registered_resources:
+  models:
+  - metadata:
+      embedding_dimension: ${env.EMBEDDING_DIMENSION:=768}
+    model_id: ${env.EMBEDDING_MODEL:=}
+    provider_id: ${env.EMBEDDING_PROVIDER:=vllm-embedding}
+    provider_model_id: ${env.EMBEDDING_PROVIDER_MODEL_ID:=ibm-granite/granite-embedding-125m-english}
+    model_type: embedding
+  vector_stores: []
+vector_stores:
+  annotation_prompt_params:
+    enable_annotations: true
+    annotation_instruction_template: "Cite sources immediately at the end of sentences using <|file-id|> format."
+telemetry:
+  enabled: true
+server:
+  port: 8321
+  auth:
+    provider_config:
+      type: ${env.AUTH_ISSUER:+oauth2_token}
+      audience: ${env.AUTH_AUDIENCE:=ogx}
+      issuer: ${env.AUTH_ISSUER:=}
+      jwks:
+        uri: ${env.AUTH_JWKS_URI:=}
+        key_recheck_period: ${env.AUTH_JWKS_RECHECK_PERIOD:=3600}
+      verify_tls: ${env.AUTH_VERIFY_TLS:=true}
+    access_policy:
+    - permit:
+        actions: [read]
+      when: resource is unowned
+      description: "All users can read system resources"
+    - permit:
+        actions: [create]
+      description: "Authenticated users can create resources"
+    - permit:
+        actions: [read, update, delete]
+      when: user is owner
+      description: "Owners can manage their own resources"
