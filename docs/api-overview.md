@@ -822,7 +822,7 @@ _Appears in:_
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
 | `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 6 <br />MinItems: 1 <br />items:Enum: [batches inference responses tool_runtime vector_io files] <br /> |
+| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 7 <br />MinItems: 1 <br />items:Enum: [batches file_processors inference responses tool_runtime vector_io files] <br /> |
 | `registryRefreshIntervalSeconds` _integer_ | RegistryRefreshIntervalSeconds configures how often the server refreshes<br />its model registry, in seconds. When omitted, the server's built-in<br />default is used. |  | Minimum: 1 <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
 | `tls` _[TLSClientConfig](#tlsclientconfig)_ | TLS configures outbound TLS trust anchors and client identity for<br />connections to providers and backends. |  |  |

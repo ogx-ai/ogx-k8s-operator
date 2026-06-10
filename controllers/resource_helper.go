@@ -296,6 +296,7 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 			Name:  "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS",
 			Value: strconv.Itoa(int(*instance.Spec.RegistryRefreshIntervalSeconds)),
 		})
+	}
 	// Inject pre-computed secret env vars for provider/storage references.
 	// These are computed once in buildManifestContext to avoid redundant tree walks.
 	if len(secretEnvVars) > 0 {

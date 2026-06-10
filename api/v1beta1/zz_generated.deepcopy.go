@@ -1454,6 +1454,7 @@ func (in *OGXServerSpec) DeepCopyInto(out *OGXServerSpec) {
 		in, out := &in.Monitoring, &out.Monitoring
 		*out = new(MonitoringSpec)
 		(*in).DeepCopyInto(*out)
+	}
 	if in.BaseConfig != nil {
 		in, out := &in.BaseConfig, &out.BaseConfig
 		*out = new(ConfigMapKeyRef)

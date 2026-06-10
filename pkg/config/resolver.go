@@ -17,6 +17,7 @@ limitations under the License.
 package config
 
 import (
+	"container/list"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -111,29 +112,46 @@ func shouldCacheOCIConfig(imageRef string) bool {
 
 const maxOCICacheEntries = 64
 
-// ociConfigCache provides thread-safe caching of OCI label configs by image reference.
-// Evicts all entries when the cache exceeds maxOCICacheEntries to bound memory usage.
+type ociCacheEntry struct {
+	key  string
+	data []byte
+}
+
+// ociConfigCache provides thread-safe LRU caching of OCI label configs by image reference.
 type ociConfigCache struct {
-	mu    sync.RWMutex
-	store map[string][]byte
+	mu    sync.Mutex
+	items map[string]*list.Element
+	order list.List
 }
 
 func newOCIConfigCache() *ociConfigCache {
-	return &ociConfigCache{store: make(map[string][]byte)}
+	return &ociConfigCache{items: make(map[string]*list.Element)}
 }
 
 func (c *ociConfigCache) get(key string) ([]byte, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	data, ok := c.store[key]
-	return data, ok
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.items[key]
+	if !ok {
+		return nil, false
+	}
+	c.order.MoveToFront(elem)
+	return elem.Value.(*ociCacheEntry).data, true
 }
 
 func (c *ociConfigCache) set(key string, data []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.store) >= maxOCICacheEntries {
-		c.store = make(map[string][]byte)
+	if elem, ok := c.items[key]; ok {
+		c.order.MoveToFront(elem)
+		elem.Value.(*ociCacheEntry).data = data
+		return
 	}
-	c.store[key] = data
+	if len(c.items) >= maxOCICacheEntries {
+		oldest := c.order.Back()
+		c.order.Remove(oldest)
+		delete(c.items, oldest.Value.(*ociCacheEntry).key)
+	}
+	elem := c.order.PushFront(&ociCacheEntry{key: key, data: data})
+	c.items[key] = elem
 }
