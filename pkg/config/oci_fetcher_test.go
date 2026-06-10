@@ -266,3 +266,34 @@ func TestResolverDoesNotCacheMutableTagResult(t *testing.T) {
 		t.Errorf("expected fetcher called twice for mutable tag, called %d times", callCount)
 	}
 }
+
+func TestOCIConfigCacheLRUEviction(t *testing.T) {
+	cache := newOCIConfigCache()
+
+	// Fill to capacity
+	for i := 0; i < maxOCICacheEntries; i++ {
+		cache.set(fmt.Sprintf("key-%d", i), []byte(fmt.Sprintf("data-%d", i)))
+	}
+
+	// Access the oldest entry to make it recently used
+	data, ok := cache.get("key-0")
+	if !ok {
+		t.Fatal("expected key-0 to be in cache")
+	}
+	if string(data) != "data-0" {
+		t.Errorf("expected data-0, got %s", string(data))
+	}
+
+	// Add one more — should evict key-1 (the actual LRU), not key-0
+	cache.set("new-key", []byte("new-data"))
+
+	if _, ok := cache.get("key-0"); !ok {
+		t.Error("key-0 should still be in cache after promotion")
+	}
+	if _, ok := cache.get("key-1"); ok {
+		t.Error("key-1 should have been evicted as the LRU entry")
+	}
+	if data, ok := cache.get("new-key"); !ok || string(data) != "new-data" {
+		t.Error("new-key should be in cache")
+	}
+}

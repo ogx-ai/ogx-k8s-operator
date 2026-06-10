@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -142,17 +143,27 @@ func fetchConfigLabels(base, repo, digest, imageRef string) (map[string]string, 
 // falling back to HTTP if HTTPS fails. This mirrors Docker's behavior and
 // avoids hardcoding hostname patterns for plain-HTTP registries.
 func detectRegistryScheme(registry string) (string, error) {
+	httpsErr := false
 	for _, scheme := range []string{"https", "http"} {
 		probeURL := fmt.Sprintf("%s://%s/v2/", scheme, registry)
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, probeURL, nil)
 		if err != nil {
+			if scheme == "https" {
+				httpsErr = true
+			}
 			continue
 		}
 		resp, err := ociHTTPClient.Do(req)
 		if err != nil {
+			if scheme == "https" {
+				httpsErr = true
+			}
 			continue
 		}
 		_ = resp.Body.Close()
+		if scheme == "http" && httpsErr {
+			slog.Warn("HTTPS probe failed, falling back to HTTP for registry", "registry", registry)
+		}
 		return fmt.Sprintf("%s://%s", scheme, registry), nil
 	}
 	return "", errors.New("failed to connect on https or http")
