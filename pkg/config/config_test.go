@@ -372,8 +372,8 @@ func TestExpandProviders_InferenceVLLM(t *testing.T) {
 	if p.ProviderType != "remote::vllm" {
 		t.Errorf("expected provider_type 'remote::vllm', got %q", p.ProviderType)
 	}
-	if p.Config["url"] != "https://vllm.example.com:8000" {
-		t.Errorf("expected url, got %v", p.Config["url"])
+	if p.Config["base_url"] != "https://vllm.example.com:8000" {
+		t.Errorf("expected base_url, got %v", p.Config["base_url"])
 	}
 }
 
@@ -838,5 +838,914 @@ func TestExpandCustomProvider_NoConflict(t *testing.T) {
 	}
 	if cp.Config["endpoint"] != "https://example.com" {
 		t.Errorf("expected endpoint in config, got %v", cp.Config["endpoint"])
+	}
+}
+
+func TestExpandProviders_VLLMWithCommonInferenceConfig(t *testing.T) {
+	refreshModels := true
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				VLLM: []ogxiov1beta1.VLLMProvider{
+					{
+						Endpoint: "https://vllm.example.com:8000",
+						RemoteInferenceCommonConfig: ogxiov1beta1.RemoteInferenceCommonConfig{
+							RefreshModels: &refreshModels,
+							AllowedModels: []string{"llama3", "mistral"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	if p.Config["base_url"] != "https://vllm.example.com:8000" {
+		t.Errorf("expected base_url, got %v", p.Config["base_url"])
+	}
+	if p.Config["refresh_models"] != true {
+		t.Errorf("expected refresh_models true, got %v", p.Config["refresh_models"])
+	}
+	allowedModels, ok := p.Config["allowed_models"].([]string)
+	if !ok || len(allowedModels) != 2 || allowedModels[0] != "llama3" {
+		t.Errorf("expected allowed_models [llama3 mistral], got %v", p.Config["allowed_models"])
+	}
+}
+
+func TestExpandProviders_AzureBaseURL(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				Azure: []ogxiov1beta1.AzureProvider{
+					{
+						Endpoint: "https://my-resource.openai.azure.com/openai/v1",
+						APIKey:   ogxiov1beta1.SecretKeyRef{Name: "azure-secret", Key: "key"},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	if p.Config["base_url"] != "https://my-resource.openai.azure.com/openai/v1" {
+		t.Errorf("expected base_url, got %v", p.Config["base_url"])
+	}
+	if _, hasOldKey := p.Config["url"]; hasOldKey {
+		t.Error("config should not contain legacy 'url' key")
+	}
+}
+
+func TestExpandProviders_BedrockRegionName(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				Bedrock: []ogxiov1beta1.BedrockProvider{
+					{
+						Region: "us-east-1",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	if p.Config["region_name"] != "us-east-1" {
+		t.Errorf("expected region_name 'us-east-1', got %v", p.Config["region_name"])
+	}
+	if _, hasOldKey := p.Config["region"]; hasOldKey {
+		t.Error("config should not contain legacy 'region' key")
+	}
+}
+
+func TestExpandProviders_WatsonxBaseURL(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				Watsonx: []ogxiov1beta1.WatsonxProvider{
+					{
+						Endpoint: "https://watsonx.example.com",
+						APIKey:   ogxiov1beta1.SecretKeyRef{Name: "wx-secret", Key: "key"},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	if p.Config["base_url"] != "https://watsonx.example.com" {
+		t.Errorf("expected base_url, got %v", p.Config["base_url"])
+	}
+	if _, hasOldKey := p.Config["url"]; hasOldKey {
+		t.Error("config should not contain legacy 'url' key")
+	}
+}
+
+func TestExpandProviders_NetworkConfigNested(t *testing.T) {
+	verify := false
+	connectTimeout := 30
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				VLLM: []ogxiov1beta1.VLLMProvider{
+					{
+						Endpoint: "https://vllm.example.com:8000",
+						RemoteInferenceCommonConfig: ogxiov1beta1.RemoteInferenceCommonConfig{
+							Network: &ogxiov1beta1.NetworkConfig{
+								TLS: &ogxiov1beta1.TLSConfig{
+									Verify: &verify,
+								},
+								Timeout: &ogxiov1beta1.TimeoutConfig{
+									Connect: &connectTimeout,
+								},
+								Headers: map[string]string{
+									"X-Custom": "value",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	network, ok := p.Config["network"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested 'network' map, got %T: %v", p.Config["network"], p.Config["network"])
+	}
+	tls, ok := network["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected tls map inside network, got %v", network["tls"])
+	}
+	if tls["verify"] != false {
+		t.Errorf("expected tls verify false, got %v", tls["verify"])
+	}
+	timeout, ok := network["timeout"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected timeout map inside network, got %v", network["timeout"])
+	}
+	if timeout["connect"] != 30 {
+		t.Errorf("expected connect timeout 30, got %v", timeout["connect"])
+	}
+	headers, ok := network["headers"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected headers map inside network, got %v", network["headers"])
+	}
+	if headers["X-Custom"] != "value" {
+		t.Errorf("expected X-Custom header, got %v", headers["X-Custom"])
+	}
+
+	if _, flat := p.Config["tls"]; flat {
+		t.Error("tls should not appear at provider config root")
+	}
+	if _, flat := p.Config["timeout"]; flat {
+		t.Error("timeout should not appear at provider config root")
+	}
+	if _, flat := p.Config["headers"]; flat {
+		t.Error("headers should not appear at provider config root")
+	}
+}
+
+func TestExpandProviders_NetworkConfigWithProxy(t *testing.T) {
+	proxyURL := "http://proxy.example.com:8080"
+	proxyHTTPS := "http://proxy.example.com:8443"
+	caCert := "/etc/ssl/proxy-ca.crt"
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				VLLM: []ogxiov1beta1.VLLMProvider{
+					{
+						Endpoint: "https://vllm.example.com:8000",
+						RemoteInferenceCommonConfig: ogxiov1beta1.RemoteInferenceCommonConfig{
+							Network: &ogxiov1beta1.NetworkConfig{
+								Proxy: &ogxiov1beta1.ProxyConfig{
+									URL:     &proxyURL,
+									HTTPS:   &proxyHTTPS,
+									CACert:  &caCert,
+									NoProxy: []string{"localhost", "10.0.0.0/8"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	network, ok := p.Config["network"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested 'network' map, got %v", p.Config["network"])
+	}
+	proxy, ok := network["proxy"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected proxy map inside network, got %v", network["proxy"])
+	}
+	if proxy["url"] != proxyURL {
+		t.Errorf("expected proxy url %q, got %v", proxyURL, proxy["url"])
+	}
+	if proxy["https"] != proxyHTTPS {
+		t.Errorf("expected proxy https %q, got %v", proxyHTTPS, proxy["https"])
+	}
+	if proxy["ca_cert"] != caCert {
+		t.Errorf("expected proxy ca_cert %q, got %v", caCert, proxy["ca_cert"])
+	}
+	noProxy, ok := proxy["no_proxy"].([]string)
+	if !ok || len(noProxy) != 2 {
+		t.Errorf("expected 2 no_proxy entries, got %v", proxy["no_proxy"])
+	}
+}
+
+func TestExpandProviders_NetworkConfigNilIsOmitted(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Inference: &ogxiov1beta1.InferenceProvidersSpec{
+			Remote: &ogxiov1beta1.InferenceRemoteProviders{
+				VLLM: []ogxiov1beta1.VLLMProvider{
+					{
+						Endpoint: "https://vllm.example.com:8000",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["inference"][0]
+	if _, hasNetwork := p.Config["network"]; hasNetwork {
+		t.Error("expected no 'network' key when network config is nil")
+	}
+}
+
+func TestExpandProviders_QdrantAllFields(t *testing.T) {
+	port := 6333
+	grpcPort := 6334
+	preferGRPC := true
+	https := true
+	timeout := 30
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Qdrant: []ogxiov1beta1.QdrantProvider{
+					{
+						URL:        "http://qdrant:6333",
+						Host:       "qdrant.example.com",
+						Port:       &port,
+						APIKey:     &ogxiov1beta1.SecretKeyRef{Name: "qdrant-secret", Key: "api-key"},
+						Location:   "us-east-1",
+						GRPCPort:   &grpcPort,
+						PreferGRPC: &preferGRPC,
+						HTTPS:      &https,
+						Prefix:     "/v1",
+						Timeout:    &timeout,
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["vector_io"][0]
+	if p.ProviderType != "remote::qdrant" {
+		t.Errorf("expected provider_type 'remote::qdrant', got %q", p.ProviderType)
+	}
+	if p.Config["url"] != "http://qdrant:6333" {
+		t.Errorf("expected url, got %v", p.Config["url"])
+	}
+	if p.Config["host"] != "qdrant.example.com" {
+		t.Errorf("expected host, got %v", p.Config["host"])
+	}
+	if p.Config["port"] != 6333 {
+		t.Errorf("expected port 6333, got %v", p.Config["port"])
+	}
+	if p.Config["location"] != "us-east-1" {
+		t.Errorf("expected location, got %v", p.Config["location"])
+	}
+	if p.Config["grpc_port"] != 6334 {
+		t.Errorf("expected grpc_port 6334, got %v", p.Config["grpc_port"])
+	}
+	if p.Config["prefer_grpc"] != true {
+		t.Errorf("expected prefer_grpc true, got %v", p.Config["prefer_grpc"])
+	}
+	if p.Config["https"] != true {
+		t.Errorf("expected https true, got %v", p.Config["https"])
+	}
+	if p.Config["prefix"] != "/v1" {
+		t.Errorf("expected prefix '/v1', got %v", p.Config["prefix"])
+	}
+	if p.Config["timeout"] != 30 {
+		t.Errorf("expected timeout 30, got %v", p.Config["timeout"])
+	}
+}
+
+func TestExpandProviders_QdrantMinimalWithHost(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Qdrant: []ogxiov1beta1.QdrantProvider{
+					{
+						Host: "qdrant.example.com",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["vector_io"][0]
+	if p.Config["host"] != "qdrant.example.com" {
+		t.Errorf("expected host, got %v", p.Config["host"])
+	}
+	if _, hasURL := p.Config["url"]; hasURL {
+		t.Error("url should not be set when only host is provided")
+	}
+}
+
+func TestExpandProviders_PgvectorWithVectorIndex(t *testing.T) {
+	m := 16
+	efConstruction := 200
+	efSearch := 100
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Pgvector: []ogxiov1beta1.PgvectorProvider{
+					{
+						Host:           "pg.example.com",
+						Password:       ogxiov1beta1.SecretKeyRef{Name: "pg-secret", Key: "password"},
+						DistanceMetric: "COSINE",
+						VectorIndex: &ogxiov1beta1.VectorIndexConfig{
+							HNSW: &ogxiov1beta1.HNSWConfig{
+								M:              &m,
+								EfConstruction: &efConstruction,
+								EfSearch:       &efSearch,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["vector_io"][0]
+	if p.ProviderType != "remote::pgvector" {
+		t.Errorf("expected provider_type 'remote::pgvector', got %q", p.ProviderType)
+	}
+	if p.Config["distance_metric"] != "COSINE" {
+		t.Errorf("expected distance_metric 'COSINE', got %v", p.Config["distance_metric"])
+	}
+
+	vi, ok := p.Config["vector_index"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected vector_index map, got %v", p.Config["vector_index"])
+	}
+	hnsw, ok := vi["hnsw"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected hnsw map, got %v", vi["hnsw"])
+	}
+	if hnsw["m"] != 16 {
+		t.Errorf("expected hnsw m=16, got %v", hnsw["m"])
+	}
+	if hnsw["ef_construction"] != 200 {
+		t.Errorf("expected hnsw ef_construction=200, got %v", hnsw["ef_construction"])
+	}
+	if hnsw["ef_search"] != 100 {
+		t.Errorf("expected hnsw ef_search=100, got %v", hnsw["ef_search"])
+	}
+}
+
+func TestExpandProviders_PgvectorWithIVFFlat(t *testing.T) {
+	nlist := 128
+	nprobe := 10
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Pgvector: []ogxiov1beta1.PgvectorProvider{
+					{
+						Password: ogxiov1beta1.SecretKeyRef{Name: "pg-secret", Key: "password"},
+						VectorIndex: &ogxiov1beta1.VectorIndexConfig{
+							IVFFlat: &ogxiov1beta1.IVFFlatConfig{
+								Nlist:  &nlist,
+								Nprobe: &nprobe,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	vi, ok := result["vector_io"][0].Config["vector_index"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected vector_index map, got %v", result["vector_io"][0].Config["vector_index"])
+	}
+	ivf, ok := vi["ivf_flat"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected ivf_flat map, got %v", vi["ivf_flat"])
+	}
+	if ivf["nlist"] != 128 {
+		t.Errorf("expected nlist=128, got %v", ivf["nlist"])
+	}
+	if ivf["nprobe"] != 10 {
+		t.Errorf("expected nprobe=10, got %v", ivf["nprobe"])
+	}
+}
+
+func TestExpandProviders_MilvusWithConsistencyLevel(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Milvus: []ogxiov1beta1.MilvusProvider{
+					{
+						URI:              "http://milvus:19530",
+						ConsistencyLevel: "Strong",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["vector_io"][0]
+	if p.ProviderType != "remote::milvus" {
+		t.Errorf("expected provider_type 'remote::milvus', got %q", p.ProviderType)
+	}
+	if p.Config["consistency_level"] != "Strong" {
+		t.Errorf("expected consistency_level 'Strong', got %v", p.Config["consistency_level"])
+	}
+}
+
+func TestExpandProviders_BatchReference(t *testing.T) {
+	maxBatches := 5
+	maxRequestsPerBatch := 100
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Batches: &ogxiov1beta1.BatchesProvidersSpec{
+			Inline: &ogxiov1beta1.BatchesInlineProviders{
+				Reference: &ogxiov1beta1.InlineReferenceProvider{
+					MaxConcurrentBatches:          &maxBatches,
+					MaxConcurrentRequestsPerBatch: &maxRequestsPerBatch,
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["batches"][0]
+	if p.ProviderType != "inline::batch-reference" {
+		t.Errorf("expected provider_type 'inline::batch-reference', got %q", p.ProviderType)
+	}
+	if p.Config["max_concurrent_batches"] != 5 {
+		t.Errorf("expected max_concurrent_batches=5, got %v", p.Config["max_concurrent_batches"])
+	}
+	if p.Config["max_concurrent_requests_per_batch"] != 100 {
+		t.Errorf("expected max_concurrent_requests_per_batch=100, got %v", p.Config["max_concurrent_requests_per_batch"])
+	}
+}
+
+func TestExpandProviders_BatchReferenceEmpty(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Batches: &ogxiov1beta1.BatchesProvidersSpec{
+			Inline: &ogxiov1beta1.BatchesInlineProviders{
+				Reference: &ogxiov1beta1.InlineReferenceProvider{},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["batches"][0]
+	if len(p.Config) != 0 {
+		t.Errorf("expected empty config for default reference provider, got %v", p.Config)
+	}
+}
+
+func TestExpandProviders_InlineFileSearchWithVectorStoresConfig(t *testing.T) {
+	embeddingDim := 768
+	providers := &ogxiov1beta1.ProvidersSpec{
+		ToolRuntime: &ogxiov1beta1.ToolRuntimeProvidersSpec{
+			Inline: &ogxiov1beta1.ToolRuntimeInlineProviders{
+				FileSearch: []ogxiov1beta1.InlineFileSearchProvider{
+					{
+						VectorStoresConfig: &ogxiov1beta1.VectorStoresConfig{
+							DefaultProviderID: "pgvector-1",
+							DefaultEmbeddingModel: &ogxiov1beta1.QualifiedModel{
+								ProviderID:          "embed-provider",
+								ModelID:             "all-MiniLM-L6-v2",
+								EmbeddingDimensions: &embeddingDim,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["tool_runtime"][0]
+	if p.ProviderType != "inline::rag-runtime" {
+		t.Errorf("expected provider_type 'inline::rag-runtime', got %q", p.ProviderType)
+	}
+	vs, ok := p.Config["vector_stores_config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected vector_stores_config map, got %v", p.Config["vector_stores_config"])
+	}
+	if vs["default_provider_id"] != "pgvector-1" {
+		t.Errorf("expected default_provider_id, got %v", vs["default_provider_id"])
+	}
+	emb, ok := vs["default_embedding_model"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected default_embedding_model map, got %v", vs["default_embedding_model"])
+	}
+	if emb["provider_id"] != "embed-provider" {
+		t.Errorf("expected provider_id 'embed-provider', got %v", emb["provider_id"])
+	}
+	if emb["model_id"] != "all-MiniLM-L6-v2" {
+		t.Errorf("expected model_id, got %v", emb["model_id"])
+	}
+	if emb["embedding_dimensions"] != 768 {
+		t.Errorf("expected embedding_dimensions 768, got %v", emb["embedding_dimensions"])
+	}
+}
+
+func TestExpandProviders_BuiltinResponsesWithVectorStoresAndCompaction(t *testing.T) {
+	compactThreshold := 4096
+	chunkSize := 512
+	chunkOverlap := 50
+	maxTokens := 256
+	temperature := "0.7"
+	enableAnnotations := true
+	chunkMultiplier := 3
+	maxTokensInContext := 2048
+	rerankerStrategy := "rrf"
+	rrfFactor := "60.0"
+	searchAlpha := "0.5"
+	searchMode := "hybrid"
+	maxFilesPerBatch := 10
+	batchChunkSize := 5
+	cleanupInterval := 3600
+	contextTimeout := 30
+	contextConcurrency := 4
+	maxDocTokens := 8000
+
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Responses: &ogxiov1beta1.ResponsesProvidersSpec{
+			Inline: &ogxiov1beta1.ResponsesInlineProviders{
+				Builtin: &ogxiov1beta1.InlineBuiltinResponsesProvider{
+					VectorStoresConfig: &ogxiov1beta1.VectorStoresConfig{
+						DefaultProviderID: "qdrant-1",
+						DefaultRerankerModel: &ogxiov1beta1.RerankerModel{
+							ProviderID: "reranker-provider",
+							ModelID:    "bge-reranker-v2",
+						},
+						RewriteQueryParams: &ogxiov1beta1.RewriteQueryParams{
+							Model: &ogxiov1beta1.QualifiedModel{
+								ProviderID: "llm-provider",
+								ModelID:    "llama3",
+							},
+							Prompt:      "Rewrite: {query}",
+							MaxTokens:   &maxTokens,
+							Temperature: &temperature,
+						},
+						FileSearchParams: &ogxiov1beta1.FileSearchDisplayParams{
+							HeaderTemplate: "=== Results ===",
+							FooterTemplate: "=== End ===",
+						},
+						ContextPromptParams: &ogxiov1beta1.ContextPromptParams{
+							ChunkAnnotationTemplate: "Chunk: {{content}}",
+							ContextTemplate:         "Context: {{chunks}}",
+						},
+						AnnotationPromptParams: &ogxiov1beta1.AnnotationPromptParams{
+							EnableAnnotations:             &enableAnnotations,
+							AnnotationInstructionTemplate: "Cite sources",
+							ChunkAnnotationTemplate:       "Source: {{source}}",
+						},
+						FileIngestionParams: &ogxiov1beta1.FileIngestionParams{
+							DefaultChunkSizeTokens:    &chunkSize,
+							DefaultChunkOverlapTokens: &chunkOverlap,
+						},
+						ChunkRetrievalParams: &ogxiov1beta1.ChunkRetrievalParams{
+							ChunkMultiplier:         &chunkMultiplier,
+							MaxTokensInContext:      &maxTokensInContext,
+							DefaultRerankerStrategy: &rerankerStrategy,
+							RRFImpactFactor:         &rrfFactor,
+							WeightedSearchAlpha:     &searchAlpha,
+							DefaultSearchMode:       &searchMode,
+						},
+						FileBatchParams: &ogxiov1beta1.FileBatchParams{
+							MaxConcurrentFilesPerBatch: &maxFilesPerBatch,
+							FileBatchChunkSize:         &batchChunkSize,
+							CleanupIntervalSeconds:     &cleanupInterval,
+						},
+						ContextualRetrievalParams: &ogxiov1beta1.ContextualRetrievalParams{
+							Model: &ogxiov1beta1.QualifiedModel{
+								ProviderID: "ctx-provider",
+								ModelID:    "ctx-model",
+							},
+							DefaultTimeoutSeconds: &contextTimeout,
+							DefaultMaxConcurrency: &contextConcurrency,
+							MaxDocumentTokens:     &maxDocTokens,
+						},
+					},
+					CompactionConfig: &ogxiov1beta1.CompactionConfig{
+						SummarizationPrompt:     "Summarize this conversation",
+						SummaryPrefix:           "Previous context: ",
+						SummarizationModel:      "llama3-8b",
+						DefaultCompactThreshold: &compactThreshold,
+						TokenizerEncoding:       "cl100k_base",
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["responses"][0]
+	if p.ProviderType != "inline::responses" {
+		t.Errorf("expected provider_type 'inline::responses', got %q", p.ProviderType)
+	}
+	if p.ProviderID != "inline-builtin" {
+		t.Errorf("expected provider_id 'inline-builtin', got %q", p.ProviderID)
+	}
+
+	vs, ok := p.Config["vector_stores_config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected vector_stores_config map, got %v", p.Config["vector_stores_config"])
+	}
+	if vs["default_provider_id"] != "qdrant-1" {
+		t.Errorf("expected default_provider_id, got %v", vs["default_provider_id"])
+	}
+
+	reranker, ok := vs["default_reranker_model"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected default_reranker_model map, got %v", vs["default_reranker_model"])
+	}
+	if reranker["provider_id"] != "reranker-provider" || reranker["model_id"] != "bge-reranker-v2" {
+		t.Errorf("unexpected reranker model: %v", reranker)
+	}
+
+	rqp, ok := vs["rewrite_query_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected rewrite_query_params map, got %v", vs["rewrite_query_params"])
+	}
+	if rqp["prompt"] != "Rewrite: {query}" {
+		t.Errorf("expected rewrite prompt, got %v", rqp["prompt"])
+	}
+	if rqp["max_tokens"] != 256 {
+		t.Errorf("expected max_tokens 256, got %v", rqp["max_tokens"])
+	}
+	if rqp["temperature"] != "0.7" {
+		t.Errorf("expected temperature '0.7', got %v", rqp["temperature"])
+	}
+
+	fsp, ok := vs["file_search_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected file_search_params map, got %v", vs["file_search_params"])
+	}
+	if fsp["header_template"] != "=== Results ===" {
+		t.Errorf("expected header_template, got %v", fsp["header_template"])
+	}
+	if fsp["footer_template"] != "=== End ===" {
+		t.Errorf("expected footer_template, got %v", fsp["footer_template"])
+	}
+
+	cpp, ok := vs["context_prompt_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected context_prompt_params map, got %v", vs["context_prompt_params"])
+	}
+	if cpp["chunk_annotation_template"] != "Chunk: {{content}}" {
+		t.Errorf("expected chunk_annotation_template, got %v", cpp["chunk_annotation_template"])
+	}
+	if cpp["context_template"] != "Context: {{chunks}}" {
+		t.Errorf("expected context_template, got %v", cpp["context_template"])
+	}
+
+	app, ok := vs["annotation_prompt_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected annotation_prompt_params map, got %v", vs["annotation_prompt_params"])
+	}
+	if app["enable_annotations"] != true {
+		t.Errorf("expected enable_annotations true, got %v", app["enable_annotations"])
+	}
+
+	fip, ok := vs["file_ingestion_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected file_ingestion_params map, got %v", vs["file_ingestion_params"])
+	}
+	if fip["default_chunk_size_tokens"] != 512 {
+		t.Errorf("expected chunk_size 512, got %v", fip["default_chunk_size_tokens"])
+	}
+	if fip["default_chunk_overlap_tokens"] != 50 {
+		t.Errorf("expected chunk_overlap 50, got %v", fip["default_chunk_overlap_tokens"])
+	}
+
+	crp, ok := vs["chunk_retrieval_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected chunk_retrieval_params map, got %v", vs["chunk_retrieval_params"])
+	}
+	if crp["chunk_multiplier"] != 3 {
+		t.Errorf("expected chunk_multiplier 3, got %v", crp["chunk_multiplier"])
+	}
+	if crp["default_reranker_strategy"] != "rrf" {
+		t.Errorf("expected default_reranker_strategy 'rrf', got %v", crp["default_reranker_strategy"])
+	}
+	if crp["default_search_mode"] != "hybrid" {
+		t.Errorf("expected default_search_mode 'hybrid', got %v", crp["default_search_mode"])
+	}
+
+	fbp, ok := vs["file_batch_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected file_batch_params map, got %v", vs["file_batch_params"])
+	}
+	if fbp["max_concurrent_files_per_batch"] != 10 {
+		t.Errorf("expected max_concurrent_files_per_batch 10, got %v", fbp["max_concurrent_files_per_batch"])
+	}
+
+	ctx, ok := vs["contextual_retrieval_params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected contextual_retrieval_params map, got %v", vs["contextual_retrieval_params"])
+	}
+	if ctx["default_timeout_seconds"] != 30 {
+		t.Errorf("expected default_timeout_seconds 30, got %v", ctx["default_timeout_seconds"])
+	}
+	if ctx["max_document_tokens"] != 8000 {
+		t.Errorf("expected max_document_tokens 8000, got %v", ctx["max_document_tokens"])
+	}
+
+	cc, ok := p.Config["compaction_config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected compaction_config map, got %v", p.Config["compaction_config"])
+	}
+	if cc["summarization_prompt"] != "Summarize this conversation" {
+		t.Errorf("expected summarization_prompt, got %v", cc["summarization_prompt"])
+	}
+	if cc["summary_prefix"] != "Previous context: " {
+		t.Errorf("expected summary_prefix, got %v", cc["summary_prefix"])
+	}
+	if cc["summarization_model"] != "llama3-8b" {
+		t.Errorf("expected summarization_model, got %v", cc["summarization_model"])
+	}
+	if cc["default_compact_threshold"] != 4096 {
+		t.Errorf("expected default_compact_threshold 4096, got %v", cc["default_compact_threshold"])
+	}
+	if cc["tokenizer_encoding"] != "cl100k_base" {
+		t.Errorf("expected tokenizer_encoding, got %v", cc["tokenizer_encoding"])
+	}
+}
+
+func TestExpandProviders_BuiltinResponsesEmpty(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		Responses: &ogxiov1beta1.ResponsesProvidersSpec{
+			Inline: &ogxiov1beta1.ResponsesInlineProviders{
+				Builtin: &ogxiov1beta1.InlineBuiltinResponsesProvider{},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := result["responses"][0]
+	if len(p.Config) != 0 {
+		t.Errorf("expected empty config for default builtin responses, got %v", p.Config)
+	}
+}
+
+func TestExpandResources_WithQuantization(t *testing.T) {
+	providers := map[string][]ConfigProvider{
+		"inference": {
+			{ProviderID: "vllm-1", ProviderType: "remote::vllm"},
+		},
+	}
+
+	resources := &ogxiov1beta1.ResourcesSpec{
+		Models: []ogxiov1beta1.ModelConfig{
+			{
+				Name:         "llama3-8b-int8",
+				Provider:     "vllm-1",
+				Quantization: "int8",
+			},
+		},
+	}
+
+	models, err := ExpandResources(resources, providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	if models[0].Quantization != "int8" {
+		t.Errorf("expected quantization 'int8', got %q", models[0].Quantization)
+	}
+}
+
+func TestGenerateConfig_ModelQuantizationInYAML(t *testing.T) {
+	baseConfig := `version: '2'
+providers:
+  inference:
+  - provider_id: vllm
+    provider_type: remote::vllm
+    config: {}
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			Inference: &ogxiov1beta1.InferenceProvidersSpec{
+				Remote: &ogxiov1beta1.InferenceRemoteProviders{
+					VLLM: []ogxiov1beta1.VLLMProvider{
+						{Endpoint: "https://vllm:8000"},
+					},
+				},
+			},
+		},
+		Resources: &ogxiov1beta1.ResourcesSpec{
+			Models: []ogxiov1beta1.ModelConfig{
+				{
+					Name:         "llama3-8b-int4",
+					Quantization: "int4",
+				},
+			},
+		},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(generated.ConfigYAML, "quantization: int4") {
+		t.Errorf("expected quantization in generated YAML, got:\n%s", generated.ConfigYAML)
 	}
 }

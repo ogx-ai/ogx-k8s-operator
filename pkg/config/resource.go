@@ -57,6 +57,9 @@ func ExpandResources(resources *ogxiov1beta1.ResourcesSpec, providers map[string
 		if m.ContextLength != nil {
 			model.ContextLength = m.ContextLength
 		}
+		if m.Quantization != "" {
+			model.Quantization = m.Quantization
+		}
 		models = append(models, model)
 	}
 

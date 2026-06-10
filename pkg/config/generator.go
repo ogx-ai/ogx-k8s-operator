@@ -159,6 +159,9 @@ func serializeModels(models []ConfigModel) []interface{} {
 		if m.ContextLength != nil {
 			entry["context_length"] = *m.ContextLength
 		}
+		if m.Quantization != "" {
+			entry["quantization"] = m.Quantization
+		}
 		list = append(list, entry)
 	}
 	return list

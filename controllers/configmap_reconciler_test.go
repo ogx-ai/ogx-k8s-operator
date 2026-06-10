@@ -34,9 +34,9 @@ func TestReconcileConfigMaps_DoesNotMutateStatusWhenInactive(t *testing.T) {
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	r := &OGXServerReconciler{
-		Client:       k8sClient,
+		Client: k8sClient,
 
-		Scheme:       scheme,
+		Scheme: scheme,
 	}
 
 	instance := &ogxiov1beta1.OGXServer{
@@ -74,7 +74,7 @@ func TestReconcileGeneratedConfig_HappyPath(t *testing.T) {
 	}
 
 	r := &OGXServerReconciler{
-		Client:         k8sClient,
+		Client: k8sClient,
 
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(fetcher),
@@ -127,7 +127,7 @@ func TestReconcileGeneratedConfig_SkippedWhenOverrideSet(t *testing.T) {
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	r := &OGXServerReconciler{
-		Client:         k8sClient,
+		Client: k8sClient,
 
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(nil),
@@ -180,9 +180,9 @@ func TestReconcileGeneratedConfig_UsesBaseConfigMap(t *testing.T) {
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(baseConfig).Build()
 
 	r := &OGXServerReconciler{
-		Client:       k8sClient,
+		Client: k8sClient,
 
-		Scheme:       scheme,
+		Scheme: scheme,
 	}
 
 	instance := &ogxiov1beta1.OGXServer{
@@ -221,9 +221,9 @@ func TestReconcileConfigMaps_LeavesStatusUnchangedWhenInactive(t *testing.T) {
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	r := &OGXServerReconciler{
-		Client:       k8sClient,
+		Client: k8sClient,
 
-		Scheme:       scheme,
+		Scheme: scheme,
 	}
 
 	instance := &ogxiov1beta1.OGXServer{
@@ -318,9 +318,9 @@ func TestCleanupOldGeneratedConfigMaps_KeepsReferencedReplicaSetConfig(t *testin
 		Build()
 
 	r := &OGXServerReconciler{
-		Client:       k8sClient,
+		Client: k8sClient,
 
-		Scheme:       scheme,
+		Scheme: scheme,
 	}
 	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "test-ns"},
@@ -346,7 +346,7 @@ func TestReconcileResources_DoesNotAdvanceConfigGenerationStatusOnSecretHashFail
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	r := &OGXServerReconciler{
-		Client:         k8sClient,
+		Client: k8sClient,
 
 		Scheme:         scheme,
 		configResolver: config.NewDefaultConfigResolver(fetcher),

@@ -135,7 +135,7 @@ func appendCustomProviders(providers *[]ConfigProvider, custom []ogxiov1beta1.Cu
 
 func expandVLLMProvider(p ogxiov1beta1.VLLMProvider) ConfigProvider {
 	cfg := map[string]interface{}{
-		"url": p.Endpoint,
+		"base_url": p.Endpoint,
 	}
 	if p.MaxTokens != nil {
 		cfg["max_tokens"] = *p.MaxTokens
@@ -143,7 +143,7 @@ func expandVLLMProvider(p ogxiov1beta1.VLLMProvider) ConfigProvider {
 	if p.APIToken != nil {
 		cfg["api_token"] = envVarRef(p.DeriveID(), "API_TOKEN")
 	}
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -157,9 +157,9 @@ func expandOpenAIProvider(p ogxiov1beta1.OpenAIProvider) ConfigProvider {
 		"api_key": envVarRef(p.DeriveID(), "API_KEY"),
 	}
 	if p.Endpoint != "" {
-		cfg["url"] = p.Endpoint
+		cfg["base_url"] = p.Endpoint
 	}
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -170,8 +170,8 @@ func expandOpenAIProvider(p ogxiov1beta1.OpenAIProvider) ConfigProvider {
 
 func expandAzureProvider(p ogxiov1beta1.AzureProvider) ConfigProvider {
 	cfg := map[string]interface{}{
-		"url":     p.Endpoint,
-		"api_key": envVarRef(p.DeriveID(), "API_KEY"),
+		"base_url": p.Endpoint,
+		"api_key":  envVarRef(p.DeriveID(), "API_KEY"),
 	}
 	if p.APIVersion != "" {
 		cfg["api_version"] = p.APIVersion
@@ -179,7 +179,7 @@ func expandAzureProvider(p ogxiov1beta1.AzureProvider) ConfigProvider {
 	if p.APIType != "" {
 		cfg["api_type"] = p.APIType
 	}
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -190,7 +190,7 @@ func expandAzureProvider(p ogxiov1beta1.AzureProvider) ConfigProvider {
 
 func expandBedrockProvider(p ogxiov1beta1.BedrockProvider) ConfigProvider {
 	cfg := map[string]interface{}{
-		"region": p.Region,
+		"region_name": p.Region,
 	}
 	id := p.DeriveID()
 	setSecretRef(cfg, "api_key", id, "API_KEY", p.APIKey)
@@ -206,13 +206,23 @@ func expandBedrockProvider(p ogxiov1beta1.BedrockProvider) ConfigProvider {
 	setIntPtr(cfg, "connect_timeout", p.ConnectTimeout)
 	setIntPtr(cfg, "read_timeout", p.ReadTimeout)
 	setIntPtr(cfg, "session_ttl", p.SessionTTL)
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   id,
 		ProviderType: "remote::bedrock",
 		Config:       cfg,
 	}
+}
+
+func applyCommonInferenceConfig(cfg map[string]interface{}, c ogxiov1beta1.RemoteInferenceCommonConfig) {
+	if c.RefreshModels != nil {
+		cfg["refresh_models"] = *c.RefreshModels
+	}
+	if len(c.AllowedModels) > 0 {
+		cfg["allowed_models"] = c.AllowedModels
+	}
+	applyNetworkConfig(cfg, c.Network)
 }
 
 func setSecretRef(cfg map[string]interface{}, key, providerID, field string, ref *ogxiov1beta1.SecretKeyRef) {
@@ -240,7 +250,7 @@ func expandVertexAIProvider(p ogxiov1beta1.VertexAIProvider) ConfigProvider {
 	if p.Location != "" {
 		cfg["location"] = p.Location
 	}
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -254,7 +264,7 @@ func expandWatsonxProvider(p ogxiov1beta1.WatsonxProvider) ConfigProvider {
 		"api_key": envVarRef(p.DeriveID(), "API_KEY"),
 	}
 	if p.Endpoint != "" {
-		cfg["url"] = p.Endpoint
+		cfg["base_url"] = p.Endpoint
 	}
 	if p.ProjectID != "" {
 		cfg["project_id"] = p.ProjectID
@@ -262,7 +272,7 @@ func expandWatsonxProvider(p ogxiov1beta1.WatsonxProvider) ConfigProvider {
 	if p.Timeout != nil {
 		cfg["timeout"] = *p.Timeout
 	}
-	applyNetworkConfig(cfg, p.Network)
+	applyCommonInferenceConfig(cfg, p.RemoteInferenceCommonConfig)
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -337,6 +347,36 @@ func expandPgvectorProvider(p ogxiov1beta1.PgvectorProvider) ConfigProvider {
 		cfg["user"] = p.User
 	}
 	cfg["password"] = envVarRef(p.DeriveID(), "PASSWORD")
+	if p.DistanceMetric != "" {
+		cfg["distance_metric"] = p.DistanceMetric
+	}
+	if p.VectorIndex != nil {
+		vi := map[string]interface{}{}
+		if p.VectorIndex.HNSW != nil {
+			hnsw := map[string]interface{}{}
+			if p.VectorIndex.HNSW.M != nil {
+				hnsw["m"] = *p.VectorIndex.HNSW.M
+			}
+			if p.VectorIndex.HNSW.EfConstruction != nil {
+				hnsw["ef_construction"] = *p.VectorIndex.HNSW.EfConstruction
+			}
+			if p.VectorIndex.HNSW.EfSearch != nil {
+				hnsw["ef_search"] = *p.VectorIndex.HNSW.EfSearch
+			}
+			vi["hnsw"] = hnsw
+		}
+		if p.VectorIndex.IVFFlat != nil {
+			ivf := map[string]interface{}{}
+			if p.VectorIndex.IVFFlat.Nlist != nil {
+				ivf["nlist"] = *p.VectorIndex.IVFFlat.Nlist
+			}
+			if p.VectorIndex.IVFFlat.Nprobe != nil {
+				ivf["nprobe"] = *p.VectorIndex.IVFFlat.Nprobe
+			}
+			vi["ivf_flat"] = ivf
+		}
+		cfg["vector_index"] = vi
+	}
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -352,6 +392,9 @@ func expandMilvusProvider(p ogxiov1beta1.MilvusProvider) ConfigProvider {
 	if p.Token != nil {
 		cfg["token"] = envVarRef(p.DeriveID(), "TOKEN")
 	}
+	if p.ConsistencyLevel != "" {
+		cfg["consistency_level"] = p.ConsistencyLevel
+	}
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
@@ -361,11 +404,36 @@ func expandMilvusProvider(p ogxiov1beta1.MilvusProvider) ConfigProvider {
 }
 
 func expandQdrantProvider(p ogxiov1beta1.QdrantProvider) ConfigProvider {
-	cfg := map[string]interface{}{
-		"url": p.URL,
+	cfg := map[string]interface{}{}
+	if p.URL != "" {
+		cfg["url"] = p.URL
+	}
+	if p.Host != "" {
+		cfg["host"] = p.Host
+	}
+	if p.Port != nil {
+		cfg["port"] = *p.Port
 	}
 	if p.APIKey != nil {
 		cfg["api_key"] = envVarRef(p.DeriveID(), "API_KEY")
+	}
+	if p.Location != "" {
+		cfg["location"] = p.Location
+	}
+	if p.GRPCPort != nil {
+		cfg["grpc_port"] = *p.GRPCPort
+	}
+	if p.PreferGRPC != nil {
+		cfg["prefer_grpc"] = *p.PreferGRPC
+	}
+	if p.HTTPS != nil {
+		cfg["https"] = *p.HTTPS
+	}
+	if p.Prefix != "" {
+		cfg["prefix"] = p.Prefix
+	}
+	if p.Timeout != nil {
+		cfg["timeout"] = *p.Timeout
 	}
 
 	return ConfigProvider{
@@ -442,7 +510,9 @@ func expandMCPProvider(p ogxiov1beta1.ModelContextProtocolProvider) ConfigProvid
 
 func expandInlineFileSearchProvider(p ogxiov1beta1.InlineFileSearchProvider) ConfigProvider {
 	cfg := map[string]interface{}{}
-
+	if p.VectorStoresConfig != nil {
+		cfg["vector_stores_config"] = expandVectorStoresConfig(p.VectorStoresConfig)
+	}
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
 		ProviderType: "inline::rag-runtime",
@@ -530,10 +600,17 @@ func expandBatchesProviders(spec *ogxiov1beta1.BatchesProvidersSpec) ([]ConfigPr
 }
 
 func expandReferenceProvider(p ogxiov1beta1.InlineReferenceProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	if p.MaxConcurrentBatches != nil {
+		cfg["max_concurrent_batches"] = *p.MaxConcurrentBatches
+	}
+	if p.MaxConcurrentRequestsPerBatch != nil {
+		cfg["max_concurrent_requests_per_batch"] = *p.MaxConcurrentRequestsPerBatch
+	}
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
 		ProviderType: "inline::batch-reference",
-		Config:       map[string]interface{}{},
+		Config:       cfg,
 	}
 }
 
@@ -556,10 +633,17 @@ func expandResponsesProviders(spec *ogxiov1beta1.ResponsesProvidersSpec) ([]Conf
 }
 
 func expandBuiltinResponsesProvider(p ogxiov1beta1.InlineBuiltinResponsesProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	if p.VectorStoresConfig != nil {
+		cfg["vector_stores_config"] = expandVectorStoresConfig(p.VectorStoresConfig)
+	}
+	if p.CompactionConfig != nil {
+		cfg["compaction_config"] = expandCompactionConfig(p.CompactionConfig)
+	}
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
 		ProviderType: "inline::responses",
-		Config:       map[string]interface{}{},
+		Config:       cfg,
 	}
 }
 
@@ -567,11 +651,200 @@ func applyNetworkConfig(cfg map[string]interface{}, network *ogxiov1beta1.Networ
 	if network == nil {
 		return
 	}
-	applyTLSConfig(cfg, network.TLS)
-	applyTimeoutConfig(cfg, network.Timeout)
+	n := map[string]interface{}{}
+	applyTLSConfig(n, network.TLS)
+	applyTimeoutConfig(n, network.Timeout)
 	if len(network.Headers) > 0 {
-		cfg["headers"] = network.Headers
+		n["headers"] = network.Headers
 	}
+	applyProxyConfig(n, network.Proxy)
+	if len(n) > 0 {
+		cfg["network"] = n
+	}
+}
+
+func applyProxyConfig(cfg map[string]interface{}, proxy *ogxiov1beta1.ProxyConfig) {
+	if proxy == nil {
+		return
+	}
+	m := map[string]interface{}{}
+	if proxy.URL != nil {
+		m["url"] = *proxy.URL
+	}
+	if proxy.HTTP != nil {
+		m["http"] = *proxy.HTTP
+	}
+	if proxy.HTTPS != nil {
+		m["https"] = *proxy.HTTPS
+	}
+	if proxy.CACert != nil {
+		m["ca_cert"] = *proxy.CACert
+	}
+	if len(proxy.NoProxy) > 0 {
+		m["no_proxy"] = proxy.NoProxy
+	}
+	if len(m) > 0 {
+		cfg["proxy"] = m
+	}
+}
+
+func expandVectorStoresConfig(vs *ogxiov1beta1.VectorStoresConfig) map[string]interface{} {
+	m := map[string]interface{}{}
+	if vs.DefaultProviderID != "" {
+		m["default_provider_id"] = vs.DefaultProviderID
+	}
+	if vs.DefaultEmbeddingModel != nil {
+		m["default_embedding_model"] = expandQualifiedModel(vs.DefaultEmbeddingModel)
+	}
+	if vs.DefaultRerankerModel != nil {
+		rm := map[string]interface{}{
+			"provider_id": vs.DefaultRerankerModel.ProviderID,
+			"model_id":    vs.DefaultRerankerModel.ModelID,
+		}
+		m["default_reranker_model"] = rm
+	}
+	if vs.RewriteQueryParams != nil {
+		rqp := map[string]interface{}{}
+		if vs.RewriteQueryParams.Model != nil {
+			rqp["model"] = expandQualifiedModel(vs.RewriteQueryParams.Model)
+		}
+		if vs.RewriteQueryParams.Prompt != "" {
+			rqp["prompt"] = vs.RewriteQueryParams.Prompt
+		}
+		if vs.RewriteQueryParams.MaxTokens != nil {
+			rqp["max_tokens"] = *vs.RewriteQueryParams.MaxTokens
+		}
+		if vs.RewriteQueryParams.Temperature != nil {
+			rqp["temperature"] = *vs.RewriteQueryParams.Temperature
+		}
+		m["rewrite_query_params"] = rqp
+	}
+	if vs.FileSearchParams != nil {
+		fsp := map[string]interface{}{}
+		if vs.FileSearchParams.HeaderTemplate != "" {
+			fsp["header_template"] = vs.FileSearchParams.HeaderTemplate
+		}
+		if vs.FileSearchParams.FooterTemplate != "" {
+			fsp["footer_template"] = vs.FileSearchParams.FooterTemplate
+		}
+		m["file_search_params"] = fsp
+	}
+	if vs.ContextPromptParams != nil {
+		cpp := map[string]interface{}{}
+		if vs.ContextPromptParams.ChunkAnnotationTemplate != "" {
+			cpp["chunk_annotation_template"] = vs.ContextPromptParams.ChunkAnnotationTemplate
+		}
+		if vs.ContextPromptParams.ContextTemplate != "" {
+			cpp["context_template"] = vs.ContextPromptParams.ContextTemplate
+		}
+		m["context_prompt_params"] = cpp
+	}
+	if vs.AnnotationPromptParams != nil {
+		app := map[string]interface{}{}
+		if vs.AnnotationPromptParams.EnableAnnotations != nil {
+			app["enable_annotations"] = *vs.AnnotationPromptParams.EnableAnnotations
+		}
+		if vs.AnnotationPromptParams.AnnotationInstructionTemplate != "" {
+			app["annotation_instruction_template"] = vs.AnnotationPromptParams.AnnotationInstructionTemplate
+		}
+		if vs.AnnotationPromptParams.ChunkAnnotationTemplate != "" {
+			app["chunk_annotation_template"] = vs.AnnotationPromptParams.ChunkAnnotationTemplate
+		}
+		m["annotation_prompt_params"] = app
+	}
+	if vs.FileIngestionParams != nil {
+		fip := map[string]interface{}{}
+		if vs.FileIngestionParams.DefaultChunkSizeTokens != nil {
+			fip["default_chunk_size_tokens"] = *vs.FileIngestionParams.DefaultChunkSizeTokens
+		}
+		if vs.FileIngestionParams.DefaultChunkOverlapTokens != nil {
+			fip["default_chunk_overlap_tokens"] = *vs.FileIngestionParams.DefaultChunkOverlapTokens
+		}
+		m["file_ingestion_params"] = fip
+	}
+	if vs.ChunkRetrievalParams != nil {
+		crp := map[string]interface{}{}
+		if vs.ChunkRetrievalParams.ChunkMultiplier != nil {
+			crp["chunk_multiplier"] = *vs.ChunkRetrievalParams.ChunkMultiplier
+		}
+		if vs.ChunkRetrievalParams.MaxTokensInContext != nil {
+			crp["max_tokens_in_context"] = *vs.ChunkRetrievalParams.MaxTokensInContext
+		}
+		if vs.ChunkRetrievalParams.DefaultRerankerStrategy != nil {
+			crp["default_reranker_strategy"] = *vs.ChunkRetrievalParams.DefaultRerankerStrategy
+		}
+		if vs.ChunkRetrievalParams.RRFImpactFactor != nil {
+			crp["rrf_impact_factor"] = *vs.ChunkRetrievalParams.RRFImpactFactor
+		}
+		if vs.ChunkRetrievalParams.WeightedSearchAlpha != nil {
+			crp["weighted_search_alpha"] = *vs.ChunkRetrievalParams.WeightedSearchAlpha
+		}
+		if vs.ChunkRetrievalParams.DefaultSearchMode != nil {
+			crp["default_search_mode"] = *vs.ChunkRetrievalParams.DefaultSearchMode
+		}
+		m["chunk_retrieval_params"] = crp
+	}
+	if vs.FileBatchParams != nil {
+		fbp := map[string]interface{}{}
+		if vs.FileBatchParams.MaxConcurrentFilesPerBatch != nil {
+			fbp["max_concurrent_files_per_batch"] = *vs.FileBatchParams.MaxConcurrentFilesPerBatch
+		}
+		if vs.FileBatchParams.FileBatchChunkSize != nil {
+			fbp["file_batch_chunk_size"] = *vs.FileBatchParams.FileBatchChunkSize
+		}
+		if vs.FileBatchParams.CleanupIntervalSeconds != nil {
+			fbp["cleanup_interval_seconds"] = *vs.FileBatchParams.CleanupIntervalSeconds
+		}
+		m["file_batch_params"] = fbp
+	}
+	if vs.ContextualRetrievalParams != nil {
+		ctx := map[string]interface{}{}
+		if vs.ContextualRetrievalParams.Model != nil {
+			ctx["model"] = expandQualifiedModel(vs.ContextualRetrievalParams.Model)
+		}
+		if vs.ContextualRetrievalParams.DefaultTimeoutSeconds != nil {
+			ctx["default_timeout_seconds"] = *vs.ContextualRetrievalParams.DefaultTimeoutSeconds
+		}
+		if vs.ContextualRetrievalParams.DefaultMaxConcurrency != nil {
+			ctx["default_max_concurrency"] = *vs.ContextualRetrievalParams.DefaultMaxConcurrency
+		}
+		if vs.ContextualRetrievalParams.MaxDocumentTokens != nil {
+			ctx["max_document_tokens"] = *vs.ContextualRetrievalParams.MaxDocumentTokens
+		}
+		m["contextual_retrieval_params"] = ctx
+	}
+	return m
+}
+
+func expandQualifiedModel(qm *ogxiov1beta1.QualifiedModel) map[string]interface{} {
+	m := map[string]interface{}{
+		"provider_id": qm.ProviderID,
+		"model_id":    qm.ModelID,
+	}
+	if qm.EmbeddingDimensions != nil {
+		m["embedding_dimensions"] = *qm.EmbeddingDimensions
+	}
+	return m
+}
+
+func expandCompactionConfig(cc *ogxiov1beta1.CompactionConfig) map[string]interface{} {
+	m := map[string]interface{}{}
+	if cc.SummarizationPrompt != "" {
+		m["summarization_prompt"] = cc.SummarizationPrompt
+	}
+	if cc.SummaryPrefix != "" {
+		m["summary_prefix"] = cc.SummaryPrefix
+	}
+	if cc.SummarizationModel != "" {
+		m["summarization_model"] = cc.SummarizationModel
+	}
+	if cc.DefaultCompactThreshold != nil {
+		m["default_compact_threshold"] = *cc.DefaultCompactThreshold
+	}
+	if cc.TokenizerEncoding != "" {
+		m["tokenizer_encoding"] = cc.TokenizerEncoding
+	}
+	return m
 }
 
 func applyTLSConfig(cfg map[string]interface{}, tls *ogxiov1beta1.TLSConfig) {

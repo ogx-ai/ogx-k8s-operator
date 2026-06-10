@@ -50,6 +50,7 @@ type ConfigModel struct {
 	ProviderID    string `yaml:"provider_id"`
 	ModelType     string `yaml:"model_type,omitempty"`
 	ContextLength *int   `yaml:"context_length,omitempty"`
+	Quantization  string `yaml:"quantization,omitempty"`
 }
 
 // RegisteredResources represents the registered_resources section of config.yaml.
