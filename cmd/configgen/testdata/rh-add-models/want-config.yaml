@@ -41,7 +41,7 @@ providers:
           provider_type: remote::s3
     inference:
         - config:
-            url: https://my-vllm:8000
+            base_url: https://my-vllm:8000
           provider_id: remote-vllm
           provider_type: remote::vllm
     responses:

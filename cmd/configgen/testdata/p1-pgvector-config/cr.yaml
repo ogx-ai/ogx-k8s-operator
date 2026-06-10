@@ -1,0 +1,24 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-pgvector-config
+spec:
+  distribution:
+    name: test
+  providers:
+    vectorIo:
+      remote:
+        pgvector:
+        - host: pgvector.example.com
+          port: 5432
+          db: vectors
+          user: pguser
+          password:
+            name: pgvector-secret
+            key: password
+          distanceMetric: COSINE
+          vectorIndex:
+            hnsw:
+              m: 16
+              efConstruction: 200
+              efSearch: 100

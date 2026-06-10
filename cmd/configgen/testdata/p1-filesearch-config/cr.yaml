@@ -1,0 +1,17 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-filesearch-config
+spec:
+  distribution:
+    name: test
+  providers:
+    toolRuntime:
+      inline:
+        fileSearch:
+        - vectorStoresConfig:
+            defaultProviderId: pgvector
+            defaultEmbeddingModel:
+              providerId: vllm
+              modelId: granite-embedding
+              embeddingDimensions: 384
