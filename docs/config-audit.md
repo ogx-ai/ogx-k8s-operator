@@ -1,6 +1,6 @@
 # Config Audit: Operator CRD vs Upstream StackConfig
 
-**Current status:** all P0 and P1 issues have been fixed
+**Current status:** all P0 and P1 issues have been fixed. #19 (add `file_processors` API) has been addressed
 
 **Date:** 2026-06-09
 **Upstream ref:** `ogx-ai/ogx@main` — `src/ogx/core/datatypes.py` (`StackConfig`)

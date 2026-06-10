@@ -93,6 +93,9 @@ func collectProviderSecrets(providers *ogxiov1beta1.ProvidersSpec) []corev1.EnvV
 	if providers.Responses != nil {
 		envVars = append(envVars, collectResponsesSecrets(providers.Responses)...)
 	}
+	if providers.FileProcessors != nil {
+		envVars = append(envVars, collectFileProcessorsSecrets(providers.FileProcessors)...)
+	}
 
 	return envVars
 }
@@ -214,6 +217,24 @@ func collectFilesSecrets(spec *ogxiov1beta1.FilesProvidersSpec) []corev1.EnvVar 
 			if p.AWSSecretAccessKey != nil {
 				envVars = append(envVars, secretToEnvVar(p.DeriveID(), "AWS_SECRET_ACCESS_KEY", *p.AWSSecretAccessKey))
 			}
+		}
+		for _, p := range spec.Remote.Custom {
+			envVars = append(envVars, collectCustomProviderSecrets(p)...)
+		}
+	}
+	if spec.Inline != nil {
+		for _, p := range spec.Inline.Custom {
+			envVars = append(envVars, collectCustomProviderSecrets(p)...)
+		}
+	}
+	return envVars
+}
+
+func collectFileProcessorsSecrets(spec *ogxiov1beta1.FileProcessorsProvidersSpec) []corev1.EnvVar {
+	var envVars []corev1.EnvVar
+	if spec.Remote != nil {
+		if spec.Remote.DoclingServe != nil && spec.Remote.DoclingServe.APIKey != nil {
+			envVars = append(envVars, secretToEnvVar(spec.Remote.DoclingServe.DeriveID(), "API_KEY", *spec.Remote.DoclingServe.APIKey))
 		}
 		for _, p := range spec.Remote.Custom {
 			envVars = append(envVars, collectCustomProviderSecrets(p)...)

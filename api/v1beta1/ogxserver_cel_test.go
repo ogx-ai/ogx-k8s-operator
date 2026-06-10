@@ -766,6 +766,20 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 			},
 			wantError: "files cannot be both in providers and disabledAPIs",
 		},
+		{
+			name: "file_processors in both disabledAPIs and providers is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.DisabledAPIs = []string{"file_processors"}
+				o.Spec.Providers = &ProvidersSpec{
+					FileProcessors: &FileProcessorsProvidersSpec{
+						Inline: &FileProcessorsInlineProviders{
+							PyPDF: &InlinePyPDFFileProcessorProvider{},
+						},
+					},
+				}
+			},
+			wantError: "file_processors cannot be both in providers and disabledAPIs",
+		},
 	}
 
 	for _, tt := range tests {

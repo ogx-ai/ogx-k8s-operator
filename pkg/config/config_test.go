@@ -409,6 +409,124 @@ func TestExpandProviders_InferenceOpenAI(t *testing.T) {
 	}
 }
 
+func TestExpandProviders_FileProcessorsAllProviders(t *testing.T) {
+	chunkSize := 1000
+	chunkOverlap := 500
+	extractMeta := true
+	cleanText := false
+	doOCR := false
+	doclingChunk := 2048
+
+	providers := &ogxiov1beta1.ProvidersSpec{
+		FileProcessors: &ogxiov1beta1.FileProcessorsProvidersSpec{
+			Remote: &ogxiov1beta1.FileProcessorsRemoteProviders{
+				DoclingServe: &ogxiov1beta1.DoclingServeProvider{
+					BaseURL:                "http://docling.example.com:5001/v1",
+					APIKey:                 &ogxiov1beta1.SecretKeyRef{Name: "docling-secret", Key: "api-key"},
+					DefaultChunkSizeTokens: &doclingChunk,
+				},
+			},
+			Inline: &ogxiov1beta1.FileProcessorsInlineProviders{
+				Auto: &ogxiov1beta1.InlineAutoFileProcessorProvider{
+					FileProcessorChunkConfig: ogxiov1beta1.FileProcessorChunkConfig{
+						DefaultChunkSizeTokens:    &chunkSize,
+						DefaultChunkOverlapTokens: &chunkOverlap,
+					},
+					ExtractMetadata: &extractMeta,
+					CleanText:       &cleanText,
+				},
+				MarkItDown: &ogxiov1beta1.InlineMarkItDownFileProcessorProvider{},
+				Docling: &ogxiov1beta1.InlineDoclingFileProcessorProvider{
+					DoOCR: &doOCR,
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fps := result["file_processors"]
+	if len(fps) != 4 {
+		t.Fatalf("expected 4 file_processors providers, got %d", len(fps))
+	}
+
+	// Remote comes first
+	if fps[0].ProviderID != "remote-docling-serve" {
+		t.Errorf("expected provider_id 'remote-docling-serve', got %q", fps[0].ProviderID)
+	}
+	if fps[0].ProviderType != "remote::docling-serve" {
+		t.Errorf("expected provider_type 'remote::docling-serve', got %q", fps[0].ProviderType)
+	}
+	if fps[0].Config["base_url"] != "http://docling.example.com:5001/v1" {
+		t.Errorf("expected base_url, got %v", fps[0].Config["base_url"])
+	}
+	if fps[0].Config["default_chunk_size_tokens"] != 2048 {
+		t.Errorf("expected default_chunk_size_tokens 2048, got %v", fps[0].Config["default_chunk_size_tokens"])
+	}
+
+	// Inline auto
+	if fps[1].ProviderID != "inline-auto" {
+		t.Errorf("expected provider_id 'inline-auto', got %q", fps[1].ProviderID)
+	}
+	if fps[1].ProviderType != "inline::auto" {
+		t.Errorf("expected provider_type 'inline::auto', got %q", fps[1].ProviderType)
+	}
+	if fps[1].Config["default_chunk_size_tokens"] != 1000 {
+		t.Errorf("expected default_chunk_size_tokens 1000, got %v", fps[1].Config["default_chunk_size_tokens"])
+	}
+	if fps[1].Config["extract_metadata"] != true {
+		t.Errorf("expected extract_metadata true, got %v", fps[1].Config["extract_metadata"])
+	}
+	if fps[1].Config["clean_text"] != false {
+		t.Errorf("expected clean_text false, got %v", fps[1].Config["clean_text"])
+	}
+
+	// Inline markitdown (empty config)
+	if fps[2].ProviderID != "inline-markitdown" {
+		t.Errorf("expected provider_id 'inline-markitdown', got %q", fps[2].ProviderID)
+	}
+	if len(fps[2].Config) != 0 {
+		t.Errorf("expected empty config for markitdown, got %v", fps[2].Config)
+	}
+
+	// Inline docling
+	if fps[3].ProviderID != "inline-docling" {
+		t.Errorf("expected provider_id 'inline-docling', got %q", fps[3].ProviderID)
+	}
+	if fps[3].Config["do_ocr"] != false {
+		t.Errorf("expected do_ocr false, got %v", fps[3].Config["do_ocr"])
+	}
+}
+
+func TestCollectSecretRefs_FileProcessorsDoclingServe(t *testing.T) {
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			FileProcessors: &ogxiov1beta1.FileProcessorsProvidersSpec{
+				Remote: &ogxiov1beta1.FileProcessorsRemoteProviders{
+					DoclingServe: &ogxiov1beta1.DoclingServeProvider{
+						BaseURL: "http://docling.example.com:5001/v1",
+						APIKey:  &ogxiov1beta1.SecretKeyRef{Name: "docling-secret", Key: "api-key"},
+					},
+				},
+			},
+		},
+	}
+
+	envVars := CollectSecretRefs(spec)
+	if len(envVars) != 1 {
+		t.Fatalf("expected 1 env var, got %d", len(envVars))
+	}
+	if envVars[0].Name != "OGX_REMOTE_DOCLING_SERVE_API_KEY" {
+		t.Errorf("expected env var name 'OGX_REMOTE_DOCLING_SERVE_API_KEY', got %q", envVars[0].Name)
+	}
+	if envVars[0].ValueFrom.SecretKeyRef.Name != "docling-secret" {
+		t.Errorf("expected secret name 'docling-secret', got %q", envVars[0].ValueFrom.SecretKeyRef.Name)
+	}
+}
+
 func TestCollectSecretRefs_Nil(t *testing.T) {
 	spec := &ogxiov1beta1.OGXServerSpec{}
 	envVars := CollectSecretRefs(spec)

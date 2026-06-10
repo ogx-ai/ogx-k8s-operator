@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	ociHTTPTimeout   = 30 * time.Second
-	configBlobLimit  = 1 << 20 // 1 MB
+	ociHTTPTimeout  = 30 * time.Second
+	configBlobLimit = 1 << 20 // 1 MB
 )
 
 var ociHTTPClient = &http.Client{Timeout: ociHTTPTimeout}

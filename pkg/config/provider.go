@@ -79,6 +79,10 @@ func buildProviderExpanders(p *ogxiov1beta1.ProvidersSpec) []providerExpander {
 		spec := p.Responses
 		out = append(out, providerExpander{"responses", func() ([]ConfigProvider, error) { return expandResponsesProviders(spec) }})
 	}
+	if p.FileProcessors != nil {
+		spec := p.FileProcessors
+		out = append(out, providerExpander{"file_processors", func() ([]ConfigProvider, error) { return expandFileProcessorsProviders(spec) }})
+	}
 	return out
 }
 
@@ -643,6 +647,115 @@ func expandBuiltinResponsesProvider(p ogxiov1beta1.InlineBuiltinResponsesProvide
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),
 		ProviderType: "inline::responses",
+		Config:       cfg,
+	}
+}
+
+func expandFileProcessorsProviders(spec *ogxiov1beta1.FileProcessorsProvidersSpec) ([]ConfigProvider, error) {
+	var providers []ConfigProvider
+	if spec.Remote != nil {
+		if spec.Remote.DoclingServe != nil {
+			providers = append(providers, expandDoclingServeProvider(*spec.Remote.DoclingServe))
+		}
+		if err := appendCustomProviders(&providers, spec.Remote.Custom); err != nil {
+			return nil, err
+		}
+	}
+	if spec.Inline != nil {
+		if spec.Inline.Auto != nil {
+			providers = append(providers, expandAutoFileProcessorProvider(*spec.Inline.Auto))
+		}
+		if spec.Inline.PyPDF != nil {
+			providers = append(providers, expandPyPDFFileProcessorProvider(*spec.Inline.PyPDF))
+		}
+		if spec.Inline.MarkItDown != nil {
+			providers = append(providers, expandMarkItDownFileProcessorProvider(*spec.Inline.MarkItDown))
+		}
+		if spec.Inline.Docling != nil {
+			providers = append(providers, expandDoclingFileProcessorProvider(*spec.Inline.Docling))
+		}
+		if err := appendCustomProviders(&providers, spec.Inline.Custom); err != nil {
+			return nil, err
+		}
+	}
+	return providers, nil
+}
+
+func expandDoclingServeProvider(p ogxiov1beta1.DoclingServeProvider) ConfigProvider {
+	cfg := map[string]interface{}{
+		"base_url": p.BaseURL,
+	}
+	if p.APIKey != nil {
+		cfg["api_key"] = envVarRef(p.DeriveID(), "API_KEY")
+	}
+	setIntPtr(cfg, "default_chunk_size_tokens", p.DefaultChunkSizeTokens)
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "remote::docling-serve",
+		Config:       cfg,
+	}
+}
+
+func expandAutoFileProcessorProvider(p ogxiov1beta1.InlineAutoFileProcessorProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	setIntPtr(cfg, "default_chunk_size_tokens", p.DefaultChunkSizeTokens)
+	setIntPtr(cfg, "default_chunk_overlap_tokens", p.DefaultChunkOverlapTokens)
+	if p.ExtractMetadata != nil {
+		cfg["extract_metadata"] = *p.ExtractMetadata
+	}
+	if p.CleanText != nil {
+		cfg["clean_text"] = *p.CleanText
+	}
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "inline::auto",
+		Config:       cfg,
+	}
+}
+
+func expandPyPDFFileProcessorProvider(p ogxiov1beta1.InlinePyPDFFileProcessorProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	setIntPtr(cfg, "default_chunk_size_tokens", p.DefaultChunkSizeTokens)
+	setIntPtr(cfg, "default_chunk_overlap_tokens", p.DefaultChunkOverlapTokens)
+	if p.ExtractMetadata != nil {
+		cfg["extract_metadata"] = *p.ExtractMetadata
+	}
+	if p.CleanText != nil {
+		cfg["clean_text"] = *p.CleanText
+	}
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "inline::pypdf",
+		Config:       cfg,
+	}
+}
+
+func expandMarkItDownFileProcessorProvider(p ogxiov1beta1.InlineMarkItDownFileProcessorProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	setIntPtr(cfg, "default_chunk_size_tokens", p.DefaultChunkSizeTokens)
+	setIntPtr(cfg, "default_chunk_overlap_tokens", p.DefaultChunkOverlapTokens)
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "inline::markitdown",
+		Config:       cfg,
+	}
+}
+
+func expandDoclingFileProcessorProvider(p ogxiov1beta1.InlineDoclingFileProcessorProvider) ConfigProvider {
+	cfg := map[string]interface{}{}
+	setIntPtr(cfg, "default_chunk_size_tokens", p.DefaultChunkSizeTokens)
+	setIntPtr(cfg, "default_chunk_overlap_tokens", p.DefaultChunkOverlapTokens)
+	if p.DoOCR != nil {
+		cfg["do_ocr"] = *p.DoOCR
+	}
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "inline::docling",
 		Config:       cfg,
 	}
 }

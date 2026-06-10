@@ -451,6 +451,7 @@ type WorkloadSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'files') || !has(self.providers.files)",message="files cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'batches') || !has(self.providers.batches)",message="batches cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'responses') || !has(self.providers.responses)",message="responses cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'file_processors') || !has(self.providers.fileProcessors)",message="file_processors cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -473,8 +474,8 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=6
-	// +kubebuilder:validation:items:Enum=batches;inference;responses;tool_runtime;vector_io;files
+	// +kubebuilder:validation:MaxItems=7
+	// +kubebuilder:validation:items:Enum=batches;file_processors;inference;responses;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// RegistryRefreshIntervalSeconds configures how often the server refreshes
 	// its model registry, in seconds. When omitted, the server's built-in
