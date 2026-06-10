@@ -18,6 +18,7 @@ package config
 
 import (
 	"fmt"
+	"sort"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 )
@@ -37,12 +38,16 @@ func ExpandResources(resources *ogxiov1beta1.ResourcesSpec, providers map[string
 	for _, m := range resources.Models {
 		providerID := m.Provider
 		if providerID == "" {
-			// Default to first inference provider
 			inferenceProviders := providers["inference"]
 			if len(inferenceProviders) == 0 {
 				return nil, fmt.Errorf("failed to assign provider for model %q: no explicit provider and no inference providers are configured", m.Name)
 			}
-			providerID = inferenceProviders[0].ProviderID
+			sorted := make([]ConfigProvider, len(inferenceProviders))
+			copy(sorted, inferenceProviders)
+			sort.Slice(sorted, func(i, j int) bool {
+				return sorted[i].ProviderID < sorted[j].ProviderID
+			})
+			providerID = sorted[0].ProviderID
 		}
 
 		model := ConfigModel{

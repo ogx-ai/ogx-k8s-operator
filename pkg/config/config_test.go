@@ -249,6 +249,41 @@ func TestExpandResources_NilSpec(t *testing.T) {
 	}
 }
 
+func TestExpandResources_DefaultProviderIsDeterministic(t *testing.T) {
+	providers := map[string][]ConfigProvider{
+		"inference": {
+			{ProviderID: "openai-1", ProviderType: "remote::openai"},
+			{ProviderID: "azure-1", ProviderType: "remote::azure"},
+			{ProviderID: "vllm-1", ProviderType: "remote::vllm"},
+		},
+	}
+	resources := &ogxiov1beta1.ResourcesSpec{
+		Models: []ogxiov1beta1.ModelConfig{{Name: "llama3"}},
+	}
+
+	models, err := ExpandResources(resources, providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if models[0].ProviderID != "azure-1" {
+		t.Errorf("expected lexicographically first provider 'azure-1', got %q", models[0].ProviderID)
+	}
+
+	// Reverse the input order — result should be the same
+	providers["inference"] = []ConfigProvider{
+		{ProviderID: "vllm-1", ProviderType: "remote::vllm"},
+		{ProviderID: "openai-1", ProviderType: "remote::openai"},
+		{ProviderID: "azure-1", ProviderType: "remote::azure"},
+	}
+	models2, err := ExpandResources(resources, providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if models2[0].ProviderID != "azure-1" {
+		t.Errorf("expected same provider regardless of input order, got %q", models2[0].ProviderID)
+	}
+}
+
 func TestExpandResources_NoProviderAndNoInference(t *testing.T) {
 	resources := &ogxiov1beta1.ResourcesSpec{
 		Models: []ogxiov1beta1.ModelConfig{
