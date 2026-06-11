@@ -53,19 +53,19 @@ func SetupWebhookWithManager(mgr ctrl.Manager, embeddedDistNames []string) error
 //nolint:lll // kubebuilder marker cannot be split across lines.
 //+kubebuilder:webhook:path=/validate-ogx-io-v1beta1-ogxserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create;update,versions=v1beta1,name=vogxserver.kb.io,admissionReviewVersions=v1
 
-// ValidateCreate implements admission.CustomValidator.
+// ValidateCreate implements admission.Validator.
 func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (admission.Warnings, error) {
 	ogxserverlog.Info("validating create", "name", r.Name)
 	return v.validate(r)
 }
 
-// ValidateUpdate implements admission.CustomValidator.
+// ValidateUpdate implements admission.Validator.
 func (v *OGXServerValidator) ValidateUpdate(_ context.Context, _ *OGXServer, r *OGXServer) (admission.Warnings, error) {
 	ogxserverlog.Info("validating update", "name", r.Name)
 	return v.validate(r)
 }
 
-// ValidateDelete implements admission.CustomValidator.
+// ValidateDelete implements admission.Validator.
 func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ *OGXServer) (admission.Warnings, error) {
 	return nil, nil
 }
