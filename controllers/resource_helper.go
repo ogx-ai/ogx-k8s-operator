@@ -316,7 +316,8 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 			}
 			deduped = append(deduped, e)
 		}
-		container.Env = append(deduped, instance.Spec.Workload.Overrides.Env...)
+		deduped = append(deduped, instance.Spec.Workload.Overrides.Env...)
+		container.Env = deduped
 	}
 }
 

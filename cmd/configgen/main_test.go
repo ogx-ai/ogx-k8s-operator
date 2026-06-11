@@ -31,9 +31,12 @@ import (
 
 // TestRun discovers test cases from testdata/ subdirectories. Each subdirectory
 // must contain a cr.yaml. Optional files:
-//   - base.yaml:        explicit base config (omit to use standard config resolution)
-//   - want-err:         if present, expect error containing this text
-//   - want-config.yaml: if present, assert generated config matches structurally
+//   - base.yaml:              explicit base config (omit to use standard config resolution)
+//   - want-err:              if present, expect error containing this text
+//   - want-config.yaml:      if present, assert generated config matches structurally
+//
+// Validation uses testdata/distributions.json by default. A testcase-local
+// distributions.json can override it when a fixture needs a custom registry.
 //
 // Set KUBEBUILDER_ASSETS to enable CRD/CEL and webhook validation for each case.
 func TestRun(t *testing.T) {
@@ -73,13 +76,17 @@ func loadTestCase(t *testing.T, dir string) testCase {
 	if p := filepath.Join(dir, "base.yaml"); fileExists(p) {
 		basePath = p
 	}
+	distributionsPath := filepath.Join("testdata", "distributions.json")
+	if p := filepath.Join(dir, "distributions.json"); fileExists(p) {
+		distributionsPath = p
+	}
 
 	return testCase{
 		opts: options{
 			crPath:            crPath,
 			basePath:          basePath,
 			crdPath:           "../../config/crd/bases",
-			distributionsPath: "../../distributions.json",
+			distributionsPath: distributionsPath,
 			validate:          os.Getenv("KUBEBUILDER_ASSETS") != "",
 		},
 		wantErr:    strings.TrimSpace(readOptionalFile(t, filepath.Join(dir, "want-err"))),

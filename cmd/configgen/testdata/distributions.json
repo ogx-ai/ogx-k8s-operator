@@ -1,0 +1,5 @@
+{
+  "rh": "docker.io/ogxai/distribution-rh:latest",
+  "starter": "docker.io/ogxai/distribution-starter:latest",
+  "test": "docker.io/ogxai/distribution-test:latest"
+}

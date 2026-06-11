@@ -25,6 +25,78 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
+const llama3ModelID = "llama3"
+
+func requireProviderAt(t *testing.T, result map[string][]ConfigProvider, api string, idx int) ConfigProvider {
+	t.Helper()
+
+	providers := result[api]
+	if len(providers) <= idx {
+		t.Fatalf("expected %s provider at index %d, got %d providers", api, idx, len(providers))
+	}
+	return providers[idx]
+}
+
+func requireConfigMap(t *testing.T, cfg map[string]interface{}, key string) map[string]interface{} {
+	t.Helper()
+
+	value, ok := cfg[key].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected %s map, got %v", key, cfg[key])
+	}
+	return value
+}
+
+func requireStringMap(t *testing.T, cfg map[string]interface{}, key string) map[string]string {
+	t.Helper()
+
+	value, ok := cfg[key].(map[string]string)
+	if !ok {
+		t.Fatalf("expected %s map, got %v", key, cfg[key])
+	}
+	return value
+}
+
+func assertProviderIdentity(t *testing.T, provider ConfigProvider, wantID, wantType string) {
+	t.Helper()
+
+	if provider.ProviderID != wantID {
+		t.Errorf("expected provider_id %q, got %q", wantID, provider.ProviderID)
+	}
+	if wantType != "" && provider.ProviderType != wantType {
+		t.Errorf("expected provider_type %q, got %q", wantType, provider.ProviderType)
+	}
+}
+
+func assertConfigValue(t *testing.T, cfg map[string]interface{}, key string, want interface{}) {
+	t.Helper()
+
+	got, ok := cfg[key]
+	if !ok {
+		t.Errorf("expected %s, but key was missing", key)
+		return
+	}
+	if got != want {
+		t.Errorf("expected %s %v, got %v", key, want, got)
+	}
+}
+
+func assertConfigValues(t *testing.T, cfg map[string]interface{}, want map[string]interface{}) {
+	t.Helper()
+
+	for key, value := range want {
+		assertConfigValue(t, cfg, key, value)
+	}
+}
+
+func assertConfigAbsent(t *testing.T, cfg map[string]interface{}, key string) {
+	t.Helper()
+
+	if _, ok := cfg[key]; ok {
+		t.Errorf("%s should not appear in config", key)
+	}
+}
+
 func TestParseBaseConfig(t *testing.T) { //nolint:cyclop,gocognit // table-driven test with inline assertions
 	tests := []struct {
 		name    string
@@ -79,8 +151,8 @@ registered_resources:
 					t.Fatalf("expected 1 registered resource model, got %+v", cfg.RegisteredResources)
 				}
 				firstModel, ok := cfg.RegisteredResources.Models[0].(map[string]interface{})
-				if !ok || firstModel["model_id"] != "llama3" {
-					t.Errorf("expected registered resource model 'llama3', got %+v", cfg.RegisteredResources.Models[0])
+				if !ok || firstModel["model_id"] != llama3ModelID {
+					t.Errorf("expected registered resource model %q, got %+v", llama3ModelID, cfg.RegisteredResources.Models[0])
 				}
 			},
 		},
@@ -196,7 +268,7 @@ func TestExpandResources(t *testing.T) {
 	resources := &ogxiov1beta1.ResourcesSpec{
 		Models: []ogxiov1beta1.ModelConfig{
 			{
-				Name:          "llama3",
+				Name:          llama3ModelID,
 				Provider:      "vllm-1",
 				ModelType:     defaultModelType,
 				ContextLength: &contextLen,
@@ -217,8 +289,8 @@ func TestExpandResources(t *testing.T) {
 	}
 
 	// First model: explicit provider
-	if models[0].ModelID != "llama3" {
-		t.Errorf("expected model_id 'llama3', got %q", models[0].ModelID)
+	if models[0].ModelID != llama3ModelID {
+		t.Errorf("expected model_id %q, got %q", llama3ModelID, models[0].ModelID)
 	}
 	if models[0].ProviderID != "vllm-1" {
 		t.Errorf("expected provider_id 'vllm-1', got %q", models[0].ProviderID)
@@ -258,7 +330,7 @@ func TestExpandResources_DefaultProviderIsDeterministic(t *testing.T) {
 		},
 	}
 	resources := &ogxiov1beta1.ResourcesSpec{
-		Models: []ogxiov1beta1.ModelConfig{{Name: "llama3"}},
+		Models: []ogxiov1beta1.ModelConfig{{Name: llama3ModelID}},
 	}
 
 	models, err := ExpandResources(resources, providers)
@@ -287,7 +359,7 @@ func TestExpandResources_DefaultProviderIsDeterministic(t *testing.T) {
 func TestExpandResources_NoProviderAndNoInference(t *testing.T) {
 	resources := &ogxiov1beta1.ResourcesSpec{
 		Models: []ogxiov1beta1.ModelConfig{
-			{Name: "llama3"},
+			{Name: llama3ModelID},
 		},
 	}
 	// No providers at all
@@ -488,52 +560,26 @@ func TestExpandProviders_FileProcessorsAllProviders(t *testing.T) {
 		t.Fatalf("expected 4 file_processors providers, got %d", len(fps))
 	}
 
-	// Remote comes first
-	if fps[0].ProviderID != "remote-docling-serve" {
-		t.Errorf("expected provider_id 'remote-docling-serve', got %q", fps[0].ProviderID)
-	}
-	if fps[0].ProviderType != "remote::docling-serve" {
-		t.Errorf("expected provider_type 'remote::docling-serve', got %q", fps[0].ProviderType)
-	}
-	if fps[0].Config["base_url"] != "http://docling.example.com:5001/v1" {
-		t.Errorf("expected base_url, got %v", fps[0].Config["base_url"])
-	}
-	if fps[0].Config["default_chunk_size_tokens"] != 2048 {
-		t.Errorf("expected default_chunk_size_tokens 2048, got %v", fps[0].Config["default_chunk_size_tokens"])
-	}
+	assertProviderIdentity(t, fps[0], "remote-docling-serve", "remote::docling-serve")
+	assertConfigValues(t, fps[0].Config, map[string]interface{}{
+		"base_url":                  "http://docling.example.com:5001/v1",
+		"default_chunk_size_tokens": 2048,
+	})
 
-	// Inline auto
-	if fps[1].ProviderID != "inline-auto" {
-		t.Errorf("expected provider_id 'inline-auto', got %q", fps[1].ProviderID)
-	}
-	if fps[1].ProviderType != "inline::auto" {
-		t.Errorf("expected provider_type 'inline::auto', got %q", fps[1].ProviderType)
-	}
-	if fps[1].Config["default_chunk_size_tokens"] != 1000 {
-		t.Errorf("expected default_chunk_size_tokens 1000, got %v", fps[1].Config["default_chunk_size_tokens"])
-	}
-	if fps[1].Config["extract_metadata"] != true {
-		t.Errorf("expected extract_metadata true, got %v", fps[1].Config["extract_metadata"])
-	}
-	if fps[1].Config["clean_text"] != false {
-		t.Errorf("expected clean_text false, got %v", fps[1].Config["clean_text"])
-	}
+	assertProviderIdentity(t, fps[1], "inline-auto", "inline::auto")
+	assertConfigValues(t, fps[1].Config, map[string]interface{}{
+		"default_chunk_size_tokens": 1000,
+		"extract_metadata":          true,
+		"clean_text":                false,
+	})
 
-	// Inline markitdown (empty config)
-	if fps[2].ProviderID != "inline-markitdown" {
-		t.Errorf("expected provider_id 'inline-markitdown', got %q", fps[2].ProviderID)
-	}
+	assertProviderIdentity(t, fps[2], "inline-markitdown", "")
 	if len(fps[2].Config) != 0 {
 		t.Errorf("expected empty config for markitdown, got %v", fps[2].Config)
 	}
 
-	// Inline docling
-	if fps[3].ProviderID != "inline-docling" {
-		t.Errorf("expected provider_id 'inline-docling', got %q", fps[3].ProviderID)
-	}
-	if fps[3].Config["do_ocr"] != false {
-		t.Errorf("expected do_ocr false, got %v", fps[3].Config["do_ocr"])
-	}
+	assertProviderIdentity(t, fps[3], "inline-docling", "")
+	assertConfigValue(t, fps[3].Config, "do_ocr", false)
 }
 
 func TestCollectSecretRefs_FileProcessorsDoclingServe(t *testing.T) {
@@ -1004,7 +1050,7 @@ func TestExpandProviders_VLLMWithCommonInferenceConfig(t *testing.T) {
 						Endpoint: "https://vllm.example.com:8000",
 						RemoteInferenceCommonConfig: ogxiov1beta1.RemoteInferenceCommonConfig{
 							RefreshModels: &refreshModels,
-							AllowedModels: []string{"llama3", "mistral"},
+							AllowedModels: []string{llama3ModelID, "mistral"},
 						},
 					},
 				},
@@ -1025,8 +1071,8 @@ func TestExpandProviders_VLLMWithCommonInferenceConfig(t *testing.T) {
 		t.Errorf("expected refresh_models true, got %v", p.Config["refresh_models"])
 	}
 	allowedModels, ok := p.Config["allowed_models"].([]string)
-	if !ok || len(allowedModels) != 2 || allowedModels[0] != "llama3" {
-		t.Errorf("expected allowed_models [llama3 mistral], got %v", p.Config["allowed_models"])
+	if !ok || len(allowedModels) != 2 || allowedModels[0] != llama3ModelID {
+		t.Errorf("expected allowed_models [%s mistral], got %v", llama3ModelID, p.Config["allowed_models"])
 	}
 }
 
@@ -1146,42 +1192,19 @@ func TestExpandProviders_NetworkConfigNested(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	p := result["inference"][0]
-	network, ok := p.Config["network"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected nested 'network' map, got %T: %v", p.Config["network"], p.Config["network"])
-	}
-	tls, ok := network["tls"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected tls map inside network, got %v", network["tls"])
-	}
-	if tls["verify"] != false {
-		t.Errorf("expected tls verify false, got %v", tls["verify"])
-	}
-	timeout, ok := network["timeout"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected timeout map inside network, got %v", network["timeout"])
-	}
-	if timeout["connect"] != 30 {
-		t.Errorf("expected connect timeout 30, got %v", timeout["connect"])
-	}
-	headers, ok := network["headers"].(map[string]string)
-	if !ok {
-		t.Fatalf("expected headers map inside network, got %v", network["headers"])
-	}
+	p := requireProviderAt(t, result, "inference", 0)
+	network := requireConfigMap(t, p.Config, "network")
+	assertConfigValue(t, requireConfigMap(t, network, "tls"), "verify", false)
+	assertConfigValue(t, requireConfigMap(t, network, "timeout"), "connect", 30)
+
+	headers := requireStringMap(t, network, "headers")
 	if headers["X-Custom"] != "value" {
 		t.Errorf("expected X-Custom header, got %v", headers["X-Custom"])
 	}
 
-	if _, flat := p.Config["tls"]; flat {
-		t.Error("tls should not appear at provider config root")
-	}
-	if _, flat := p.Config["timeout"]; flat {
-		t.Error("timeout should not appear at provider config root")
-	}
-	if _, flat := p.Config["headers"]; flat {
-		t.Error("headers should not appear at provider config root")
-	}
+	assertConfigAbsent(t, p.Config, "tls")
+	assertConfigAbsent(t, p.Config, "timeout")
+	assertConfigAbsent(t, p.Config, "headers")
 }
 
 func TestExpandProviders_NetworkConfigWithProxy(t *testing.T) {
@@ -1295,37 +1318,19 @@ func TestExpandProviders_QdrantAllFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	p := result["vector_io"][0]
-	if p.ProviderType != "remote::qdrant" {
-		t.Errorf("expected provider_type 'remote::qdrant', got %q", p.ProviderType)
-	}
-	if p.Config["url"] != "http://qdrant:6333" {
-		t.Errorf("expected url, got %v", p.Config["url"])
-	}
-	if p.Config["host"] != "qdrant.example.com" {
-		t.Errorf("expected host, got %v", p.Config["host"])
-	}
-	if p.Config["port"] != 6333 {
-		t.Errorf("expected port 6333, got %v", p.Config["port"])
-	}
-	if p.Config["location"] != "us-east-1" {
-		t.Errorf("expected location, got %v", p.Config["location"])
-	}
-	if p.Config["grpc_port"] != 6334 {
-		t.Errorf("expected grpc_port 6334, got %v", p.Config["grpc_port"])
-	}
-	if p.Config["prefer_grpc"] != true {
-		t.Errorf("expected prefer_grpc true, got %v", p.Config["prefer_grpc"])
-	}
-	if p.Config["https"] != true {
-		t.Errorf("expected https true, got %v", p.Config["https"])
-	}
-	if p.Config["prefix"] != "/v1" {
-		t.Errorf("expected prefix '/v1', got %v", p.Config["prefix"])
-	}
-	if p.Config["timeout"] != 30 {
-		t.Errorf("expected timeout 30, got %v", p.Config["timeout"])
-	}
+	p := requireProviderAt(t, result, "vector_io", 0)
+	assertProviderIdentity(t, p, "remote-qdrant", "remote::qdrant")
+	assertConfigValues(t, p.Config, map[string]interface{}{
+		"url":         "http://qdrant:6333",
+		"host":        "qdrant.example.com",
+		"port":        6333,
+		"location":    "us-east-1",
+		"grpc_port":   6334,
+		"prefer_grpc": true,
+		"https":       true,
+		"prefix":      "/v1",
+		"timeout":     30,
+	})
 }
 
 func TestExpandProviders_QdrantMinimalWithHost(t *testing.T) {
@@ -1618,7 +1623,7 @@ func TestExpandProviders_BuiltinResponsesWithVectorStoresAndCompaction(t *testin
 						RewriteQueryParams: &ogxiov1beta1.RewriteQueryParams{
 							Model: &ogxiov1beta1.QualifiedModel{
 								ProviderID: "llm-provider",
-								ModelID:    "llama3",
+								ModelID:    llama3ModelID,
 							},
 							Prompt:      "Rewrite: {query}",
 							MaxTokens:   &maxTokens,
@@ -1681,137 +1686,51 @@ func TestExpandProviders_BuiltinResponsesWithVectorStoresAndCompaction(t *testin
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	p := result["responses"][0]
-	if p.ProviderType != "inline::responses" {
-		t.Errorf("expected provider_type 'inline::responses', got %q", p.ProviderType)
-	}
-	if p.ProviderID != "inline-builtin" {
-		t.Errorf("expected provider_id 'inline-builtin', got %q", p.ProviderID)
-	}
+	p := requireProviderAt(t, result, "responses", 0)
+	assertProviderIdentity(t, p, "inline-builtin", "inline::responses")
 
-	vs, ok := p.Config["vector_stores_config"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected vector_stores_config map, got %v", p.Config["vector_stores_config"])
-	}
-	if vs["default_provider_id"] != "qdrant-1" {
-		t.Errorf("expected default_provider_id, got %v", vs["default_provider_id"])
-	}
+	vs := requireConfigMap(t, p.Config, "vector_stores_config")
+	assertConfigValue(t, vs, "default_provider_id", "qdrant-1")
+	assertConfigValues(t, requireConfigMap(t, vs, "default_reranker_model"), map[string]interface{}{
+		"provider_id": "reranker-provider",
+		"model_id":    "bge-reranker-v2",
+	})
+	assertConfigValues(t, requireConfigMap(t, vs, "rewrite_query_params"), map[string]interface{}{
+		"prompt":      "Rewrite: {query}",
+		"max_tokens":  256,
+		"temperature": "0.7",
+	})
+	assertConfigValues(t, requireConfigMap(t, vs, "file_search_params"), map[string]interface{}{
+		"header_template": "=== Results ===",
+		"footer_template": "=== End ===",
+	})
+	assertConfigValues(t, requireConfigMap(t, vs, "context_prompt_params"), map[string]interface{}{
+		"chunk_annotation_template": "Chunk: {{content}}",
+		"context_template":          "Context: {{chunks}}",
+	})
+	assertConfigValue(t, requireConfigMap(t, vs, "annotation_prompt_params"), "enable_annotations", true)
+	assertConfigValues(t, requireConfigMap(t, vs, "file_ingestion_params"), map[string]interface{}{
+		"default_chunk_size_tokens":    512,
+		"default_chunk_overlap_tokens": 50,
+	})
+	assertConfigValues(t, requireConfigMap(t, vs, "chunk_retrieval_params"), map[string]interface{}{
+		"chunk_multiplier":          3,
+		"default_reranker_strategy": "rrf",
+		"default_search_mode":       "hybrid",
+	})
+	assertConfigValue(t, requireConfigMap(t, vs, "file_batch_params"), "max_concurrent_files_per_batch", 10)
+	assertConfigValues(t, requireConfigMap(t, vs, "contextual_retrieval_params"), map[string]interface{}{
+		"default_timeout_seconds": 30,
+		"max_document_tokens":     8000,
+	})
 
-	reranker, ok := vs["default_reranker_model"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected default_reranker_model map, got %v", vs["default_reranker_model"])
-	}
-	if reranker["provider_id"] != "reranker-provider" || reranker["model_id"] != "bge-reranker-v2" {
-		t.Errorf("unexpected reranker model: %v", reranker)
-	}
-
-	rqp, ok := vs["rewrite_query_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected rewrite_query_params map, got %v", vs["rewrite_query_params"])
-	}
-	if rqp["prompt"] != "Rewrite: {query}" {
-		t.Errorf("expected rewrite prompt, got %v", rqp["prompt"])
-	}
-	if rqp["max_tokens"] != 256 {
-		t.Errorf("expected max_tokens 256, got %v", rqp["max_tokens"])
-	}
-	if rqp["temperature"] != "0.7" {
-		t.Errorf("expected temperature '0.7', got %v", rqp["temperature"])
-	}
-
-	fsp, ok := vs["file_search_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected file_search_params map, got %v", vs["file_search_params"])
-	}
-	if fsp["header_template"] != "=== Results ===" {
-		t.Errorf("expected header_template, got %v", fsp["header_template"])
-	}
-	if fsp["footer_template"] != "=== End ===" {
-		t.Errorf("expected footer_template, got %v", fsp["footer_template"])
-	}
-
-	cpp, ok := vs["context_prompt_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected context_prompt_params map, got %v", vs["context_prompt_params"])
-	}
-	if cpp["chunk_annotation_template"] != "Chunk: {{content}}" {
-		t.Errorf("expected chunk_annotation_template, got %v", cpp["chunk_annotation_template"])
-	}
-	if cpp["context_template"] != "Context: {{chunks}}" {
-		t.Errorf("expected context_template, got %v", cpp["context_template"])
-	}
-
-	app, ok := vs["annotation_prompt_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected annotation_prompt_params map, got %v", vs["annotation_prompt_params"])
-	}
-	if app["enable_annotations"] != true {
-		t.Errorf("expected enable_annotations true, got %v", app["enable_annotations"])
-	}
-
-	fip, ok := vs["file_ingestion_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected file_ingestion_params map, got %v", vs["file_ingestion_params"])
-	}
-	if fip["default_chunk_size_tokens"] != 512 {
-		t.Errorf("expected chunk_size 512, got %v", fip["default_chunk_size_tokens"])
-	}
-	if fip["default_chunk_overlap_tokens"] != 50 {
-		t.Errorf("expected chunk_overlap 50, got %v", fip["default_chunk_overlap_tokens"])
-	}
-
-	crp, ok := vs["chunk_retrieval_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected chunk_retrieval_params map, got %v", vs["chunk_retrieval_params"])
-	}
-	if crp["chunk_multiplier"] != 3 {
-		t.Errorf("expected chunk_multiplier 3, got %v", crp["chunk_multiplier"])
-	}
-	if crp["default_reranker_strategy"] != "rrf" {
-		t.Errorf("expected default_reranker_strategy 'rrf', got %v", crp["default_reranker_strategy"])
-	}
-	if crp["default_search_mode"] != "hybrid" {
-		t.Errorf("expected default_search_mode 'hybrid', got %v", crp["default_search_mode"])
-	}
-
-	fbp, ok := vs["file_batch_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected file_batch_params map, got %v", vs["file_batch_params"])
-	}
-	if fbp["max_concurrent_files_per_batch"] != 10 {
-		t.Errorf("expected max_concurrent_files_per_batch 10, got %v", fbp["max_concurrent_files_per_batch"])
-	}
-
-	ctx, ok := vs["contextual_retrieval_params"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected contextual_retrieval_params map, got %v", vs["contextual_retrieval_params"])
-	}
-	if ctx["default_timeout_seconds"] != 30 {
-		t.Errorf("expected default_timeout_seconds 30, got %v", ctx["default_timeout_seconds"])
-	}
-	if ctx["max_document_tokens"] != 8000 {
-		t.Errorf("expected max_document_tokens 8000, got %v", ctx["max_document_tokens"])
-	}
-
-	cc, ok := p.Config["compaction_config"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected compaction_config map, got %v", p.Config["compaction_config"])
-	}
-	if cc["summarization_prompt"] != "Summarize this conversation" {
-		t.Errorf("expected summarization_prompt, got %v", cc["summarization_prompt"])
-	}
-	if cc["summary_prefix"] != "Previous context: " {
-		t.Errorf("expected summary_prefix, got %v", cc["summary_prefix"])
-	}
-	if cc["summarization_model"] != "llama3-8b" {
-		t.Errorf("expected summarization_model, got %v", cc["summarization_model"])
-	}
-	if cc["default_compact_threshold"] != 4096 {
-		t.Errorf("expected default_compact_threshold 4096, got %v", cc["default_compact_threshold"])
-	}
-	if cc["tokenizer_encoding"] != "cl100k_base" {
-		t.Errorf("expected tokenizer_encoding, got %v", cc["tokenizer_encoding"])
-	}
+	assertConfigValues(t, requireConfigMap(t, p.Config, "compaction_config"), map[string]interface{}{
+		"summarization_prompt":      "Summarize this conversation",
+		"summary_prefix":            "Previous context: ",
+		"summarization_model":       "llama3-8b",
+		"default_compact_threshold": 4096,
+		"tokenizer_encoding":        "cl100k_base",
+	})
 }
 
 func TestExpandProviders_BuiltinResponsesEmpty(t *testing.T) {

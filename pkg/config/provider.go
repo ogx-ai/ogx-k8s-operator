@@ -354,32 +354,8 @@ func expandPgvectorProvider(p ogxiov1beta1.PgvectorProvider) ConfigProvider {
 	if p.DistanceMetric != "" {
 		cfg["distance_metric"] = p.DistanceMetric
 	}
-	if p.VectorIndex != nil {
-		vi := map[string]interface{}{}
-		if p.VectorIndex.HNSW != nil {
-			hnsw := map[string]interface{}{}
-			if p.VectorIndex.HNSW.M != nil {
-				hnsw["m"] = *p.VectorIndex.HNSW.M
-			}
-			if p.VectorIndex.HNSW.EfConstruction != nil {
-				hnsw["ef_construction"] = *p.VectorIndex.HNSW.EfConstruction
-			}
-			if p.VectorIndex.HNSW.EfSearch != nil {
-				hnsw["ef_search"] = *p.VectorIndex.HNSW.EfSearch
-			}
-			vi["hnsw"] = hnsw
-		}
-		if p.VectorIndex.IVFFlat != nil {
-			ivf := map[string]interface{}{}
-			if p.VectorIndex.IVFFlat.Nlist != nil {
-				ivf["nlist"] = *p.VectorIndex.IVFFlat.Nlist
-			}
-			if p.VectorIndex.IVFFlat.Nprobe != nil {
-				ivf["nprobe"] = *p.VectorIndex.IVFFlat.Nprobe
-			}
-			vi["ivf_flat"] = ivf
-		}
-		cfg["vector_index"] = vi
+	if vectorIndex := expandPgvectorVectorIndex(p.VectorIndex); vectorIndex != nil {
+		cfg["vector_index"] = vectorIndex
 	}
 
 	return ConfigProvider{
@@ -387,6 +363,63 @@ func expandPgvectorProvider(p ogxiov1beta1.PgvectorProvider) ConfigProvider {
 		ProviderType: "remote::pgvector",
 		Config:       cfg,
 	}
+}
+
+func expandPgvectorVectorIndex(vectorIndex *ogxiov1beta1.VectorIndexConfig) map[string]interface{} {
+	if vectorIndex == nil {
+		return nil
+	}
+
+	cfg := map[string]interface{}{}
+	if hnsw := expandPgvectorHNSW(vectorIndex.HNSW); hnsw != nil {
+		cfg["hnsw"] = hnsw
+	}
+	if ivfFlat := expandPgvectorIVFFlat(vectorIndex.IVFFlat); ivfFlat != nil {
+		cfg["ivf_flat"] = ivfFlat
+	}
+	if len(cfg) == 0 {
+		return nil
+	}
+	return cfg
+}
+
+func expandPgvectorHNSW(hnsw *ogxiov1beta1.HNSWConfig) map[string]interface{} {
+	if hnsw == nil {
+		return nil
+	}
+
+	cfg := map[string]interface{}{}
+	if hnsw.M != nil {
+		cfg["m"] = *hnsw.M
+	}
+	if hnsw.EfConstruction != nil {
+		cfg["ef_construction"] = *hnsw.EfConstruction
+	}
+	if hnsw.EfSearch != nil {
+		cfg["ef_search"] = *hnsw.EfSearch
+	}
+	if len(cfg) == 0 {
+		return nil
+	}
+	return cfg
+}
+
+func expandPgvectorIVFFlat(ivfFlat *ogxiov1beta1.IVFFlatConfig) map[string]interface{} {
+	if ivfFlat == nil {
+		return nil
+	}
+
+	cfg := map[string]interface{}{}
+	if ivfFlat.Nlist != nil {
+		cfg["nlist"] = *ivfFlat.Nlist
+	}
+	if ivfFlat.Nprobe != nil {
+		cfg["nprobe"] = *ivfFlat.Nprobe
+	}
+	if len(cfg) == 0 {
+		return nil
+	}
+	return cfg
 }
 
 func expandMilvusProvider(p ogxiov1beta1.MilvusProvider) ConfigProvider {
@@ -409,6 +442,18 @@ func expandMilvusProvider(p ogxiov1beta1.MilvusProvider) ConfigProvider {
 
 func expandQdrantProvider(p ogxiov1beta1.QdrantProvider) ConfigProvider {
 	cfg := map[string]interface{}{}
+	applyQdrantConnectionConfig(cfg, p)
+	applyQdrantAuthConfig(cfg, p)
+	applyQdrantRuntimeConfig(cfg, p)
+
+	return ConfigProvider{
+		ProviderID:   p.DeriveID(),
+		ProviderType: "remote::qdrant",
+		Config:       cfg,
+	}
+}
+
+func applyQdrantConnectionConfig(cfg map[string]interface{}, p ogxiov1beta1.QdrantProvider) {
 	if p.URL != "" {
 		cfg["url"] = p.URL
 	}
@@ -418,12 +463,18 @@ func expandQdrantProvider(p ogxiov1beta1.QdrantProvider) ConfigProvider {
 	if p.Port != nil {
 		cfg["port"] = *p.Port
 	}
-	if p.APIKey != nil {
-		cfg["api_key"] = envVarRef(p.DeriveID(), "API_KEY")
-	}
 	if p.Location != "" {
 		cfg["location"] = p.Location
 	}
+}
+
+func applyQdrantAuthConfig(cfg map[string]interface{}, p ogxiov1beta1.QdrantProvider) {
+	if p.APIKey != nil {
+		cfg["api_key"] = envVarRef(p.DeriveID(), "API_KEY")
+	}
+}
+
+func applyQdrantRuntimeConfig(cfg map[string]interface{}, p ogxiov1beta1.QdrantProvider) {
 	if p.GRPCPort != nil {
 		cfg["grpc_port"] = *p.GRPCPort
 	}
@@ -438,12 +489,6 @@ func expandQdrantProvider(p ogxiov1beta1.QdrantProvider) ConfigProvider {
 	}
 	if p.Timeout != nil {
 		cfg["timeout"] = *p.Timeout
-	}
-
-	return ConfigProvider{
-		ProviderID:   p.DeriveID(),
-		ProviderType: "remote::qdrant",
-		Config:       cfg,
 	}
 }
 
@@ -803,130 +848,181 @@ func applyProxyConfig(cfg map[string]interface{}, proxy *ogxiov1beta1.ProxyConfi
 
 func expandVectorStoresConfig(vs *ogxiov1beta1.VectorStoresConfig) map[string]interface{} {
 	m := map[string]interface{}{}
+	applyVectorStoreDefaults(m, vs)
+	applyVectorStoreSearchConfig(m, vs)
+	applyVectorStorePromptConfig(m, vs)
+	applyVectorStoreIngestionConfig(m, vs)
+	return m
+}
+
+func applyVectorStoreDefaults(cfg map[string]interface{}, vs *ogxiov1beta1.VectorStoresConfig) {
 	if vs.DefaultProviderID != "" {
-		m["default_provider_id"] = vs.DefaultProviderID
+		cfg["default_provider_id"] = vs.DefaultProviderID
 	}
 	if vs.DefaultEmbeddingModel != nil {
-		m["default_embedding_model"] = expandQualifiedModel(vs.DefaultEmbeddingModel)
+		cfg["default_embedding_model"] = expandQualifiedModel(vs.DefaultEmbeddingModel)
 	}
 	if vs.DefaultRerankerModel != nil {
-		rm := map[string]interface{}{
-			"provider_id": vs.DefaultRerankerModel.ProviderID,
-			"model_id":    vs.DefaultRerankerModel.ModelID,
-		}
-		m["default_reranker_model"] = rm
+		cfg["default_reranker_model"] = expandRerankerModel(vs.DefaultRerankerModel)
 	}
+}
+
+func applyVectorStoreSearchConfig(cfg map[string]interface{}, vs *ogxiov1beta1.VectorStoresConfig) {
 	if vs.RewriteQueryParams != nil {
-		rqp := map[string]interface{}{}
-		if vs.RewriteQueryParams.Model != nil {
-			rqp["model"] = expandQualifiedModel(vs.RewriteQueryParams.Model)
-		}
-		if vs.RewriteQueryParams.Prompt != "" {
-			rqp["prompt"] = vs.RewriteQueryParams.Prompt
-		}
-		if vs.RewriteQueryParams.MaxTokens != nil {
-			rqp["max_tokens"] = *vs.RewriteQueryParams.MaxTokens
-		}
-		if vs.RewriteQueryParams.Temperature != nil {
-			rqp["temperature"] = *vs.RewriteQueryParams.Temperature
-		}
-		m["rewrite_query_params"] = rqp
+		cfg["rewrite_query_params"] = expandRewriteQueryParams(vs.RewriteQueryParams)
 	}
 	if vs.FileSearchParams != nil {
-		fsp := map[string]interface{}{}
-		if vs.FileSearchParams.HeaderTemplate != "" {
-			fsp["header_template"] = vs.FileSearchParams.HeaderTemplate
-		}
-		if vs.FileSearchParams.FooterTemplate != "" {
-			fsp["footer_template"] = vs.FileSearchParams.FooterTemplate
-		}
-		m["file_search_params"] = fsp
-	}
-	if vs.ContextPromptParams != nil {
-		cpp := map[string]interface{}{}
-		if vs.ContextPromptParams.ChunkAnnotationTemplate != "" {
-			cpp["chunk_annotation_template"] = vs.ContextPromptParams.ChunkAnnotationTemplate
-		}
-		if vs.ContextPromptParams.ContextTemplate != "" {
-			cpp["context_template"] = vs.ContextPromptParams.ContextTemplate
-		}
-		m["context_prompt_params"] = cpp
-	}
-	if vs.AnnotationPromptParams != nil {
-		app := map[string]interface{}{}
-		if vs.AnnotationPromptParams.EnableAnnotations != nil {
-			app["enable_annotations"] = *vs.AnnotationPromptParams.EnableAnnotations
-		}
-		if vs.AnnotationPromptParams.AnnotationInstructionTemplate != "" {
-			app["annotation_instruction_template"] = vs.AnnotationPromptParams.AnnotationInstructionTemplate
-		}
-		if vs.AnnotationPromptParams.ChunkAnnotationTemplate != "" {
-			app["chunk_annotation_template"] = vs.AnnotationPromptParams.ChunkAnnotationTemplate
-		}
-		m["annotation_prompt_params"] = app
-	}
-	if vs.FileIngestionParams != nil {
-		fip := map[string]interface{}{}
-		if vs.FileIngestionParams.DefaultChunkSizeTokens != nil {
-			fip["default_chunk_size_tokens"] = *vs.FileIngestionParams.DefaultChunkSizeTokens
-		}
-		if vs.FileIngestionParams.DefaultChunkOverlapTokens != nil {
-			fip["default_chunk_overlap_tokens"] = *vs.FileIngestionParams.DefaultChunkOverlapTokens
-		}
-		m["file_ingestion_params"] = fip
+		cfg["file_search_params"] = expandFileSearchParams(vs.FileSearchParams)
 	}
 	if vs.ChunkRetrievalParams != nil {
-		crp := map[string]interface{}{}
-		if vs.ChunkRetrievalParams.ChunkMultiplier != nil {
-			crp["chunk_multiplier"] = *vs.ChunkRetrievalParams.ChunkMultiplier
-		}
-		if vs.ChunkRetrievalParams.MaxTokensInContext != nil {
-			crp["max_tokens_in_context"] = *vs.ChunkRetrievalParams.MaxTokensInContext
-		}
-		if vs.ChunkRetrievalParams.DefaultRerankerStrategy != nil {
-			crp["default_reranker_strategy"] = *vs.ChunkRetrievalParams.DefaultRerankerStrategy
-		}
-		if vs.ChunkRetrievalParams.RRFImpactFactor != nil {
-			crp["rrf_impact_factor"] = *vs.ChunkRetrievalParams.RRFImpactFactor
-		}
-		if vs.ChunkRetrievalParams.WeightedSearchAlpha != nil {
-			crp["weighted_search_alpha"] = *vs.ChunkRetrievalParams.WeightedSearchAlpha
-		}
-		if vs.ChunkRetrievalParams.DefaultSearchMode != nil {
-			crp["default_search_mode"] = *vs.ChunkRetrievalParams.DefaultSearchMode
-		}
-		m["chunk_retrieval_params"] = crp
+		cfg["chunk_retrieval_params"] = expandChunkRetrievalParams(vs.ChunkRetrievalParams)
+	}
+}
+
+func applyVectorStorePromptConfig(cfg map[string]interface{}, vs *ogxiov1beta1.VectorStoresConfig) {
+	if vs.ContextPromptParams != nil {
+		cfg["context_prompt_params"] = expandContextPromptParams(vs.ContextPromptParams)
+	}
+	if vs.AnnotationPromptParams != nil {
+		cfg["annotation_prompt_params"] = expandAnnotationPromptParams(vs.AnnotationPromptParams)
+	}
+}
+
+func applyVectorStoreIngestionConfig(cfg map[string]interface{}, vs *ogxiov1beta1.VectorStoresConfig) {
+	if vs.FileIngestionParams != nil {
+		cfg["file_ingestion_params"] = expandFileIngestionParams(vs.FileIngestionParams)
 	}
 	if vs.FileBatchParams != nil {
-		fbp := map[string]interface{}{}
-		if vs.FileBatchParams.MaxConcurrentFilesPerBatch != nil {
-			fbp["max_concurrent_files_per_batch"] = *vs.FileBatchParams.MaxConcurrentFilesPerBatch
-		}
-		if vs.FileBatchParams.FileBatchChunkSize != nil {
-			fbp["file_batch_chunk_size"] = *vs.FileBatchParams.FileBatchChunkSize
-		}
-		if vs.FileBatchParams.CleanupIntervalSeconds != nil {
-			fbp["cleanup_interval_seconds"] = *vs.FileBatchParams.CleanupIntervalSeconds
-		}
-		m["file_batch_params"] = fbp
+		cfg["file_batch_params"] = expandFileBatchParams(vs.FileBatchParams)
 	}
 	if vs.ContextualRetrievalParams != nil {
-		ctx := map[string]interface{}{}
-		if vs.ContextualRetrievalParams.Model != nil {
-			ctx["model"] = expandQualifiedModel(vs.ContextualRetrievalParams.Model)
-		}
-		if vs.ContextualRetrievalParams.DefaultTimeoutSeconds != nil {
-			ctx["default_timeout_seconds"] = *vs.ContextualRetrievalParams.DefaultTimeoutSeconds
-		}
-		if vs.ContextualRetrievalParams.DefaultMaxConcurrency != nil {
-			ctx["default_max_concurrency"] = *vs.ContextualRetrievalParams.DefaultMaxConcurrency
-		}
-		if vs.ContextualRetrievalParams.MaxDocumentTokens != nil {
-			ctx["max_document_tokens"] = *vs.ContextualRetrievalParams.MaxDocumentTokens
-		}
-		m["contextual_retrieval_params"] = ctx
+		cfg["contextual_retrieval_params"] = expandContextualRetrievalParams(vs.ContextualRetrievalParams)
 	}
-	return m
+}
+
+func expandRerankerModel(model *ogxiov1beta1.RerankerModel) map[string]interface{} {
+	return map[string]interface{}{
+		"provider_id": model.ProviderID,
+		"model_id":    model.ModelID,
+	}
+}
+
+func expandRewriteQueryParams(params *ogxiov1beta1.RewriteQueryParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.Model != nil {
+		cfg["model"] = expandQualifiedModel(params.Model)
+	}
+	if params.Prompt != "" {
+		cfg["prompt"] = params.Prompt
+	}
+	if params.MaxTokens != nil {
+		cfg["max_tokens"] = *params.MaxTokens
+	}
+	if params.Temperature != nil {
+		cfg["temperature"] = *params.Temperature
+	}
+	return cfg
+}
+
+func expandFileSearchParams(params *ogxiov1beta1.FileSearchDisplayParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.HeaderTemplate != "" {
+		cfg["header_template"] = params.HeaderTemplate
+	}
+	if params.FooterTemplate != "" {
+		cfg["footer_template"] = params.FooterTemplate
+	}
+	return cfg
+}
+
+func expandContextPromptParams(params *ogxiov1beta1.ContextPromptParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.ChunkAnnotationTemplate != "" {
+		cfg["chunk_annotation_template"] = params.ChunkAnnotationTemplate
+	}
+	if params.ContextTemplate != "" {
+		cfg["context_template"] = params.ContextTemplate
+	}
+	return cfg
+}
+
+func expandAnnotationPromptParams(params *ogxiov1beta1.AnnotationPromptParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.EnableAnnotations != nil {
+		cfg["enable_annotations"] = *params.EnableAnnotations
+	}
+	if params.AnnotationInstructionTemplate != "" {
+		cfg["annotation_instruction_template"] = params.AnnotationInstructionTemplate
+	}
+	if params.ChunkAnnotationTemplate != "" {
+		cfg["chunk_annotation_template"] = params.ChunkAnnotationTemplate
+	}
+	return cfg
+}
+
+func expandFileIngestionParams(params *ogxiov1beta1.FileIngestionParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.DefaultChunkSizeTokens != nil {
+		cfg["default_chunk_size_tokens"] = *params.DefaultChunkSizeTokens
+	}
+	if params.DefaultChunkOverlapTokens != nil {
+		cfg["default_chunk_overlap_tokens"] = *params.DefaultChunkOverlapTokens
+	}
+	return cfg
+}
+
+func expandChunkRetrievalParams(params *ogxiov1beta1.ChunkRetrievalParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.ChunkMultiplier != nil {
+		cfg["chunk_multiplier"] = *params.ChunkMultiplier
+	}
+	if params.MaxTokensInContext != nil {
+		cfg["max_tokens_in_context"] = *params.MaxTokensInContext
+	}
+	if params.DefaultRerankerStrategy != nil {
+		cfg["default_reranker_strategy"] = *params.DefaultRerankerStrategy
+	}
+	if params.RRFImpactFactor != nil {
+		cfg["rrf_impact_factor"] = *params.RRFImpactFactor
+	}
+	if params.WeightedSearchAlpha != nil {
+		cfg["weighted_search_alpha"] = *params.WeightedSearchAlpha
+	}
+	if params.DefaultSearchMode != nil {
+		cfg["default_search_mode"] = *params.DefaultSearchMode
+	}
+	return cfg
+}
+
+func expandFileBatchParams(params *ogxiov1beta1.FileBatchParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.MaxConcurrentFilesPerBatch != nil {
+		cfg["max_concurrent_files_per_batch"] = *params.MaxConcurrentFilesPerBatch
+	}
+	if params.FileBatchChunkSize != nil {
+		cfg["file_batch_chunk_size"] = *params.FileBatchChunkSize
+	}
+	if params.CleanupIntervalSeconds != nil {
+		cfg["cleanup_interval_seconds"] = *params.CleanupIntervalSeconds
+	}
+	return cfg
+}
+
+func expandContextualRetrievalParams(params *ogxiov1beta1.ContextualRetrievalParams) map[string]interface{} {
+	cfg := map[string]interface{}{}
+	if params.Model != nil {
+		cfg["model"] = expandQualifiedModel(params.Model)
+	}
+	if params.DefaultTimeoutSeconds != nil {
+		cfg["default_timeout_seconds"] = *params.DefaultTimeoutSeconds
+	}
+	if params.DefaultMaxConcurrency != nil {
+		cfg["default_max_concurrency"] = *params.DefaultMaxConcurrency
+	}
+	if params.MaxDocumentTokens != nil {
+		cfg["max_document_tokens"] = *params.MaxDocumentTokens
+	}
+	return cfg
 }
 
 func expandQualifiedModel(qm *ogxiov1beta1.QualifiedModel) map[string]interface{} {

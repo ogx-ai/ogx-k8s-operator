@@ -136,7 +136,8 @@ func (c *ociConfigCache) get(key string) ([]byte, bool) {
 		return nil, false
 	}
 	c.order.MoveToFront(elem)
-	return elem.Value.(*ociCacheEntry).data, true
+	entry := cacheEntry(elem)
+	return entry.data, true
 }
 
 func (c *ociConfigCache) set(key string, data []byte) {
@@ -144,14 +145,24 @@ func (c *ociConfigCache) set(key string, data []byte) {
 	defer c.mu.Unlock()
 	if elem, ok := c.items[key]; ok {
 		c.order.MoveToFront(elem)
-		elem.Value.(*ociCacheEntry).data = data
+		entry := cacheEntry(elem)
+		entry.data = data
 		return
 	}
 	if len(c.items) >= maxOCICacheEntries {
 		oldest := c.order.Back()
-		c.order.Remove(oldest)
-		delete(c.items, oldest.Value.(*ociCacheEntry).key)
+		oldestEntry := cacheEntry(oldest)
+		_ = c.order.Remove(oldest)
+		delete(c.items, oldestEntry.key)
 	}
 	elem := c.order.PushFront(&ociCacheEntry{key: key, data: data})
 	c.items[key] = elem
+}
+
+func cacheEntry(elem *list.Element) *ociCacheEntry {
+	entry, ok := elem.Value.(*ociCacheEntry)
+	if !ok {
+		panic("unexpected OCI cache entry type")
+	}
+	return entry
 }
