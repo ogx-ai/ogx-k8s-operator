@@ -159,12 +159,13 @@ func main() {
 	if err != nil {
 		if apimeta.IsNoMatchError(err) {
 			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+			tlsOpts = append(tlsOpts, func(c *tls.Config) {
+				c.MinVersion = tls.VersionTLS12
+			})
 		} else {
-			setupLog.Info("TLS profile not available, using hardened defaults", "error", err)
+			setupLog.Error(err, "unable to read OpenShift APIServer TLS profile")
+			os.Exit(1)
 		}
-		tlsOpts = append(tlsOpts, func(c *tls.Config) {
-			c.MinVersion = tls.VersionTLS12
-		})
 	} else {
 		hasOpenShiftConfigAPI = true
 		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
