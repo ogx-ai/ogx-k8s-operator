@@ -126,6 +126,44 @@ func setupHealthChecks(mgr ctrl.Manager) error {
 	return nil
 }
 
+type tlsSetupResult struct {
+	tlsOpts               []func(*tls.Config)
+	profile               configv1.TLSProfileSpec
+	hasOpenShiftConfigAPI bool
+}
+
+func setupTLS() (tlsSetupResult, error) {
+	var result tlsSetupResult
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bootstrapCancel()
+	bootstrapClient, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
+	if err != nil {
+		return result, fmt.Errorf("unable to create bootstrap client for TLS profile: %w", err)
+	}
+	result.profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient)
+	if err != nil {
+		if apimeta.IsNoMatchError(err) {
+			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+			result.tlsOpts = append(result.tlsOpts, func(c *tls.Config) {
+				c.MinVersion = tls.VersionTLS12
+			})
+		} else {
+			return result, fmt.Errorf("unable to read APIServer TLS profile: %w", err)
+		}
+	} else {
+		result.hasOpenShiftConfigAPI = true
+		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(result.profile)
+		if len(unsupportedCiphers) > 0 {
+			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
+		}
+		result.tlsOpts = append(result.tlsOpts, tlsConfigFn)
+	}
+	result.tlsOpts = append(result.tlsOpts, func(c *tls.Config) {
+		c.NextProtos = []string{"h2", "http/1.1"}
+	})
+	return result, nil
+}
+
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -144,39 +182,11 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Fetch the cluster TLS security profile for webhook and metrics servers (OpenShift only)
-	var tlsOpts []func(*tls.Config)
-	var profile configv1.TLSProfileSpec
-	hasOpenShiftConfigAPI := false
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer bootstrapCancel()
-	bootstrapClient, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
+	tlsResult, err := setupTLS()
 	if err != nil {
-		setupLog.Error(err, "unable to create bootstrap client for TLS profile")
+		setupLog.Error(err, "failed to set up TLS")
 		os.Exit(1)
 	}
-	profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient)
-	if err != nil {
-		if apimeta.IsNoMatchError(err) {
-			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
-			tlsOpts = append(tlsOpts, func(c *tls.Config) {
-				c.MinVersion = tls.VersionTLS12
-			})
-		} else {
-			setupLog.Error(err, "unable to read OpenShift APIServer TLS profile")
-			os.Exit(1)
-		}
-	} else {
-		hasOpenShiftConfigAPI = true
-		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
-		if len(unsupportedCiphers) > 0 {
-			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
-		}
-		tlsOpts = append(tlsOpts, tlsConfigFn)
-	}
-	tlsOpts = append(tlsOpts, func(c *tls.Config) {
-		c.NextProtos = []string{"h2", "http/1.1"}
-	})
 
 	// root context
 	sigCtx := ctrl.SetupSignalHandler()
@@ -186,7 +196,7 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                     scheme,
-		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsOpts},
+		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsResult.tlsOpts},
 		Cache:                      newCacheOptions(),
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
@@ -194,7 +204,7 @@ func main() {
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
 		WebhookServer: webhook.NewServer(webhook.Options{
-			TLSOpts: tlsOpts,
+			TLSOpts: tlsResult.tlsOpts,
 		}),
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
@@ -255,10 +265,10 @@ func main() {
 	}
 
 	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts
-	if hasOpenShiftConfigAPI {
+	if tlsResult.hasOpenShiftConfigAPI {
 		watcher := &tlspkg.SecurityProfileWatcher{
 			Client:                mgr.GetClient(),
-			InitialTLSProfileSpec: profile,
+			InitialTLSProfileSpec: tlsResult.profile,
 			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
 				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
 				cancel()
