@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -40,10 +41,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	restclient "k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -126,17 +127,19 @@ func setupHealthChecks(mgr ctrl.Manager) error {
 	return nil
 }
 
+var errTLSProfileChanged = errors.New("TLS profile changed, restarting")
+
 type tlsSetupResult struct {
 	tlsOpts               []func(*tls.Config)
 	profile               configv1.TLSProfileSpec
 	hasOpenShiftConfigAPI bool
 }
 
-func setupTLS() (tlsSetupResult, error) {
+func setupTLS(cfg *restclient.Config) (tlsSetupResult, error) {
 	var result tlsSetupResult
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bootstrapCancel()
-	bootstrapClient, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
+	bootstrapClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		return result, fmt.Errorf("unable to create bootstrap client for TLS profile: %w", err)
 	}
@@ -158,6 +161,7 @@ func setupTLS() (tlsSetupResult, error) {
 		}
 		result.tlsOpts = append(result.tlsOpts, tlsConfigFn)
 	}
+	// ALPN must always be set for HTTP/2 support, regardless of the TLS profile source.
 	result.tlsOpts = append(result.tlsOpts, func(c *tls.Config) {
 		c.NextProtos = []string{"h2", "http/1.1"}
 	})
@@ -189,7 +193,15 @@ func main() {
 }
 
 func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
-	tlsResult, err := setupTLS()
+	cfg, err := restclient.InClusterConfig()
+	if err != nil {
+		cfg, err = ctrl.GetConfig()
+		if err != nil {
+			return fmt.Errorf("failed to get kubeconfig: %w", err)
+		}
+	}
+
+	tlsResult, err := setupTLS(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to set up TLS: %w", err)
 	}
@@ -199,7 +211,7 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 	defer cancel()
 	ctx = logf.IntoContext(ctx, setupLog)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                     scheme,
 		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsResult.tlsOpts},
 		Cache:                      newCacheOptions(),
@@ -214,11 +226,6 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start manager: %w", err)
-	}
-
-	cfg, err := config.GetConfig()
-	if err != nil {
-		return fmt.Errorf("failed to get config for setup: %w", err)
 	}
 
 	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
@@ -262,5 +269,11 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 	}
 
 	setupLog.Info("starting manager")
-	return mgr.Start(ctx)
+	if err := mgr.Start(ctx); err != nil {
+		return err
+	}
+	if ctx.Err() != nil && tlsResult.hasOpenShiftConfigAPI {
+		return errTLSProfileChanged
+	}
+	return nil
 }
