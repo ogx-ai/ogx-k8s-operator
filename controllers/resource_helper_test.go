@@ -99,6 +99,37 @@ func TestBuildContainerSpec(t *testing.T) {
 		}
 		assert.Contains(t, envNames, "TEST_ENV")
 	})
+
+	t.Run("registryRefreshIntervalSeconds not set", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			},
+		}
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		for _, e := range c.Env {
+			assert.NotEqual(t, "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS", e.Name)
+		}
+	})
+
+	t.Run("registryRefreshIntervalSeconds set", func(t *testing.T) {
+		val := int32(30)
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution:                   ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+				RegistryRefreshIntervalSeconds: &val,
+			},
+		}
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		var found bool
+		for _, e := range c.Env {
+			if e.Name == "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS" {
+				assert.Equal(t, "30", e.Value)
+				found = true
+			}
+		}
+		assert.True(t, found, "expected OGX_REGISTRY_REFRESH_INTERVAL_SECONDS env var")
+	})
 }
 
 func TestResolveImage(t *testing.T) {

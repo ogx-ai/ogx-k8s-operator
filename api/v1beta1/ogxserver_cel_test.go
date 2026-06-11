@@ -866,6 +866,56 @@ func TestCEL_WorkloadOverrides(t *testing.T) {
 	}
 }
 
+func TestCEL_RegistryRefreshIntervalSeconds(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-regref")
+
+	tests := []struct {
+		name      string
+		mutate    func(*OGXServer)
+		wantError string
+	}{
+		{
+			name:   "field omitted is valid",
+			mutate: func(_ *OGXServer) {},
+		},
+		{
+			name: "value of 1 is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.RegistryRefreshIntervalSeconds = ptr(int32(1))
+			},
+		},
+		{
+			name: "large value is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.RegistryRefreshIntervalSeconds = ptr(int32(86400))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			tt.mutate(obj)
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected success, got: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+			} else {
+				requireCELError(t, err, tt.wantError)
+			}
+		})
+	}
+
+	t.Run("value of 0 is rejected by minimum constraint", func(t *testing.T) {
+		raw := validUnstructuredOGXServer(t, uniqueName(), ns)
+		setNestedField(raw, int64(0), "spec", "registryRefreshIntervalSeconds")
+		err := createUnstructured(t, raw)
+		requireAPIError(t, err, "should be greater than or equal to 1")
+	})
+}
+
 func TestCEL_VectorIndexConfig(t *testing.T) {
 	ns := createCELTestNamespace(t, "cel-vidx")
 

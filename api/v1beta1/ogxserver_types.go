@@ -462,6 +462,12 @@ type OGXServerSpec struct {
 	// +kubebuilder:validation:MaxItems=6
 	// +kubebuilder:validation:items:Enum=batches;inference;responses;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
+	// RegistryRefreshIntervalSeconds configures how often the server refreshes
+	// its model registry, in seconds. When omitted, the server's built-in
+	// default is used.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RegistryRefreshIntervalSeconds *int32 `json:"registryRefreshIntervalSeconds,omitempty"`
 	// Network defines network access controls.
 	// +optional
 	Network *NetworkSpec `json:"network,omitempty"`
