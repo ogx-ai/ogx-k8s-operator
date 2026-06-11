@@ -141,7 +141,7 @@ func setupTLS(cfg *restclient.Config) (tlsSetupResult, error) {
 	defer bootstrapCancel()
 	bootstrapClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		return result, fmt.Errorf("unable to create bootstrap client for TLS profile: %w", err)
+		return result, fmt.Errorf("failed to create bootstrap client for TLS profile: %w", err)
 	}
 	result.profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient)
 	if err != nil {
@@ -151,7 +151,7 @@ func setupTLS(cfg *restclient.Config) (tlsSetupResult, error) {
 				c.MinVersion = tls.VersionTLS12
 			})
 		} else {
-			return result, fmt.Errorf("unable to read APIServer TLS profile: %w", err)
+			return result, fmt.Errorf("failed to read APIServer TLS profile: %w", err)
 		}
 	} else {
 		result.hasOpenShiftConfigAPI = true
@@ -192,13 +192,36 @@ func main() {
 	}
 }
 
-func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
-	cfg, err := restclient.InClusterConfig()
+func setupComponents(ctx context.Context, cfg *restclient.Config, mgr ctrl.Manager) error {
+	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		cfg, err = ctrl.GetConfig()
-		if err != nil {
-			return fmt.Errorf("failed to get kubeconfig: %w", err)
-		}
+		return fmt.Errorf("failed to set up clients: %w", err)
+	}
+
+	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, embeddedDistributions)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cluster config: %w", err)
+	}
+
+	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
+		return fmt.Errorf("failed to perform upgrade cleanup: %w", err)
+	}
+
+	if err := setupWebhook(mgr, clusterInfo); err != nil {
+		return fmt.Errorf("failed to set up webhook: %w", err)
+	}
+
+	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo, setupClient); err != nil {
+		return fmt.Errorf("failed to set up reconciler: %w", err)
+	}
+
+	return setupHealthChecks(mgr)
+}
+
+func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
 
 	tlsResult, err := setupTLS(cfg)
@@ -228,30 +251,8 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 		return fmt.Errorf("failed to start manager: %w", err)
 	}
 
-	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		return fmt.Errorf("failed to set up clients: %w", err)
-	}
-
-	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, embeddedDistributions)
-	if err != nil {
-		return fmt.Errorf("failed to initialize cluster config: %w", err)
-	}
-
-	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
-		return fmt.Errorf("failed to perform upgrade cleanup: %w", err)
-	}
-
-	if err := setupWebhook(mgr, clusterInfo); err != nil {
-		return fmt.Errorf("failed to set up webhook: %w", err)
-	}
-
-	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo, setupClient); err != nil {
-		return fmt.Errorf("failed to set up reconciler: %w", err)
-	}
-
-	if err := setupHealthChecks(mgr); err != nil {
-		return fmt.Errorf("failed to set up health checks: %w", err)
+	if err := setupComponents(ctx, cfg, mgr); err != nil {
+		return err
 	}
 
 	if tlsResult.hasOpenShiftConfigAPI {
@@ -264,7 +265,7 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 			},
 		}
 		if err := watcher.SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("unable to register TLS security profile watcher: %w", err)
+			return fmt.Errorf("failed to register TLS security profile watcher: %w", err)
 		}
 	}
 
