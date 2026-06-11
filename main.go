@@ -182,13 +182,18 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	tlsResult, err := setupTLS()
-	if err != nil {
-		setupLog.Error(err, "failed to set up TLS")
+	if err := run(metricsAddr, probeAddr, enableLeaderElection); err != nil {
+		setupLog.Error(err, "failed to run manager")
 		os.Exit(1)
 	}
+}
 
-	// root context
+func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
+	tlsResult, err := setupTLS()
+	if err != nil {
+		return fmt.Errorf("failed to set up TLS: %w", err)
+	}
+
 	sigCtx := ctrl.SetupSignalHandler()
 	ctx, cancel := context.WithCancel(sigCtx)
 	defer cancel()
@@ -206,65 +211,42 @@ func main() {
 		WebhookServer: webhook.NewServer(webhook.Options{
 			TLSOpts: tlsResult.tlsOpts,
 		}),
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
-		setupLog.Error(err, "failed to start manager")
-		os.Exit(1)
+		return fmt.Errorf("failed to start manager: %w", err)
 	}
 
 	cfg, err := config.GetConfig()
 	if err != nil {
-		setupLog.Error(err, "failed to get config for setup")
-		os.Exit(1)
+		return fmt.Errorf("failed to get config for setup: %w", err)
 	}
 
-	setupClient, err := client.New(cfg, client.Options{
-		Scheme: scheme,
-	})
+	setupClient, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		setupLog.Error(err, "failed to set up clients")
-		os.Exit(1)
+		return fmt.Errorf("failed to set up clients: %w", err)
 	}
 
 	clusterInfo, err := cluster.NewClusterInfo(ctx, setupClient, embeddedDistributions)
 	if err != nil {
-		setupLog.Error(err, "failed to initialize cluster config")
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize cluster config: %w", err)
 	}
 
-	// Perform one-time upgrade cleanup operations
 	if err := cluster.PerformUpgradeCleanup(ctx, setupClient); err != nil {
-		setupLog.Error(err, "failed to perform upgrade cleanup")
-		os.Exit(1)
+		return fmt.Errorf("failed to perform upgrade cleanup: %w", err)
 	}
 
 	if err := setupWebhook(mgr, clusterInfo); err != nil {
-		setupLog.Error(err, "failed to set up webhook")
-		os.Exit(1)
+		return fmt.Errorf("failed to set up webhook: %w", err)
 	}
 
 	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo, setupClient); err != nil {
-		setupLog.Error(err, "failed to set up reconciler")
-		os.Exit(1)
+		return fmt.Errorf("failed to set up reconciler: %w", err)
 	}
 
 	if err := setupHealthChecks(mgr); err != nil {
-		setupLog.Error(err, "failed to set up health checks")
-		os.Exit(1)
+		return fmt.Errorf("failed to set up health checks: %w", err)
 	}
 
-	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts
 	if tlsResult.hasOpenShiftConfigAPI {
 		watcher := &tlspkg.SecurityProfileWatcher{
 			Client:                mgr.GetClient(),
@@ -275,14 +257,10 @@ func main() {
 			},
 		}
 		if err := watcher.SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to register TLS security profile watcher")
-			os.Exit(1)
+			return fmt.Errorf("unable to register TLS security profile watcher: %w", err)
 		}
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
-		setupLog.Error(err, "failed to run manager")
-		os.Exit(1)
-	}
+	return mgr.Start(ctx)
 }
