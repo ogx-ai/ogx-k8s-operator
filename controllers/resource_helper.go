@@ -259,6 +259,13 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 		},
 	)
 
+	if instance.Spec.RegistryRefreshIntervalSeconds != nil {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name:  "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS",
+			Value: strconv.Itoa(int(*instance.Spec.RegistryRefreshIntervalSeconds)),
+		})
+	}
+
 	// Finally, add the user provided env vars
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
 		container.Env = append(container.Env, instance.Spec.Workload.Overrides.Env...)

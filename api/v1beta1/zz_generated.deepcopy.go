@@ -1172,6 +1172,11 @@ func (in *OGXServerSpec) DeepCopyInto(out *OGXServerSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.RegistryRefreshIntervalSeconds != nil {
+		in, out := &in.RegistryRefreshIntervalSeconds, &out.RegistryRefreshIntervalSeconds
+		*out = new(int32)
+		**out = **in
+	}
 	if in.Network != nil {
 		in, out := &in.Network, &out.Network
 		*out = new(NetworkSpec)
