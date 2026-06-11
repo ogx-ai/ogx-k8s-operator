@@ -43,3 +43,6 @@ package controllers
 
 // HorizontalPodAutoscaler permissions - controller creates and manages HPAs for server pods
 //+kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+
+// OpenShift TLS security profile - controller reads the cluster APIServer TLS configuration
+//+kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch

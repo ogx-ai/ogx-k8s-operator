@@ -18,19 +18,24 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
+	configv1 "github.com/openshift/api/config/v1"
+	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -43,6 +48,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	_ "embed"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -62,6 +68,7 @@ func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(ogxiov1beta1.AddToScheme(scheme))
+	utilruntime.Must(configv1.Install(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -135,21 +142,59 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	// root context
-	ctx := ctrl.SetupSignalHandler()
-	ctx = logf.IntoContext(ctx, setupLog)
-
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Fetch the cluster TLS security profile for webhook and metrics servers (OpenShift only)
+	var tlsOpts []func(*tls.Config)
+	var profile configv1.TLSProfileSpec
+	hasOpenShiftConfigAPI := false
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bootstrapCancel()
+	bootstrapClient, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create bootstrap client for TLS profile")
+		os.Exit(1)
+	}
+	profile, err = tlspkg.FetchAPIServerTLSProfile(bootstrapCtx, bootstrapClient)
+	if err != nil {
+		if apimeta.IsNoMatchError(err) {
+			setupLog.Info("TLS profile not available, using hardened defaults (non-OpenShift cluster)")
+		} else {
+			setupLog.Info("TLS profile not available, using hardened defaults", "error", err)
+		}
+		tlsOpts = append(tlsOpts, func(c *tls.Config) {
+			c.MinVersion = tls.VersionTLS12
+		})
+	} else {
+		hasOpenShiftConfigAPI = true
+		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
+		if len(unsupportedCiphers) > 0 {
+			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
+		}
+		tlsOpts = append(tlsOpts, tlsConfigFn)
+	}
+	tlsOpts = append(tlsOpts, func(c *tls.Config) {
+		c.NextProtos = []string{"h2", "http/1.1"}
+	})
+
+	// root context
+	sigCtx := ctrl.SetupSignalHandler()
+	ctx, cancel := context.WithCancel(sigCtx)
+	defer cancel()
+	ctx = logf.IntoContext(ctx, setupLog)
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                     scheme,
-		Metrics:                    metricsserver.Options{BindAddress: metricsAddr},
+		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsOpts},
 		Cache:                      newCacheOptions(),
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
 		LeaderElectionID:           "54e06e98.ogx.io",
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
+		WebhookServer: webhook.NewServer(webhook.Options{
+			TLSOpts: tlsOpts,
+		}),
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -206,6 +251,22 @@ func main() {
 	if err := setupHealthChecks(mgr); err != nil {
 		setupLog.Error(err, "failed to set up health checks")
 		os.Exit(1)
+	}
+
+	// Register SecurityProfileWatcher on OpenShift: cancel context on TLS profile change so pod restarts
+	if hasOpenShiftConfigAPI {
+		watcher := &tlspkg.SecurityProfileWatcher{
+			Client:                mgr.GetClient(),
+			InitialTLSProfileSpec: profile,
+			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
+				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
+				cancel()
+			},
+		}
+		if err := watcher.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to register TLS security profile watcher")
+			os.Exit(1)
+		}
 	}
 
 	setupLog.Info("starting manager")
