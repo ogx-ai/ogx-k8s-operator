@@ -3552,6 +3552,14 @@ spec:
                         type: object
                     type: object
                 type: object
+              registryRefreshIntervalSeconds:
+                description: |-
+                  RegistryRefreshIntervalSeconds configures how often the server refreshes
+                  its model registry, in seconds. When omitted, the server's built-in
+                  default is used.
+                format: int32
+                minimum: 1
+                type: integer
               resources:
                 description: |-
                   Resources declares models and tools to register.
