@@ -534,7 +534,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled controls whether external access is created. | false |  |
-| `hostname` _string_ | Hostname sets a custom hostname for the external endpoint.<br />When omitted, an auto-generated hostname is used. |  |  |
+| `hostname` _string_ | Hostname sets the hostname for the external endpoint.<br />Required when external access is enabled for TLS SNI routing. |  |  |
+| `tls` _[TLSSpec](#tlsspec)_ | TLS configures TLS for the external Ingress. Required when external access<br />is enabled. The referenced Secret must contain a valid TLS certificate for<br />the specified hostname. |  |  |
 
 #### FileProcessorChunkConfig
 
@@ -1324,6 +1325,7 @@ _Appears in:_
 TLSSpec defines TLS termination configuration for the server.
 
 _Appears in:_
+- [ExternalAccessConfig](#externalaccessconfig)
 - [NetworkSpec](#networkspec)
 
 | Field | Description | Default | Validation |

@@ -96,6 +96,7 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 
 	allErrs = append(allErrs, validateAdoptionAnnotations(r)...)
 	allErrs = append(allErrs, validateVolumeTypes(r)...)
+	allErrs = append(allErrs, validateExternalAccess(r)...)
 
 	return allErrs
 }
@@ -228,6 +229,29 @@ func validateVolumeTypes(r *OGXServer) field.ErrorList {
 					vol.Name),
 			))
 		}
+	}
+	return errs
+}
+
+func validateExternalAccess(r *OGXServer) field.ErrorList {
+	var errs field.ErrorList
+	if r.Spec.Network == nil || r.Spec.Network.ExternalAccess == nil || !r.Spec.Network.ExternalAccess.Enabled {
+		return errs
+	}
+	ea := r.Spec.Network.ExternalAccess
+	eaPath := field.NewPath("spec", "network", "externalAccess")
+
+	if ea.Hostname == "" {
+		errs = append(errs, field.Required(
+			eaPath.Child("hostname"),
+			"hostname is required when external access is enabled for TLS SNI routing",
+		))
+	}
+	if ea.TLS == nil || ea.TLS.SecretName == "" {
+		errs = append(errs, field.Required(
+			eaPath.Child("tls", "secretName"),
+			"TLS secretName is required when external access is enabled to prevent plain-HTTP exposure",
+		))
 	}
 	return errs
 }

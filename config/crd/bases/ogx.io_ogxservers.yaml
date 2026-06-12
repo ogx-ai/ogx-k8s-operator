@@ -156,13 +156,34 @@ spec:
                         type: boolean
                       hostname:
                         description: |-
-                          Hostname sets a custom hostname for the external endpoint.
-                          When omitted, an auto-generated hostname is used.
+                          Hostname sets the hostname for the external endpoint.
+                          Required when external access is enabled for TLS SNI routing.
                         type: string
+                      tls:
+                        description: |-
+                          TLS configures TLS for the external Ingress. Required when external access
+                          is enabled. The referenced Secret must contain a valid TLS certificate for
+                          the specified hostname.
+                        properties:
+                          secretName:
+                            description: |-
+                              SecretName references a Kubernetes TLS Secret containing a valid TLS certificate
+                              for server TLS termination. The Secret must be in the same namespace as the
+                              OGXServer and must have the label ogx.io/watch: "true" to be detected by the
+                              operator's cache.
+                            minLength: 1
+                            type: string
+                        required:
+                        - secretName
+                        type: object
                     type: object
                     x-kubernetes-validations:
                     - message: hostname must not be empty if specified
                       rule: '!has(self.hostname) || self.hostname.size() > 0'
+                    - message: tls is required when external access is enabled
+                      rule: '!self.enabled || has(self.tls)'
+                    - message: hostname is required when external access is enabled
+                      rule: '!self.enabled || has(self.hostname)'
                   policy:
                     description: |-
                       Policy configures the operator-managed NetworkPolicy.
