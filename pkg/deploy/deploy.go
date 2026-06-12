@@ -44,6 +44,7 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 		// Use server-side apply to merge changes properly
 		// Ensure the deployment has proper TypeMeta for server-side apply
 		deployment.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
+		//nolint:staticcheck // client.Apply migration requires ApplyConfiguration types
 		return cli.Patch(ctx, deployment, client.Apply, client.ForceOwnership, client.FieldOwner("ogx-operator"))
 	}
 	return nil
