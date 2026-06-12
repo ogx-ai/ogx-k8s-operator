@@ -29,6 +29,9 @@ package controllers
 
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
 
+// Secret permissions - controller watches user-labeled secrets to trigger reconciliation
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+
 // ConfigMap permissions - controller reads user configmaps and manages operator config configmaps
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
 

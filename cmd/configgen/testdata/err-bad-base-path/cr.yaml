@@ -1,0 +1,15 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://my-vllm:8000
+  resources:
+    models:
+    - name: llama3

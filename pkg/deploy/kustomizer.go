@@ -452,6 +452,7 @@ type ManifestContext struct {
 	ResolvedImage           string
 	ConfigMapHash           string
 	CABundleHash            string
+	SecretHash              string
 	ContainerSpec           map[string]any
 	PodSpec                 map[string]any
 	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec
@@ -598,6 +599,9 @@ func addConfigMapAnnotations(data map[string]any, manifestCtx *ManifestContext) 
 	}
 	if manifestCtx.CABundleHash != "" {
 		annotations["configmap.hash/ca-bundle"] = manifestCtx.CABundleHash
+	}
+	if manifestCtx.SecretHash != "" {
+		annotations["secret.hash/referenced"] = manifestCtx.SecretHash
 	}
 
 	return nil

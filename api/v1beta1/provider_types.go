@@ -82,13 +82,15 @@ type ProvidersSpec struct {
 	Batches *BatchesProvidersSpec `json:"batches,omitempty"`
 	// +optional
 	Responses *ResponsesProvidersSpec `json:"responses,omitempty"`
+	// +optional
+	FileProcessors *FileProcessorsProvidersSpec `json:"fileProcessors,omitempty"`
 }
 
 func (s *ProvidersSpec) IDs() []string {
 	if s == nil {
 		return nil
 	}
-	return slices.Concat(s.Inference.IDs(), s.VectorIo.IDs(), s.ToolRuntime.IDs(), s.Files.IDs(), s.Batches.IDs(), s.Responses.IDs())
+	return slices.Concat(s.Inference.IDs(), s.VectorIo.IDs(), s.ToolRuntime.IDs(), s.Files.IDs(), s.Batches.IDs(), s.Responses.IDs(), s.FileProcessors.IDs())
 }
 
 func (b RoutedProviderBase) deriveOrDefault(defaultID string) string {

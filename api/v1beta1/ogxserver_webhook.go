@@ -33,21 +33,21 @@ var ogxserverlog = logf.Log.WithName("ogxserver-webhook")
 
 // OGXServerValidator validates OGXServer resources.
 type OGXServerValidator struct {
-	// EmbeddedDistributionNames is the list of known distribution names from
-	// the embedded distribution registry. Injected at setup time to avoid
-	// import cycles with pkg/cluster.
-	EmbeddedDistributionNames []string
+	// KnownDistributionNames is the list of valid distribution names from the
+	// operator's distribution registry. Injected at setup time to avoid import
+	// cycles with pkg/cluster.
+	KnownDistributionNames []string
 }
 
 var _ admission.CustomValidator = &OGXServerValidator{}
 
 // SetupWebhookWithManager registers the validating webhook.
-// embeddedDistNames should be the keys from the embedded distributions map.
-func SetupWebhookWithManager(mgr ctrl.Manager, embeddedDistNames []string) error {
+// knownDistNames should be the keys from the operator's distribution registry.
+func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&OGXServer{}).
 		WithValidator(&OGXServerValidator{
-			EmbeddedDistributionNames: embeddedDistNames,
+			KnownDistributionNames: knownDistNames,
 		}).
 		Complete()
 }
@@ -92,7 +92,7 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 	var allErrs field.ErrorList
 
 	if r.Spec.Distribution.Name != "" {
-		allErrs = append(allErrs, validateDistributionName(r.Spec.Distribution.Name, v.EmbeddedDistributionNames)...)
+		allErrs = append(allErrs, validateDistributionName(r.Spec.Distribution.Name, v.KnownDistributionNames)...)
 	}
 
 	if r.Spec.Providers != nil {
@@ -176,7 +176,7 @@ func validateProviderReferences(resources *ResourcesSpec, providers *ProvidersSp
 	return errs
 }
 
-// validateDistributionName validates that distribution.name is in the embedded
+// validateDistributionName validates that distribution.name is in the operator
 // distribution registry.
 func validateDistributionName(name string, knownNames []string) field.ErrorList {
 	if len(knownNames) == 0 {

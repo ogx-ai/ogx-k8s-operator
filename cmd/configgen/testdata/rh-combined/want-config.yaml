@@ -1,0 +1,189 @@
+apis:
+    - responses
+    - inference
+    - tool_runtime
+    - vector_io
+    - files
+    - file_processors
+distro_name: rh
+providers:
+    batches:
+        - config:
+            sqlstore:
+                backend: sql_default
+                table_name: batches
+          provider_id: reference
+          provider_type: inline::reference
+    file_processors:
+        - config: {}
+          provider_id: pypdf
+          provider_type: inline::pypdf
+    files:
+        - config:
+            metadata_store:
+                backend: sql_default
+                table_name: files_metadata
+            storage_dir: /opt/app-root/src/.ogx/distributions/rh/files
+          provider_id: meta-reference-files
+          provider_type: inline::localfs
+        - config:
+            auto_create_bucket: ${env.S3_AUTO_CREATE_BUCKET:=false}
+            aws_access_key_id: ${env.AWS_ACCESS_KEY_ID:=}
+            aws_secret_access_key: ${env.AWS_SECRET_ACCESS_KEY:=}
+            bucket_name: ${env.S3_BUCKET_NAME:=}
+            endpoint_url: ${env.S3_ENDPOINT_URL:=}
+            metadata_store:
+                backend: sql_default
+                table_name: files_metadata
+            region: ${env.AWS_DEFAULT_REGION:=us-east-1}
+          provider_id: ${env.ENABLE_S3:+s3}
+          provider_type: remote::s3
+    inference:
+        - config:
+            base_url: https://my-vllm:8000
+          provider_id: remote-vllm
+          provider_type: remote::vllm
+    responses:
+        - config:
+            persistence:
+                agent_state:
+                    backend: kv_default
+                    namespace: agents::meta_reference
+                responses:
+                    backend: sql_default
+                    max_write_queue_size: 10000
+                    num_writers: 4
+                    table_name: agents_responses
+          provider_id: meta-reference
+          provider_type: inline::builtin
+    tool_runtime:
+        - config:
+            api_key: ${env.BRAVE_SEARCH_API_KEY:=}
+            max_results: 3
+          provider_id: brave-search
+          provider_type: remote::brave-search
+        - config:
+            api_key: ${env.TAVILY_SEARCH_API_KEY:=}
+            max_results: 3
+          provider_id: tavily-search
+          provider_type: remote::tavily-search
+        - config: {}
+          provider_id: file-search
+          provider_type: inline::file-search
+        - config: {}
+          provider_id: model-context-protocol
+          provider_type: remote::model-context-protocol
+    vector_io:
+        - config:
+            ca_pem_path: ${env.MILVUS_CA_PEM_PATH:=}
+            client_key_path: ${env.MILVUS_CLIENT_KEY_PATH:=}
+            client_pem_path: ${env.MILVUS_CLIENT_PEM_PATH:=}
+            consistency_level: ${env.MILVUS_CONSISTENCY_LEVEL:=}
+            persistence:
+                backend: kv_default
+                namespace: vector_io::milvus_remote
+            secure: ${env.MILVUS_SECURE:=}
+            token: ${env.MILVUS_TOKEN:=}
+            uri: ${env.MILVUS_ENDPOINT:=}
+          provider_id: ${env.MILVUS_ENDPOINT:+milvus-remote}
+          provider_type: remote::milvus
+        - config:
+            db: ${env.PGVECTOR_DB:=}
+            host: ${env.PGVECTOR_HOST:=localhost}
+            password: ${env.PGVECTOR_PASSWORD:=}
+            persistence:
+                backend: kv_default
+                namespace: vector_io::pgvector
+            port: ${env.PGVECTOR_PORT:=5432}
+            user: ${env.PGVECTOR_USER:=}
+          provider_id: ${env.ENABLE_PGVECTOR:+pgvector}
+          provider_type: remote::pgvector
+        - config:
+            api_key: ${env.QDRANT_API_KEY:=}
+            grpc_port: ${env.QDRANT_GRPC_PORT:=6334}
+            host: ${env.QDRANT_HOST:=}
+            https: ${env.QDRANT_HTTPS:=}
+            location: ${env.QDRANT_LOCATION:=}
+            persistence:
+                backend: kv_default
+                namespace: vector_io::qdrant_remote
+            port: ${env.QDRANT_PORT:=6333}
+            prefer_grpc: ${env.QDRANT_PREFER_GRPC:=false}
+            prefix: ${env.QDRANT_PREFIX:=}
+            timeout: ${env.QDRANT_TIMEOUT:=}
+            url: ${env.QDRANT_URL:=}
+          provider_id: ${env.ENABLE_QDRANT:+qdrant-remote}
+          provider_type: remote::qdrant
+registered_resources:
+    models:
+        - model_id: llama3
+          model_type: llm
+          provider_id: remote-vllm
+server:
+    auth:
+        access_policy:
+            - description: All users can read system resources
+              permit:
+                actions:
+                    - read
+              when: resource is unowned
+            - description: Authenticated users can create resources
+              permit:
+                actions:
+                    - create
+            - description: Owners can manage their own resources
+              permit:
+                actions:
+                    - read
+                    - update
+                    - delete
+              when: user is owner
+        provider_config:
+            audience: ${env.AUTH_AUDIENCE:=ogx}
+            issuer: ${env.AUTH_ISSUER:=}
+            jwks:
+                key_recheck_period: ${env.AUTH_JWKS_RECHECK_PERIOD:=3600}
+                uri: ${env.AUTH_JWKS_URI:=}
+            type: ${env.AUTH_ISSUER:+oauth2_token}
+            verify_tls: ${env.AUTH_VERIFY_TLS:=true}
+    port: 9090
+storage:
+    backends:
+        kv_default:
+            db: ${env.POSTGRES_DB:=ogx}
+            host: ${env.POSTGRES_HOST:=localhost}
+            password: ${env.POSTGRES_PASSWORD:=ogx}
+            port: ${env.POSTGRES_PORT:=5432}
+            table_name: ${env.POSTGRES_TABLE_NAME:=ogx_kvstore}
+            type: kv_postgres
+            user: ${env.POSTGRES_USER:=ogx}
+        sql_default:
+            db: ${env.POSTGRES_DB:=ogx}
+            host: ${env.POSTGRES_HOST:=localhost}
+            password: ${env.POSTGRES_PASSWORD:=ogx}
+            port: ${env.POSTGRES_PORT:=5432}
+            type: sql_postgres
+            user: ${env.POSTGRES_USER:=ogx}
+    stores:
+        connectors:
+            backend: sql_default
+            table_name: connectors
+        conversations:
+            backend: sql_default
+            table_name: openai_conversations
+        inference:
+            backend: sql_default
+            max_write_queue_size: 10000
+            num_writers: 4
+            table_name: inference_store
+        metadata:
+            backend: kv_default
+            namespace: registry
+        prompts:
+            backend: kv_default
+            namespace: prompts
+vector_stores:
+    annotation_prompt_params:
+        annotation_instruction_template: Cite sources immediately at the end of sentences using <|file-id|> format.
+        enable_annotations: true
+version: "2"

@@ -138,6 +138,20 @@ spec:
           value: "hello"
 ```
 
+### Runtime Config in CR (New)
+
+`OGXServer` adds declarative runtime config generation directly from CR fields:
+
+- `spec.providers`
+- `spec.resources`
+- `spec.storage`
+- `spec.disabledAPIs`
+
+If `spec.overrideConfig` is not set, the operator generates `config.yaml` and mounts it automatically.
+If `spec.overrideConfig` is set, the user-provided ConfigMap override takes precedence.
+
+See [Runtime Config Generation Guide](additional/runtime-config-generation.md).
+
 ### NetworkPolicy
 
 The legacy `AllowedFromSpec` and ConfigMap-based `enableNetworkPolicy` feature flag are replaced by `spec.network.policy` with native Kubernetes NetworkPolicy types:
@@ -367,3 +381,12 @@ spec:
 ```
 
 Any external NetworkPolicies targeting `app: llama-stack` must be updated to `app: ogx`.
+
+### Distribution Name Removals
+
+The following built-in distribution names have been removed from `distributions.json`:
+
+- `remote-vllm`
+- `meta-reference-gpu`
+
+If your `OGXServer` spec references either of these by name, you must switch to specifying the image directly via `spec.distribution.image` or use one of the remaining distributions (`starter`, `postgres-demo`).

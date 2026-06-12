@@ -465,6 +465,8 @@ CustomProvider defines the configuration for a custom provider instance.
 _Appears in:_
 - [BatchesInlineProviders](#batchesinlineproviders)
 - [BatchesRemoteProviders](#batchesremoteproviders)
+- [FileProcessorsInlineProviders](#fileprocessorsinlineproviders)
+- [FileProcessorsRemoteProviders](#fileprocessorsremoteproviders)
 - [FilesInlineProviders](#filesinlineproviders)
 - [FilesRemoteProviders](#filesremoteproviders)
 - [InferenceInlineProviders](#inferenceinlineproviders)
@@ -509,6 +511,19 @@ _Appears in:_
 | `name` _string_ | Name is the distribution name that maps to a supported distribution (e.g., "starter", "remote-vllm").<br />Resolved to a container image via distributions.json and image-overrides. |  |  |
 | `image` _string_ | Image is a direct container image reference to use. |  |  |
 
+#### DoclingServeProvider
+
+DoclingServeProvider configures a remote::docling-serve file_processors provider instance.
+
+_Appears in:_
+- [FileProcessorsRemoteProviders](#fileprocessorsremoteproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `baseUrl` _string_ | BaseURL is the base URL of the Docling Serve instance. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `apiKey` _[SecretKeyRef](#secretkeyref)_ | APIKey is the API key for authenticating with Docling Serve.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+
 #### ExternalAccessConfig
 
 ExternalAccessConfig controls external service exposure.
@@ -520,6 +535,60 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled controls whether external access is created. | false |  |
 | `hostname` _string_ | Hostname sets a custom hostname for the external endpoint.<br />When omitted, an auto-generated hostname is used. |  |  |
+
+#### FileProcessorChunkConfig
+
+FileProcessorChunkConfig contains chunking fields shared by all file_processors providers.
+
+_Appears in:_
+- [InlineAutoFileProcessorProvider](#inlineautofileprocessorprovider)
+- [InlineDoclingFileProcessorProvider](#inlinedoclingfileprocessorprovider)
+- [InlineMarkItDownFileProcessorProvider](#inlinemarkitdownfileprocessorprovider)
+- [InlinePyPDFFileProcessorProvider](#inlinepypdffileprocessorprovider)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+| `defaultChunkOverlapTokens` _integer_ | DefaultChunkOverlapTokens is the default chunk overlap in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 2048 <br />Minimum: 0 <br /> |
+
+#### FileProcessorsInlineProviders
+
+FileProcessorsInlineProviders groups inline file_processors providers.
+
+_Appears in:_
+- [FileProcessorsProvidersSpec](#fileprocessorsprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `auto` _[InlineAutoFileProcessorProvider](#inlineautofileprocessorprovider)_ |  |  |  |
+| `pypdf` _[InlinePyPDFFileProcessorProvider](#inlinepypdffileprocessorprovider)_ |  |  |  |
+| `markitdown` _[InlineMarkItDownFileProcessorProvider](#inlinemarkitdownfileprocessorprovider)_ |  |  |  |
+| `docling` _[InlineDoclingFileProcessorProvider](#inlinedoclingfileprocessorprovider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
+
+#### FileProcessorsProvidersSpec
+
+FileProcessorsProvidersSpec configures file_processors providers.
+
+_Appears in:_
+- [ProvidersSpec](#providersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `remote` _[FileProcessorsRemoteProviders](#fileprocessorsremoteproviders)_ |  |  |  |
+| `inline` _[FileProcessorsInlineProviders](#fileprocessorsinlineproviders)_ |  |  |  |
+
+#### FileProcessorsRemoteProviders
+
+FileProcessorsRemoteProviders groups remote file_processors providers.
+
+_Appears in:_
+- [FileProcessorsProvidersSpec](#fileprocessorsprovidersspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `doclingServe` _[DoclingServeProvider](#doclingserveprovider)_ |  |  |  |
+| `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
 #### FilesInlineProviders
 
@@ -609,6 +678,20 @@ _Appears in:_
 | `watsonx` _[WatsonxProvider](#watsonxprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 | `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
+#### InlineAutoFileProcessorProvider
+
+InlineAutoFileProcessorProvider configures inline::auto for file_processors.
+
+_Appears in:_
+- [FileProcessorsInlineProviders](#fileprocessorsinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+| `defaultChunkOverlapTokens` _integer_ | DefaultChunkOverlapTokens is the default chunk overlap in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 2048 <br />Minimum: 0 <br /> |
+| `extractMetadata` _boolean_ | ExtractMetadata controls whether to extract PDF metadata<br />(title, author, etc.). |  |  |
+| `cleanText` _boolean_ | CleanText controls whether to clean extracted text<br />(remove extra whitespace, normalize line breaks). |  |  |
+
 #### InlineBuiltinResponsesProvider
 
 InlineBuiltinResponsesProvider configures inline::builtin for responses.
@@ -620,6 +703,19 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `vectorStoresConfig` _[VectorStoresConfig](#vectorstoresconfig)_ | VectorStoresConfig configures vector store behavior for file search<br />and retrieval-augmented generation. |  |  |
 | `compactionConfig` _[CompactionConfig](#compactionconfig)_ | CompactionConfig configures conversation compaction behavior<br />and prompt templates. |  |  |
+
+#### InlineDoclingFileProcessorProvider
+
+InlineDoclingFileProcessorProvider configures inline::docling for file_processors.
+
+_Appears in:_
+- [FileProcessorsInlineProviders](#fileprocessorsinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+| `defaultChunkOverlapTokens` _integer_ | DefaultChunkOverlapTokens is the default chunk overlap in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 2048 <br />Minimum: 0 <br /> |
+| `doOcr` _boolean_ | DoOCR controls whether to enable OCR for scanned documents. |  |  |
 
 #### InlineFileSearchProvider
 
@@ -643,6 +739,32 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `ttlSecs` _integer_ | TTLSecs is the time-to-live in seconds for uploaded files. |  | Minimum: 1 <br /> |
+
+#### InlineMarkItDownFileProcessorProvider
+
+InlineMarkItDownFileProcessorProvider configures inline::markitdown for file_processors.
+
+_Appears in:_
+- [FileProcessorsInlineProviders](#fileprocessorsinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+| `defaultChunkOverlapTokens` _integer_ | DefaultChunkOverlapTokens is the default chunk overlap in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 2048 <br />Minimum: 0 <br /> |
+
+#### InlinePyPDFFileProcessorProvider
+
+InlinePyPDFFileProcessorProvider configures inline::pypdf for file_processors.
+
+_Appears in:_
+- [FileProcessorsInlineProviders](#fileprocessorsinlineproviders)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `defaultChunkSizeTokens` _integer_ | DefaultChunkSizeTokens is the default chunk size in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 4096 <br />Minimum: 100 <br /> |
+| `defaultChunkOverlapTokens` _integer_ | DefaultChunkOverlapTokens is the default chunk overlap in tokens when<br />chunking_strategy type is 'auto'. |  | Maximum: 2048 <br />Minimum: 0 <br /> |
+| `extractMetadata` _boolean_ | ExtractMetadata controls whether to extract PDF metadata<br />(title, author, etc.). |  |  |
+| `cleanText` _boolean_ | CleanText controls whether to clean extracted text<br />(remove extra whitespace, normalize line breaks). |  |  |
 
 #### InlineReferenceProvider
 
@@ -820,15 +942,16 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `distribution` _[DistributionSpec](#distributionspec)_ | Distribution identifies the OGX distribution to deploy. |  | Required: \{\} <br /> |
 | `providers` _[ProvidersSpec](#providersspec)_ | Providers configures providers by API type.<br />Mutually exclusive with overrideConfig. |  |  |
-| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models and tools to register.<br />Mutually exclusive with overrideConfig. |  |  |
+| `resources` _[ResourcesSpec](#resourcesspec)_ | Resources declares models to register.<br />Mutually exclusive with overrideConfig. |  |  |
 | `storage` _[StateStorageSpec](#statestoragespec)_ | Storage configures state storage backends (KV and SQL).<br />Mutually exclusive with overrideConfig. |  |  |
-| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 6 <br />MinItems: 1 <br />items:Enum: [batches inference responses tool_runtime vector_io files] <br /> |
+| `disabledAPIs` _string array_ | DisabledAPIs lists API names to remove from the generated config.<br />Mutually exclusive with overrideConfig. |  | MaxItems: 7 <br />MinItems: 1 <br />items:Enum: [batches file_processors inference responses tool_runtime vector_io files] <br /> |
 | `registryRefreshIntervalSeconds` _integer_ | RegistryRefreshIntervalSeconds configures how often the server refreshes<br />its model registry, in seconds. When omitted, the server's built-in<br />default is used. |  | Minimum: 1 <br /> |
 | `network` _[NetworkSpec](#networkspec)_ | Network defines network access controls. |  |  |
 | `tls` _[TLSClientConfig](#tlsclientconfig)_ | TLS configures outbound TLS trust anchors and client identity for<br />connections to providers and backends. |  |  |
 | `workload` _[WorkloadSpec](#workloadspec)_ | Workload consolidates Kubernetes deployment settings. |  |  |
 | `monitoring` _[MonitoringSpec](#monitoringspec)_ | Monitoring configures Prometheus monitoring and observability. |  |  |
-| `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, and disabledAPIs.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `baseConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | BaseConfig references a ConfigMap key containing the base config.yaml used<br />as the starting point for declarative config generation.<br />When set, this takes precedence over OCI label resolution.<br />Mutually exclusive with overrideConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
 #### OGXServerStatus
 
@@ -949,6 +1072,7 @@ _Appears in:_
 | `files` _[FilesProvidersSpec](#filesprovidersspec)_ |  |  |  |
 | `batches` _[BatchesProvidersSpec](#batchesprovidersspec)_ |  |  |  |
 | `responses` _[ResponsesProvidersSpec](#responsesprovidersspec)_ |  |  |  |
+| `fileProcessors` _[FileProcessorsProvidersSpec](#fileprocessorsprovidersspec)_ |  |  |  |
 
 #### ProxyConfig
 
@@ -1028,12 +1152,12 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `image` _string_ | Image is the resolved container image reference (with digest when available). |  |  |
-| `configSource` _string_ | ConfigSource indicates the config origin: "embedded" or "oci-label". |  |  |
+| `configSource` _string_ | ConfigSource indicates the base config origin (for example "configmap" or "oci-label"). |  |  |
 | `configHash` _string_ | ConfigHash is the SHA256 hash of the base config used. |  |  |
 
 #### ResourcesSpec
 
-ResourcesSpec defines declarative registration of models and tools.
+ResourcesSpec defines declarative registration of models.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
@@ -1041,7 +1165,6 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `models` _[ModelConfig](#modelconfig) array_ | Models to register with inference providers. |  | MinItems: 1 <br /> |
-| `tools` _string array_ | Tools are tool group names to register with the toolRuntime provider. |  | MinItems: 1 <br />items:MinLength: 1 <br /> |
 
 #### ResponsesInlineProviders
 
@@ -1141,6 +1264,7 @@ _Appears in:_
 - [BedrockProvider](#bedrockprovider)
 - [BraveSearchProvider](#bravesearchprovider)
 - [CustomProvider](#customprovider)
+- [DoclingServeProvider](#doclingserveprovider)
 - [IdentityConfig](#identityconfig)
 - [KVStorageSpec](#kvstoragespec)
 - [MilvusProvider](#milvusprovider)

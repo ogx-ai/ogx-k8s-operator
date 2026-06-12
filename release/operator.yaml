@@ -78,6 +78,29 @@ spec:
           spec:
             description: OGXServerSpec defines the desired state of OGXServer.
             properties:
+              baseConfig:
+                description: |-
+                  BaseConfig references a ConfigMap key containing the base config.yaml used
+                  as the starting point for declarative config generation.
+                  When set, this takes precedence over OCI label resolution.
+                  Mutually exclusive with overrideConfig.
+                  The ConfigMap must be in the same namespace as the OGXServer
+                  and must have the label ogx.io/watch: "true".
+                properties:
+                  key:
+                    description: Key is the key within the ConfigMap.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                    type: string
+                  name:
+                    description: Name is the name of the ConfigMap.
+                    minLength: 1
+                    type: string
+                required:
+                - key
+                - name
+                type: object
               disabledAPIs:
                 description: |-
                   DisabledAPIs lists API names to remove from the generated config.
@@ -85,13 +108,14 @@ spec:
                 items:
                   enum:
                   - batches
+                  - file_processors
                   - inference
                   - responses
                   - tool_runtime
                   - vector_io
                   - files
                   type: string
-                maxItems: 6
+                maxItems: 7
                 minItems: 1
                 type: array
               distribution:
@@ -586,7 +610,7 @@ spec:
               overrideConfig:
                 description: |-
                   OverrideConfig references a ConfigMap key containing a full config.yaml override.
-                  Mutually exclusive with providers, resources, storage, and disabledAPIs.
+                  Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.
                   The ConfigMap must be in the same namespace as the OGXServer
                   and must have the label ogx.io/watch: "true".
                 properties:
@@ -766,6 +790,292 @@ spec:
                             maxItems: 100
                             minItems: 1
                             type: array
+                        type: object
+                    type: object
+                  fileProcessors:
+                    description: FileProcessorsProvidersSpec configures file_processors
+                      providers.
+                    properties:
+                      inline:
+                        description: FileProcessorsInlineProviders groups inline file_processors
+                          providers.
+                        properties:
+                          auto:
+                            description: InlineAutoFileProcessorProvider configures
+                              inline::auto for file_processors.
+                            properties:
+                              cleanText:
+                                description: |-
+                                  CleanText controls whether to clean extracted text
+                                  (remove extra whitespace, normalize line breaks).
+                                type: boolean
+                              defaultChunkOverlapTokens:
+                                description: |-
+                                  DefaultChunkOverlapTokens is the default chunk overlap in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 2048
+                                minimum: 0
+                                type: integer
+                              defaultChunkSizeTokens:
+                                description: |-
+                                  DefaultChunkSizeTokens is the default chunk size in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 4096
+                                minimum: 100
+                                type: integer
+                              extractMetadata:
+                                description: |-
+                                  ExtractMetadata controls whether to extract PDF metadata
+                                  (title, author, etc.).
+                                type: boolean
+                            type: object
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        maxLength: 253
+                                        minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
+                            type: array
+                          docling:
+                            description: InlineDoclingFileProcessorProvider configures
+                              inline::docling for file_processors.
+                            properties:
+                              defaultChunkOverlapTokens:
+                                description: |-
+                                  DefaultChunkOverlapTokens is the default chunk overlap in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 2048
+                                minimum: 0
+                                type: integer
+                              defaultChunkSizeTokens:
+                                description: |-
+                                  DefaultChunkSizeTokens is the default chunk size in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 4096
+                                minimum: 100
+                                type: integer
+                              doOcr:
+                                description: DoOCR controls whether to enable OCR
+                                  for scanned documents.
+                                type: boolean
+                            type: object
+                          markitdown:
+                            description: InlineMarkItDownFileProcessorProvider configures
+                              inline::markitdown for file_processors.
+                            properties:
+                              defaultChunkOverlapTokens:
+                                description: |-
+                                  DefaultChunkOverlapTokens is the default chunk overlap in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 2048
+                                minimum: 0
+                                type: integer
+                              defaultChunkSizeTokens:
+                                description: |-
+                                  DefaultChunkSizeTokens is the default chunk size in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 4096
+                                minimum: 100
+                                type: integer
+                            type: object
+                          pypdf:
+                            description: InlinePyPDFFileProcessorProvider configures
+                              inline::pypdf for file_processors.
+                            properties:
+                              cleanText:
+                                description: |-
+                                  CleanText controls whether to clean extracted text
+                                  (remove extra whitespace, normalize line breaks).
+                                type: boolean
+                              defaultChunkOverlapTokens:
+                                description: |-
+                                  DefaultChunkOverlapTokens is the default chunk overlap in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 2048
+                                minimum: 0
+                                type: integer
+                              defaultChunkSizeTokens:
+                                description: |-
+                                  DefaultChunkSizeTokens is the default chunk size in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 4096
+                                minimum: 100
+                                type: integer
+                              extractMetadata:
+                                description: |-
+                                  ExtractMetadata controls whether to extract PDF metadata
+                                  (title, author, etc.).
+                                type: boolean
+                            type: object
+                        type: object
+                      remote:
+                        description: FileProcessorsRemoteProviders groups remote file_processors
+                          providers.
+                        properties:
+                          custom:
+                            items:
+                              description: CustomProvider defines the configuration
+                                for a custom provider instance.
+                              properties:
+                                id:
+                                  description: |-
+                                    ID is a unique provider identifier. Derived from the provider
+                                    type when omitted. Must be unique across all providers.
+                                  type: string
+                                secretRefs:
+                                  additionalProperties:
+                                    description: |-
+                                      SecretKeyRef references a specific key in a Kubernetes Secret.
+                                      The Secret must be in the same namespace as the OGXServer and must have
+                                      the label ogx.io/watch: "true" to be detected by the operator's cache.
+                                    properties:
+                                      key:
+                                        description: Key is the key within the Secret.
+                                        maxLength: 253
+                                        minLength: 1
+                                        pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                                        type: string
+                                      name:
+                                        description: Name is the name of the Kubernetes
+                                          Secret.
+                                        minLength: 1
+                                        type: string
+                                    required:
+                                    - key
+                                    - name
+                                    type: object
+                                  description: |-
+                                    SecretRefs is a map of named secret references for provider-specific
+                                    connection fields (e.g., host, password). Each key becomes the env var
+                                    field suffix and maps to config.<key> with env var substitution.
+                                    Each Secret must be in the same namespace as the OGXServer
+                                    and must have the label ogx.io/watch: "true".
+                                  minProperties: 1
+                                  type: object
+                                settings:
+                                  description: |-
+                                    Settings contains provider-specific configuration merged into the
+                                    provider's config section in config.yaml. Passed through as-is
+                                    without any secret resolution. Use secretRefs for secret values.
+                                  x-kubernetes-preserve-unknown-fields: true
+                                type:
+                                  description: |-
+                                    Type is the provider type, specified with a "remote::" or "inline::"
+                                    prefix (e.g., "remote::llama-guard", "inline::my-provider").
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              type: object
+                              x-kubernetes-validations:
+                              - message: type must have a 'remote::' or 'inline::'
+                                  prefix (e.g., 'remote::llama-guard', 'inline::my-provider')
+                                rule: self.type.startsWith('remote::') || self.type.startsWith('inline::')
+                              - message: id must not be empty if specified
+                                rule: '!has(self.id) || self.id.size() > 0'
+                            maxItems: 100
+                            minItems: 1
+                            type: array
+                          doclingServe:
+                            description: DoclingServeProvider configures a remote::docling-serve
+                              file_processors provider instance.
+                            properties:
+                              apiKey:
+                                description: |-
+                                  APIKey is the API key for authenticating with Docling Serve.
+                                  The Secret must be in the same namespace as the OGXServer
+                                  and must have the label ogx.io/watch: "true".
+                                properties:
+                                  key:
+                                    description: Key is the key within the Secret.
+                                    maxLength: 253
+                                    minLength: 1
+                                    pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                                    type: string
+                                  name:
+                                    description: Name is the name of the Kubernetes
+                                      Secret.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - key
+                                - name
+                                type: object
+                              baseUrl:
+                                description: BaseURL is the base URL of the Docling
+                                  Serve instance.
+                                minLength: 1
+                                type: string
+                              defaultChunkSizeTokens:
+                                description: |-
+                                  DefaultChunkSizeTokens is the default chunk size in tokens when
+                                  chunking_strategy type is 'auto'.
+                                maximum: 4096
+                                minimum: 100
+                                type: integer
+                            required:
+                            - baseUrl
+                            type: object
+                            x-kubernetes-validations:
+                            - message: baseUrl must not be empty if specified
+                              rule: '!has(self.baseUrl) || self.baseUrl.size() > 0'
                         type: object
                     type: object
                   files:
@@ -3581,7 +3891,7 @@ spec:
                 type: integer
               resources:
                 description: |-
-                  Resources declares models and tools to register.
+                  Resources declares models to register.
                   Mutually exclusive with overrideConfig.
                 properties:
                   models:
@@ -3619,14 +3929,6 @@ spec:
                       - message: quantization must not be empty if specified
                         rule: '!has(self.quantization) || self.quantization.size()
                           > 0'
-                    minItems: 1
-                    type: array
-                  tools:
-                    description: Tools are tool group names to register with the toolRuntime
-                      provider.
-                    items:
-                      minLength: 1
-                      type: string
                     minItems: 1
                     type: array
                 type: object
@@ -6296,6 +6598,8 @@ spec:
               rule: '!has(self.overrideConfig) || !has(self.storage)'
             - message: overrideConfig and disabledAPIs are mutually exclusive
               rule: '!has(self.overrideConfig) || !has(self.disabledAPIs)'
+            - message: overrideConfig and baseConfig are mutually exclusive
+              rule: '!has(self.overrideConfig) || !has(self.baseConfig)'
             - message: inference cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''inference'') || !has(self.providers.inference)'
@@ -6314,6 +6618,9 @@ spec:
             - message: responses cannot be both in providers and disabledAPIs
               rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
                 d == ''responses'') || !has(self.providers.responses)'
+            - message: file_processors cannot be both in providers and disabledAPIs
+              rule: '!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d,
+                d == ''file_processors'') || !has(self.providers.fileProcessors)'
           status:
             description: OGXServerStatus defines the observed state of OGXServer.
             properties:
@@ -6470,8 +6777,8 @@ spec:
                       used.
                     type: string
                   configSource:
-                    description: 'ConfigSource indicates the config origin: "embedded"
-                      or "oci-label".'
+                    description: ConfigSource indicates the base config origin (for
+                      example "configmap" or "oci-label").
                     type: string
                   image:
                     description: Image is the resolved container image reference (with
@@ -6575,6 +6882,14 @@ rules:
   - pods
   verbs:
   - list
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - ""
   resources:

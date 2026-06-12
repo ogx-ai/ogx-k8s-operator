@@ -878,12 +878,16 @@ func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 	}
 
 	// Call the function
-	reconciler, err := controllers.NewOGXServerReconciler(
-		t.Context(),
+	operatorCM, err := controllers.InitializeOperatorConfigMap(t.Context(), k8sClient, operatorNamespace.Name)
+	require.NoError(t, err)
+	imageMappingOverrides := controllers.ParseImageMappingOverrides(t.Context(), operatorCM.Data)
+
+	reconciler := controllers.NewOGXServerReconciler(
 		k8sClient,
 		scheme.Scheme,
 		clusterInfo,
-		k8sClient,
+		imageMappingOverrides,
+		operatorNamespace.Name,
 	)
 
 	// Assertions
@@ -926,12 +930,16 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 		DistributionImages: map[string]string{"starter": "default-starter-image"},
 	}
 
-	reconciler, err := controllers.NewOGXServerReconciler(
-		t.Context(),
+	operatorCM, err := controllers.InitializeOperatorConfigMap(t.Context(), k8sClient, operatorNamespace.Name)
+	require.NoError(t, err)
+	imageMappingOverrides := controllers.ParseImageMappingOverrides(t.Context(), operatorCM.Data)
+
+	reconciler := controllers.NewOGXServerReconciler(
 		k8sClient,
 		scheme.Scheme,
 		clusterInfo,
-		k8sClient,
+		imageMappingOverrides,
+		operatorNamespace.Name,
 	)
 	require.NoError(t, err)
 
@@ -963,8 +971,8 @@ func TestConfigMapUpdateTriggersReconciliation(t *testing.T) {
 	require.NoError(t, k8sClient.Update(t.Context(), configMap))
 
 	// Reconcile with the same reconciler instance. refreshOperatorConfig (called
-	// at the start of Reconcile) reads the updated ConfigMap via the direct API
-	// client, so the new image override is picked up without recreating the reconciler.
+	// at the start of Reconcile) reads the updated ConfigMap from the cache,
+	// so the new image override is picked up without recreating the reconciler.
 	_, err = reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace},
 	})
@@ -1006,12 +1014,16 @@ func TestReconcileRequeuesAfterSuccess(t *testing.T) {
 		DistributionImages: map[string]string{"starter": "default-starter-image"},
 	}
 
-	reconciler, err := controllers.NewOGXServerReconciler(
-		t.Context(),
+	operatorCM, err := controllers.InitializeOperatorConfigMap(t.Context(), k8sClient, operatorNamespace.Name)
+	require.NoError(t, err)
+	imageMappingOverrides := controllers.ParseImageMappingOverrides(t.Context(), operatorCM.Data)
+
+	reconciler := controllers.NewOGXServerReconciler(
 		k8sClient,
 		scheme.Scheme,
 		clusterInfo,
-		k8sClient,
+		imageMappingOverrides,
+		operatorNamespace.Name,
 	)
 	require.NoError(t, err)
 

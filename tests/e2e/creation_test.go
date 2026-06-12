@@ -34,31 +34,45 @@ func runCreationTestsForDistribution(t *testing.T, distType string) *ogxiov1beta
 		ogxServer = testCreateServerForType(t, distType)
 	})
 
+	requireServer := func(t *testing.T) {
+		t.Helper()
+		if ogxServer == nil {
+			t.Skip("Skipping: OGXServer creation failed")
+		}
+	}
+
 	t.Run("should create PVC if storage is configured", func(t *testing.T) {
+		requireServer(t)
 		testPVCConfiguration(t, ogxServer)
 	})
 
 	t.Run("should handle direct deployment updates", func(t *testing.T) {
+		requireServer(t)
 		testDirectDeploymentUpdates(t, ogxServer)
 	})
 
 	t.Run("should check health status", func(t *testing.T) {
+		requireServer(t)
 		testHealthStatus(t, ogxServer)
 	})
 
 	t.Run("should update deployment through CR", func(t *testing.T) {
+		requireServer(t)
 		testCRDeploymentUpdate(t, ogxServer)
 	})
 
 	t.Run("should update distribution status", func(t *testing.T) {
+		requireServer(t)
 		testDistributionStatus(t, ogxServer)
 	})
 
 	t.Run("should use custom ServiceAccount from workload overrides", func(t *testing.T) {
+		requireServer(t)
 		testServiceAccountOverride(t, ogxServer)
 	})
 
 	t.Run("should apply image mapping overrides from ConfigMap", func(t *testing.T) {
+		requireServer(t)
 		testImageMappingOverrides(t, ogxServer)
 	})
 
@@ -80,6 +94,8 @@ func testCreateServerForType(t *testing.T, distType string) *ogxiov1beta1.OGXSer
 
 	ogxServer := GetSampleCRForDistribution(t, distType)
 	ogxServer.Namespace = ns.Name
+
+	EnsureOverrideConfigMap(t, TestEnv.Client, TestEnv.Ctx, ogxServer)
 
 	t.Logf("Creating %s distribution with name: %s", distType, ogxServer.Name)
 
@@ -303,7 +319,6 @@ func testServiceAccountOverride(t *testing.T, server *ogxiov1beta1.OGXServer) {
 		},
 	}
 	require.NoError(t, TestEnv.Client.Create(TestEnv.Ctx, sa))
-	defer TestEnv.Client.Delete(TestEnv.Ctx, sa)
 
 	err := wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		latest := &ogxiov1beta1.OGXServer{}
@@ -343,6 +358,30 @@ func testServiceAccountOverride(t *testing.T, server *ogxiov1beta1.OGXServer) {
 		deployment))
 
 	assert.Equal(t, "custom-sa", deployment.Spec.Template.Spec.ServiceAccountName)
+
+	// Reset the ServiceAccountName before deleting the SA to prevent subsequent
+	// reconciles from producing a deployment that references a deleted SA.
+	err = wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		latest := &ogxiov1beta1.OGXServer{}
+		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
+			Namespace: server.Namespace,
+			Name:      server.Name,
+		}, latest); getErr != nil {
+			return false, getErr
+		}
+		latest.Spec.Workload.Overrides.ServiceAccountName = ""
+		if updateErr := TestEnv.Client.Update(ctx, latest); updateErr != nil {
+			if k8serrors.IsConflict(updateErr) {
+				return false, nil
+			}
+			return false, updateErr
+		}
+		return true, nil
+	})
+	require.NoError(t, err, "Failed to reset ServiceAccount override")
+
+	time.Sleep(5 * time.Second)
+	require.NoError(t, TestEnv.Client.Delete(TestEnv.Ctx, sa))
 }
 
 func isDeploymentReady(u *unstructured.Unstructured) bool {

@@ -1,0 +1,23 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-qdrant-config
+spec:
+  distribution:
+    name: test
+  providers:
+    vectorIo:
+      remote:
+        qdrant:
+        - url: https://qdrant.example.com
+          host: qdrant-host
+          port: 6333
+          apiKey:
+            name: qdrant-secret
+            key: api-key
+          location: us-east-1
+          grpcPort: 6334
+          preferGrpc: true
+          https: true
+          prefix: my-prefix
+          timeout: 60

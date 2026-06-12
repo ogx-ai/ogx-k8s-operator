@@ -6,6 +6,7 @@ This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI S
 
 - Automated deployment of OGX servers
 - Support for multiple distributions (includes Ollama, vLLM, and others)
+- Declarative runtime config generation from OGXServer CR fields
 - Customizable server configurations
 - Volume management for model storage
 - Kubernetes-native resource management
@@ -15,6 +16,7 @@ This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI S
 - [Quick Start](#quick-start)
     - [Installation](#installation)
     - [Deploying the OGX Server](#deploying-the-ogx-server)
+    - [Runtime Config via CR](#runtime-config-via-cr)
 - [Enabling Network Policies](#enabling-network-policies)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
@@ -98,7 +100,78 @@ spec:
 
 To enable the `inline::milvus` local vector storage provider, set `ENABLE_INLINE_MILVUS` in `spec.workload.overrides.env`. This is only supported in single-worker, single-replica deployments. Milvus-Lite uses SQLite internally and does not support concurrent access from multiple processes.
 
-### Using a ConfigMap for config.yaml configuration
+### Runtime Config via CR
+
+The operator supports two ways to provide OGX `config.yaml`:
+
+1. **Declarative generation from CR fields** (recommended) via:
+   - `spec.baseConfig` (optional base config input)
+   - `spec.providers`
+   - `spec.resources`
+   - `spec.storage`
+   - `spec.disabledAPIs`
+2. **Direct override** via `spec.overrideConfig` pointing to a user-managed ConfigMap.
+
+When declarative fields are present and `spec.overrideConfig` is not set, the operator:
+
+- Resolves base config from `spec.baseConfig` when set, otherwise from OCI labels `com.ogx.distribution.default-config` + `com.ogx.config.<filename>`
+- Generates a final `config.yaml`
+- Creates immutable ConfigMap `${name}-config-${hash}`
+- Mounts that config to `/etc/ogx/config.yaml`
+- Injects required secret-based env vars from provider/storage secret refs
+- Rolls the Deployment when referenced config/secret inputs change
+
+The mounted runtime config always comes from either `spec.overrideConfig` or the
+generated ConfigMap. `spec.baseConfig` is only used as an input to generation
+and is never mounted into the pod directly.
+
+Example declarative OGXServer:
+
+```yaml
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: runtime-config-sample
+spec:
+  distribution:
+    name: starter
+  providers:
+    inference:
+      remote:
+        openai:
+          - id: openai-primary
+            apiKey:
+              name: openai-creds
+              key: api-key
+  resources:
+    models:
+      - name: gpt-4o-mini
+        provider: openai-primary
+  storage:
+    sql:
+      type: postgres
+      connectionString:
+        name: db-credentials
+        key: connection-string
+```
+
+Ready-to-apply sample:
+
+```bash
+kubectl apply -f config/samples/example-with-generated-config.yaml
+```
+
+Required labels for referenced resources (same namespace as OGXServer):
+
+```yaml
+metadata:
+  labels:
+    ogx.io/watch: "true"
+```
+
+See [Runtime Config Generation Guide](docs/additional/runtime-config-generation.md) for detailed flow, examples, and troubleshooting.
+
+### Using a ConfigMap for config.yaml override
 
 A ConfigMap can be used to store config.yaml configuration for each OGXServer.
 Updates to the ConfigMap will restart the Pod to load the new data.
@@ -107,6 +180,8 @@ Example to create a config.yaml ConfigMap, and an OGXServer that references it:
 ```
 kubectl apply -f config/samples/example-with-configmap.yaml
 ```
+
+`spec.overrideConfig` always takes precedence over declarative generation fields.
 
 ## Enabling Network Policies
 

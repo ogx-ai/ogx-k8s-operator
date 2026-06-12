@@ -56,7 +56,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
 		assert.Equal(t, ogxiov1beta1.DefaultContainerName, c.Name)
 		assert.Equal(t, "test-image:latest", c.Image)
 		assert.Equal(t, ogxiov1beta1.DefaultServerPort, c.Ports[0].ContainerPort)
@@ -90,7 +90,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				},
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
 		assert.Equal(t, int32(9000), c.Ports[0].ContainerPort)
 		assert.Equal(t, newDefaultStartupProbe(9000), c.StartupProbe)
 		envNames := make([]string, 0, len(c.Env))
@@ -106,7 +106,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
 		for _, e := range c.Env {
 			assert.NotEqual(t, "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS", e.Name)
 		}
@@ -120,7 +120,7 @@ func TestBuildContainerSpec(t *testing.T) {
 				RegistryRefreshIntervalSeconds: &val,
 			},
 		}
-		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest")
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
 		var found bool
 		for _, e := range c.Env {
 			if e.Name == "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS" {
@@ -130,6 +130,43 @@ func TestBuildContainerSpec(t *testing.T) {
 		}
 		assert.True(t, found, "expected OGX_REGISTRY_REFRESH_INTERVAL_SECONDS env var")
 	})
+}
+
+func TestContainerEnvVarDedup(t *testing.T) {
+	instance := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Overrides: &ogxiov1beta1.WorkloadOverrides{
+					Env: []corev1.EnvVar{
+						{Name: "OGX_WORKERS", Value: "99"},
+						{Name: "MY_CUSTOM_VAR", Value: "custom"},
+					},
+				},
+			},
+		},
+	}
+	c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
+
+	envMap := make(map[string]int)
+	for _, e := range c.Env {
+		envMap[e.Name]++
+	}
+
+	if envMap["OGX_WORKERS"] != 1 {
+		t.Errorf("expected OGX_WORKERS to appear exactly once, got %d", envMap["OGX_WORKERS"])
+	}
+	if envMap["MY_CUSTOM_VAR"] != 1 {
+		t.Errorf("expected MY_CUSTOM_VAR to appear, got %d", envMap["MY_CUSTOM_VAR"])
+	}
+
+	// Verify the user override wins
+	for _, e := range c.Env {
+		if e.Name == "OGX_WORKERS" {
+			assert.Equal(t, "99", e.Value, "user override should take precedence over operator default")
+			break
+		}
+	}
 }
 
 func TestResolveImage(t *testing.T) {
