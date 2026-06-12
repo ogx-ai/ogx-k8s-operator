@@ -5,6 +5,9 @@ metadata:
 spec:
   distribution:
     name: starter
+  overrideConfig:
+    name: starter-config
+    key: config.yaml
   tls:
     trust:
       caCertificates:

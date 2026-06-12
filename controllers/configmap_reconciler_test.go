@@ -80,7 +80,7 @@ func TestReconcileGeneratedConfig_HappyPath(t *testing.T) {
 		configResolver: config.NewDefaultConfigResolver(fetcher),
 		ClusterInfo: &cluster.ClusterInfo{
 			DistributionImages: map[string]string{
-				"starter": "docker.io/llamastack/distribution-starter:latest",
+				"starter": "docker.io/ogxai/distribution-starter:latest",
 			},
 		},
 	}
@@ -133,7 +133,7 @@ func TestReconcileGeneratedConfig_SkippedWhenOverrideSet(t *testing.T) {
 		configResolver: config.NewDefaultConfigResolver(nil),
 		ClusterInfo: &cluster.ClusterInfo{
 			DistributionImages: map[string]string{
-				"starter": "docker.io/llamastack/distribution-starter:latest",
+				"starter": "docker.io/ogxai/distribution-starter:latest",
 			},
 		},
 	}
@@ -352,7 +352,7 @@ func TestReconcileResources_DoesNotAdvanceConfigGenerationStatusOnSecretHashFail
 		configResolver: config.NewDefaultConfigResolver(fetcher),
 		ClusterInfo: &cluster.ClusterInfo{
 			DistributionImages: map[string]string{
-				"starter": "docker.io/llamastack/distribution-starter:latest",
+				"starter": "docker.io/ogxai/distribution-starter:latest",
 			},
 		},
 	}

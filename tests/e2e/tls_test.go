@@ -66,11 +66,33 @@ func testCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	ensureStarterConfigMap(t, ogxTestNS)
+
 	err = createCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
 	err = verifyCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
+}
+
+func ensureStarterConfigMap(t *testing.T, namespace string) {
+	t.Helper()
+
+	projectRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	configMapPath := filepath.Join(projectRoot, "config", "samples", "starter-config-configmap.yaml")
+	yamlFile, err := os.ReadFile(configMapPath)
+	require.NoError(t, err)
+
+	cm := &corev1.ConfigMap{}
+	require.NoError(t, yaml.Unmarshal(yamlFile, cm))
+
+	cm.Namespace = namespace
+	err = TestEnv.Client.Create(TestEnv.Ctx, cm)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
 }
 
 func testOGXServerWithCABundle(t *testing.T) {
@@ -161,6 +183,9 @@ func createCABundleConfigMap(t *testing.T, targetNS string) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "custom-ca-bundle",
 			Namespace: targetNS,
+			Labels: map[string]string{
+				controllers.WatchLabelKey: controllers.WatchLabelValue,
+			},
 		},
 		Data: map[string]string{
 			controllers.DefaultCABundleKey: string(caBundle),

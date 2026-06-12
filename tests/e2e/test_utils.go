@@ -266,6 +266,33 @@ func registerSchemes() {
 	}
 }
 
+// EnsureOverrideConfigMap creates the ConfigMap referenced by the CR's overrideConfig
+// if one is configured. The ConfigMap must exist before the CR is created.
+func EnsureOverrideConfigMap(t *testing.T, c client.Client, ctx context.Context, server *ogxiov1beta1.OGXServer) {
+	t.Helper()
+
+	if server.Spec.OverrideConfig == nil || server.Spec.OverrideConfig.Name == "" {
+		return
+	}
+
+	projectRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	configMapPath := filepath.Join(projectRoot, "config", "samples", "starter-config-configmap.yaml")
+	yamlFile, err := os.ReadFile(configMapPath)
+	require.NoError(t, err)
+
+	cm := &corev1.ConfigMap{}
+	err = yaml.Unmarshal(yamlFile, cm)
+	require.NoError(t, err)
+
+	cm.Namespace = server.Namespace
+	err = c.Create(ctx, cm)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
+}
+
 // GetSampleCRForDistribution returns an OGXServer configured for the specified distribution type.
 func GetSampleCRForDistribution(t *testing.T, distType string) *ogxiov1beta1.OGXServer {
 	t.Helper()

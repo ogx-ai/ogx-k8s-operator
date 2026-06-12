@@ -5,9 +5,12 @@ metadata:
 spec:
   distribution:
     name: starter
+  overrideConfig:
+    name: starter-config
+    key: config.yaml
   workload:
     replicas: 1
-    workers: 2
+    workers: 1
     storage:
       size: "20Gi"
       mountPath: "/.ogx"

@@ -52,6 +52,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1108,12 +1109,20 @@ func (r *OGXServerReconciler) updateStatus(ctx context.Context, instance *ogxiov
 		}
 	}
 
-	// Always update the status at the end of the function.
 	instance.Status.Version.LastUpdated = metav1.NewTime(metav1.Now().UTC())
-	if err := r.Status().Update(ctx, instance); err != nil {
+	desiredStatus := instance.Status.DeepCopy()
+
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &ogxiov1beta1.OGXServer{}
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(instance), latest); getErr != nil {
+			return getErr
+		}
+		latest.Status = *desiredStatus
+		return r.Status().Update(ctx, latest)
+	})
+	if err != nil {
 		return fmt.Errorf("failed to update status: %w", err)
 	}
-
 	return nil
 }
 
