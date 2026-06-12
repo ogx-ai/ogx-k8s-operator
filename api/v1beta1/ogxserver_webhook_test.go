@@ -854,6 +854,37 @@ func TestCollectValidationErrors(t *testing.T) {
 			},
 			wantErrs: 1,
 		},
+		{
+			name: "external access enabled without TLS is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+						},
+					},
+				},
+			},
+			wantErrs: 1,
+		},
+		{
+			name: "external access with TLS and hostname is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+							TLS:      &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -862,6 +893,116 @@ func TestCollectValidationErrors(t *testing.T) {
 			errs := v.collectValidationErrors(tt.server)
 			if len(errs) != tt.wantErrs {
 				t.Errorf("collectValidationErrors() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+		})
+	}
+}
+
+func TestValidateExternalAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		server    *OGXServer
+		wantErrs  int
+		errSubstr string
+	}{
+		{
+			name: "nil network is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{Distribution: DistributionSpec{Image: "x"}},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "disabled external access without TLS is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{Enabled: false},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "enabled with TLS and hostname is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+							TLS:      &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "enabled without TLS is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+						},
+					},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "TLS secretName is required",
+		},
+		{
+			name: "enabled without hostname is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled: true,
+							TLS:     &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "hostname is required",
+		},
+		{
+			name: "enabled without hostname or TLS gives two errors",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{Enabled: true},
+					},
+				},
+			},
+			wantErrs: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateExternalAccess(tt.server)
+			if len(errs) != tt.wantErrs {
+				t.Errorf("validateExternalAccess() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+			if tt.errSubstr != "" && len(errs) > 0 {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e.Detail, tt.errSubstr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no error contains %q; errors: %v", tt.errSubstr, errs)
+				}
 			}
 		})
 	}
