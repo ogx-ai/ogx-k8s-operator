@@ -13,7 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-func int32Ptr(v int32) *int32 { return &v }
+func int32Ptr(v int32) *int32  { return &v }
+func testBoolPtr(v bool) *bool { return &v }
 
 // createTestOGX builds a minimal OGXServer for tests (distribution by name and/or image).
 func createTestOGX(name, image string) *ogxiov1beta1.OGXServer {
@@ -72,6 +73,12 @@ func TestBuildContainerSpec(t *testing.T) {
 			}
 		}
 		assert.True(t, foundOgxVol, "expected ogx-storage volume mount")
+
+		require.NotNil(t, c.SecurityContext)
+		assert.Equal(t, testBoolPtr(true), c.SecurityContext.RunAsNonRoot)
+		assert.Equal(t, testBoolPtr(false), c.SecurityContext.AllowPrivilegeEscalation)
+		require.NotNil(t, c.SecurityContext.RunAsUser)
+		assert.Equal(t, RunAsUserID, *c.SecurityContext.RunAsUser)
 	})
 
 	t.Run("custom port and workload resources", func(t *testing.T) {
@@ -457,4 +464,19 @@ func TestBuildHPASpec(t *testing.T) {
 	require.NotNil(t, spec)
 	assert.Equal(t, int32(5), spec.MaxReplicas)
 	require.Len(t, spec.Metrics, 2)
+}
+
+func TestConfigurePodStorageSecurityContext(t *testing.T) {
+	instance := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+		},
+	}
+	container := corev1.Container{Name: "test"}
+	podSpec := configurePodStorage(t.Context(), nil, instance, container, "test-pvc")
+	require.NotNil(t, podSpec.SecurityContext)
+	assert.Equal(t, testBoolPtr(true), podSpec.SecurityContext.RunAsNonRoot)
+	assert.Equal(t, FSGroup, *podSpec.SecurityContext.FSGroup)
+	require.NotNil(t, podSpec.SecurityContext.RunAsUser)
+	assert.Equal(t, RunAsUserID, *podSpec.SecurityContext.RunAsUser)
 }
