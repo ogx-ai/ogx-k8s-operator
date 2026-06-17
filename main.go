@@ -114,7 +114,6 @@ func newCacheOptions() cache.Options {
 				}),
 			},
 			&appsv1.Deployment{}:                     managedByFilter,
-			&appsv1.ReplicaSet{}:                     managedByFilter,
 			&policyv1.PodDisruptionBudget{}:          managedByFilter,
 			&autoscalingv2.HorizontalPodAutoscaler{}: managedByFilter,
 			&corev1.Service{}:                        managedByFilter,
