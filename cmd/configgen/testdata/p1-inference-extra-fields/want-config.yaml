@@ -1,0 +1,17 @@
+version: "2"
+distro_name: test
+apis:
+  - inference
+providers:
+  inference:
+    - provider_id: remote-vllm
+      provider_type: remote::vllm
+      config:
+        base_url: https://vllm.example.com:8000
+        refresh_models: true
+        allowed_models:
+          - model-a
+          - model-b
+registered_resources: {}
+server:
+  port: 8321

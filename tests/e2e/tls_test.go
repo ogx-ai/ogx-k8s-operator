@@ -66,11 +66,33 @@ func testCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	ensureStarterConfigMap(t, ogxTestNS)
+
 	err = createCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
 
 	err = verifyCABundleConfigMap(t, ogxTestNS)
 	require.NoError(t, err)
+}
+
+func ensureStarterConfigMap(t *testing.T, namespace string) {
+	t.Helper()
+
+	projectRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	configMapPath := filepath.Join(projectRoot, "config", "samples", "starter-config-configmap.yaml")
+	yamlFile, err := os.ReadFile(configMapPath)
+	require.NoError(t, err)
+
+	cm := &corev1.ConfigMap{}
+	require.NoError(t, yaml.Unmarshal(yamlFile, cm))
+
+	cm.Namespace = namespace
+	err = TestEnv.Client.Create(TestEnv.Ctx, cm)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
 }
 
 func testOGXServerWithCABundle(t *testing.T) {
@@ -161,6 +183,9 @@ func createCABundleConfigMap(t *testing.T, targetNS string) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "custom-ca-bundle",
 			Namespace: targetNS,
+			Labels: map[string]string{
+				controllers.WatchLabelKey: controllers.WatchLabelValue,
+			},
 		},
 		Data: map[string]string{
 			controllers.DefaultCABundleKey: string(caBundle),
@@ -282,6 +307,13 @@ func updateCABundleConfigMap(t *testing.T, targetNS string) error {
 func deployOGXServerWithCABundle(t *testing.T) error {
 	t.Helper()
 
+	logOperatorPodStatus(t, TestEnv, TestOpts.OperatorNS)
+
+	if err := WaitForWebhookReady(t, TestEnv, TestOpts.OperatorNS, 2*time.Minute); err != nil {
+		logOperatorPodStatus(t, TestEnv, TestOpts.OperatorNS)
+		return fmt.Errorf("failed to wait for webhook readiness: %w", err)
+	}
+
 	projectRoot, err := filepath.Abs("../..")
 	if err != nil {
 		return fmt.Errorf("failed to get project root: %w", err)
@@ -302,14 +334,28 @@ func deployOGXServerWithCABundle(t *testing.T) error {
 		if obj.GetNamespace() == "" {
 			obj.SetNamespace(ogxTestNS)
 		}
-
-		err = TestEnv.Client.Create(TestEnv.Ctx, obj)
-		if err != nil && !k8serrors.IsAlreadyExists(err) {
+		if err := createObjectWithWebhookRetry(t, obj); err != nil {
 			return fmt.Errorf("failed to create OGXServer resource: %w", err)
 		}
 	}
 
 	return nil
+}
+
+func createObjectWithWebhookRetry(t *testing.T, obj client.Object) error {
+	t.Helper()
+
+	return wait.PollUntilContextTimeout(TestEnv.Ctx, 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		err := TestEnv.Client.Create(ctx, obj)
+		if err == nil || k8serrors.IsAlreadyExists(err) {
+			return true, nil
+		}
+		if strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "webhook") {
+			t.Logf("Webhook not ready yet, retrying: %v", err)
+			return false, nil
+		}
+		return false, err
+	})
 }
 
 func verifyCertificateMounts(t *testing.T, namespace, name string) error {

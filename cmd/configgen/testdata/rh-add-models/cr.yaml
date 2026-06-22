@@ -1,0 +1,17 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-rh-add-models
+spec:
+  distribution:
+    name: rh
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://my-vllm:8000
+  resources:
+    models:
+    - name: llama3
+    - name: llama3-embed
+      modelType: embedding

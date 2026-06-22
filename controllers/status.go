@@ -15,6 +15,8 @@ const (
 	ConditionTypeStorageReady = "StorageReady"
 	// ConditionTypeServiceReady indicates whether the service is ready.
 	ConditionTypeServiceReady = "ServiceReady"
+	// ConditionTypeConfigGenerated indicates whether config generation succeeded.
+	ConditionTypeConfigGenerated = "ConfigGenerated"
 	// ConditionTypeStorageAdopted indicates whether legacy storage was adopted.
 	ConditionTypeStorageAdopted = "StorageAdopted"
 	// ConditionTypeNetworkingAdopted indicates whether legacy networking was adopted.
@@ -192,4 +194,19 @@ func IsConditionTrue(status *ogxiov1beta1.OGXServerStatus, conditionType string)
 func IsConditionFalse(status *ogxiov1beta1.OGXServerStatus, conditionType string) bool {
 	condition := GetCondition(status, conditionType)
 	return condition != nil && condition.Status == metav1.ConditionFalse
+}
+
+// setConfigGeneratedCondition sets the ConfigGenerated condition.
+func (r *OGXServerReconciler) setConfigGeneratedCondition(instance *ogxiov1beta1.OGXServer, success bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeConfigGenerated,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !success {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(&instance.Status, condition)
 }

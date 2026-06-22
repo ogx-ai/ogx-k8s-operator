@@ -266,6 +266,33 @@ func registerSchemes() {
 	}
 }
 
+// EnsureOverrideConfigMap creates the ConfigMap referenced by the CR's overrideConfig
+// if one is configured. The ConfigMap must exist before the CR is created.
+func EnsureOverrideConfigMap(t *testing.T, c client.Client, ctx context.Context, server *ogxiov1beta1.OGXServer) {
+	t.Helper()
+
+	if server.Spec.OverrideConfig == nil || server.Spec.OverrideConfig.Name == "" {
+		return
+	}
+
+	projectRoot, err := filepath.Abs("../..")
+	require.NoError(t, err)
+
+	configMapPath := filepath.Join(projectRoot, "config", "samples", "starter-config-configmap.yaml")
+	yamlFile, err := os.ReadFile(configMapPath)
+	require.NoError(t, err)
+
+	cm := &corev1.ConfigMap{}
+	err = yaml.Unmarshal(yamlFile, cm)
+	require.NoError(t, err)
+
+	cm.Namespace = server.Namespace
+	err = c.Create(ctx, cm)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
+}
+
 // GetSampleCRForDistribution returns an OGXServer configured for the specified distribution type.
 func GetSampleCRForDistribution(t *testing.T, distType string) *ogxiov1beta1.OGXServer {
 	t.Helper()
@@ -510,6 +537,72 @@ func logDeploymentSpec(t *testing.T, testenv *TestEnvironment, namespace, name s
 			t.Logf("    Readiness probe: %+v", container.ReadinessProbe)
 		}
 	}
+}
+
+// logOperatorPodStatus logs operator pod details to diagnose webhook failures
+// caused by pod restarts, OOMKills, or CrashLoopBackOff.
+func logOperatorPodStatus(t *testing.T, testenv *TestEnvironment, operatorNS string) {
+	t.Helper()
+
+	podList := &corev1.PodList{}
+	err := testenv.Client.List(testenv.Ctx, podList,
+		client.InNamespace(operatorNS),
+		client.MatchingLabels{"control-plane": "controller-manager"})
+	if err != nil {
+		t.Logf("Failed to list operator pods: %v", err)
+		return
+	}
+
+	for _, pod := range podList.Items {
+		t.Logf("Operator pod %s: Phase=%s", pod.Name, pod.Status.Phase)
+		for _, cs := range pod.Status.ContainerStatuses {
+			t.Logf("  Container %s: Ready=%v, RestartCount=%d", cs.Name, cs.Ready, cs.RestartCount)
+			if cs.LastTerminationState.Terminated != nil {
+				t.Logf("  Last termination: Reason=%s, ExitCode=%d, At=%s",
+					cs.LastTerminationState.Terminated.Reason,
+					cs.LastTerminationState.Terminated.ExitCode,
+					cs.LastTerminationState.Terminated.FinishedAt.String())
+			}
+		}
+	}
+}
+
+// WaitForWebhookReady polls until the webhook service endpoint has at least one ready address.
+// This prevents "connection refused" errors when creating OGXServer resources before
+// the operator's webhook server is accepting connections.
+func WaitForWebhookReady(t *testing.T, testenv *TestEnvironment, operatorNS string, timeout time.Duration) error {
+	t.Helper()
+	t.Log("Waiting for webhook endpoint to become ready...")
+
+	webhookServiceName := "ogx-k8s-operator-webhook-service"
+
+	return wait.PollUntilContextTimeout(testenv.Ctx, generalRetryInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		endpointSliceList := &discoveryv1.EndpointSliceList{}
+		err := testenv.Client.List(ctx, endpointSliceList,
+			client.InNamespace(operatorNS),
+			client.MatchingLabels{"kubernetes.io/service-name": webhookServiceName})
+		if err != nil {
+			t.Logf("Failed to list endpoint slices for webhook service: %v", err)
+			return false, nil
+		}
+
+		if len(endpointSliceList.Items) == 0 {
+			t.Log("No endpoint slices found for webhook service yet")
+			return false, nil
+		}
+
+		for _, slice := range endpointSliceList.Items {
+			for _, endpoint := range slice.Endpoints {
+				if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+					t.Log("Webhook endpoint is ready")
+					return true, nil
+				}
+			}
+		}
+
+		t.Log("Webhook endpoint exists but no ready addresses yet")
+		return false, nil
+	})
 }
 
 // logServiceSpec logs the actual service configuration to debug selector issues.

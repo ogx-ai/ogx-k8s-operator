@@ -138,6 +138,11 @@ func (b *OGXServerBuilder) WithCACertificates(refs ...ogxiov1beta1.ConfigMapKeyR
 	return b
 }
 
+func (b *OGXServerBuilder) WithMonitoring(monitoring *ogxiov1beta1.MonitoringSpec) *OGXServerBuilder {
+	b.instance.Spec.Monitoring = monitoring
+	return b
+}
+
 func (b *OGXServerBuilder) Build() *ogxiov1beta1.OGXServer {
 	return b.instance.DeepCopy()
 }

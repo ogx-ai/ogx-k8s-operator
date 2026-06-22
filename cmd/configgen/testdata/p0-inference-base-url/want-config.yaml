@@ -1,0 +1,33 @@
+version: "2"
+distro_name: test
+apis:
+  - inference
+providers:
+  inference:
+    - provider_id: remote-vllm
+      provider_type: remote::vllm
+      config:
+        base_url: https://vllm.example.com:8000
+    - provider_id: remote-openai
+      provider_type: remote::openai
+      config:
+        api_key: ${env.OGX_REMOTE_OPENAI_API_KEY}
+        base_url: https://api.openai.com/v1
+    - provider_id: remote-azure
+      provider_type: remote::azure
+      config:
+        base_url: https://my-resource.openai.azure.com/openai/v1
+        api_key: ${env.OGX_REMOTE_AZURE_API_KEY}
+    - provider_id: remote-bedrock
+      provider_type: remote::bedrock
+      config:
+        region_name: us-west-2
+        api_key: ${env.OGX_REMOTE_BEDROCK_API_KEY}
+    - provider_id: remote-watsonx
+      provider_type: remote::watsonx
+      config:
+        api_key: ${env.OGX_REMOTE_WATSONX_API_KEY}
+        base_url: https://us-south.ml.cloud.ibm.com
+registered_resources: {}
+server:
+  port: 8321

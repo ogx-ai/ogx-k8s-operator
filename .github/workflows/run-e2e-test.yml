@@ -129,9 +129,18 @@ jobs:
         run: |
           kubectl -n ogx-test get all -o yaml > all.log
           kubectl -n ogx-k8s-operator-system logs deployment.apps/ogx-k8s-operator-controller-manager > controller-manager.log
+          kubectl -n ogx-k8s-operator-system logs deployment.apps/ogx-k8s-operator-controller-manager --previous > controller-manager-previous.log 2>/dev/null || true
           kubectl -n ogx-test describe all > all-describe.log
           kubectl -n ogx-test describe events > events.log
           kubectl get ogxservers --all-namespaces -o yaml > ogxservers.log
+          echo "=== Operator Pod Status ===" > operator-debug.log
+          kubectl -n ogx-k8s-operator-system get pods -o wide >> operator-debug.log 2>&1
+          echo "=== Operator Pod Describe ===" >> operator-debug.log
+          kubectl -n ogx-k8s-operator-system describe pods -l control-plane=controller-manager >> operator-debug.log 2>&1
+          echo "=== Node Memory Pressure ===" >> operator-debug.log
+          kubectl describe nodes | grep -A5 "MemoryPressure\|memory\|OOMKill" >> operator-debug.log 2>&1
+          echo "=== Operator Events ===" >> operator-debug.log
+          kubectl -n ogx-k8s-operator-system get events --sort-by='.lastTimestamp' >> operator-debug.log 2>&1
 
       - name: Upload all logs to artifacts
         if: ${{ always() }}

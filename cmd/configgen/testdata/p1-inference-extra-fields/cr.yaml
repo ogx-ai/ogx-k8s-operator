@@ -1,0 +1,16 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-inference-extra-fields
+spec:
+  distribution:
+    name: test
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://vllm.example.com:8000
+          refreshModels: true
+          allowedModels:
+          - model-a
+          - model-b
