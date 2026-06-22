@@ -7,6 +7,8 @@ package controllers
 
 // Deployment permissions - controller creates and manages deployments
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// ReplicaSet permissions - controller lists rollout history to retain referenced generated configmaps
+//+kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch
 
 // Service permissions - controller creates and manages services
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -46,3 +48,10 @@ package controllers
 
 // HorizontalPodAutoscaler permissions - controller creates and manages HPAs for server pods
 //+kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+
+// Monitoring permissions - controller creates and manages ServiceMonitors and PrometheusRules
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list;watch;create;update;patch;delete
+
+// CRD discovery - controller checks for monitoring.coreos.com CRD availability
+//+kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch

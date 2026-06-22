@@ -1109,6 +1109,32 @@ func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
 	})
 }
 
+func TestCheckCRDExists(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns true for registered CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "ogxservers.ogx.io")
+		require.NoError(t, err)
+		assert.True(t, exists, "ogxservers.ogx.io CRD should exist in envtest")
+	})
+
+	t.Run("returns false for non-existent CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "fakes.nonexistent.example.com")
+		require.NoError(t, err)
+		assert.False(t, exists, "non-existent CRD should return false")
+	})
+}
+
+func TestMonitoringCRDsAvailable(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns false when monitoring CRDs are not installed", func(t *testing.T) {
+		available, err := MonitoringCRDsAvailable(ctx, k8sClient)
+		require.NoError(t, err)
+		assert.False(t, available, "monitoring CRDs should not be available in envtest")
+	})
+}
+
 // resourceToUnstructured converts a kustomize resource to an unstructured object.
 func resourceToUnstructured(t *testing.T, res *kresource.Resource) (*unstructured.Unstructured, error) {
 	t.Helper()

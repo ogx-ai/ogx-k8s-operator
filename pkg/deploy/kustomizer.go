@@ -809,3 +809,41 @@ func CheckClusterRoleExists(ctx context.Context, cli client.Client, crb *unstruc
 	}
 	return false, nil
 }
+
+// CheckCRDExists checks whether a CustomResourceDefinition is registered on the cluster.
+// Returns true if the CRD exists, false if not found.
+func CheckCRDExists(ctx context.Context, cli client.Client, crdName string) (bool, error) {
+	crd := &unstructured.Unstructured{}
+	crd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apiextensions.k8s.io",
+		Version: "v1",
+		Kind:    "CustomResourceDefinition",
+	})
+
+	err := cli.Get(ctx, client.ObjectKey{Name: crdName}, crd)
+	if err != nil {
+		if k8serr.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MonitoringCRDsAvailable checks whether the prometheus-operator CRDs
+// (ServiceMonitor and PrometheusRule) are registered on the cluster.
+func MonitoringCRDsAvailable(ctx context.Context, cli client.Client) (bool, error) {
+	for _, crdName := range []string{
+		"servicemonitors.monitoring.coreos.com",
+		"prometheusrules.monitoring.coreos.com",
+	} {
+		exists, err := CheckCRDExists(ctx, cli, crdName)
+		if err != nil {
+			return false, fmt.Errorf("failed to check CRD %s: %w", crdName, err)
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
