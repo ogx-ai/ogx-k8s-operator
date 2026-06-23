@@ -1,4 +1,14 @@
 pull_request_rules:
+- name: keep PRs up to date with main
+  conditions:
+    - -conflict
+    - -draft
+    - -closed
+    - -merged
+    - label!=do-not-merge
+  actions:
+    update: {}
+
 - name: auto-merge GitHub Actions dependency bumps
   description: >
     Automatic merge of GitHub Actions dependency bump PRs with 1 approval
