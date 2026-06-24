@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -15,6 +15,14 @@ const (
 	ConditionTypeStorageReady = "StorageReady"
 	// ConditionTypeServiceReady indicates whether the service is ready.
 	ConditionTypeServiceReady = "ServiceReady"
+	// ConditionTypeConfigGenerated indicates whether config generation succeeded.
+	ConditionTypeConfigGenerated = "ConfigGenerated"
+	// ConditionTypeStorageAdopted indicates whether legacy storage was adopted.
+	ConditionTypeStorageAdopted = "StorageAdopted"
+	// ConditionTypeNetworkingAdopted indicates whether legacy networking was adopted.
+	ConditionTypeNetworkingAdopted = "NetworkingAdopted"
+	// ConditionTypeAdoptionConfigInvalid indicates whether adoption annotation values are invalid.
+	ConditionTypeAdoptionConfigInvalid = "AdoptionConfigInvalid"
 )
 
 // Condition reasons.
@@ -37,6 +45,12 @@ const (
 	ReasonServiceReady = "ServiceReady"
 	// ReasonServiceFailed indicates the service failed.
 	ReasonServiceFailed = "ServiceFailed"
+	// ReasonStorageAdopted indicates legacy storage was adopted.
+	ReasonStorageAdopted = "StorageAdopted"
+	// ReasonNetworkingAdopted indicates legacy networking was adopted.
+	ReasonNetworkingAdopted = "NetworkingAdopted"
+	// ReasonAdoptionConfigInvalid indicates adoption annotation values are invalid.
+	ReasonAdoptionConfigInvalid = "AdoptionConfigInvalid"
 )
 
 // Condition messages.
@@ -62,7 +76,7 @@ const (
 )
 
 // SetDeploymentReadyCondition sets the deployment ready condition.
-func SetDeploymentReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus, ready bool, message string) {
+func SetDeploymentReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, message string) {
 	condition := metav1.Condition{
 		Type:               ConditionTypeDeploymentReady,
 		Status:             metav1.ConditionTrue,
@@ -81,7 +95,7 @@ func SetDeploymentReadyCondition(status *llamav1alpha1.LlamaStackDistributionSta
 }
 
 // SetHealthCheckCondition sets the health check condition.
-func SetHealthCheckCondition(status *llamav1alpha1.LlamaStackDistributionStatus, healthy bool, message string) {
+func SetHealthCheckCondition(status *ogxiov1beta1.OGXServerStatus, healthy bool, message string) {
 	condition := metav1.Condition{
 		Type:               ConditionTypeHealthCheck,
 		Status:             metav1.ConditionTrue,
@@ -100,7 +114,7 @@ func SetHealthCheckCondition(status *llamav1alpha1.LlamaStackDistributionStatus,
 }
 
 // SetStorageReadyCondition sets the storage ready condition.
-func SetStorageReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus, ready bool, message string) {
+func SetStorageReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, message string) {
 	condition := metav1.Condition{
 		Type:               ConditionTypeStorageReady,
 		Status:             metav1.ConditionTrue,
@@ -119,7 +133,7 @@ func SetStorageReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus
 }
 
 // SetServiceReadyCondition sets the service ready condition.
-func SetServiceReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus, ready bool, message string) {
+func SetServiceReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, message string) {
 	condition := metav1.Condition{
 		Type:               ConditionTypeServiceReady,
 		Status:             metav1.ConditionTrue,
@@ -138,7 +152,7 @@ func SetServiceReadyCondition(status *llamav1alpha1.LlamaStackDistributionStatus
 }
 
 // SetCondition sets a condition in the status.
-func SetCondition(status *llamav1alpha1.LlamaStackDistributionStatus, condition metav1.Condition) {
+func SetCondition(status *ogxiov1beta1.OGXServerStatus, condition metav1.Condition) {
 	// Initialize conditions if needed
 	if status.Conditions == nil {
 		status.Conditions = make([]metav1.Condition, 0)
@@ -158,7 +172,7 @@ func SetCondition(status *llamav1alpha1.LlamaStackDistributionStatus, condition 
 }
 
 // GetCondition returns a condition by type.
-func GetCondition(status *llamav1alpha1.LlamaStackDistributionStatus, conditionType string) *metav1.Condition {
+func GetCondition(status *ogxiov1beta1.OGXServerStatus, conditionType string) *metav1.Condition {
 	if status == nil || status.Conditions == nil {
 		return nil
 	}
@@ -171,13 +185,28 @@ func GetCondition(status *llamav1alpha1.LlamaStackDistributionStatus, conditionT
 }
 
 // IsConditionTrue returns true if the condition is true.
-func IsConditionTrue(status *llamav1alpha1.LlamaStackDistributionStatus, conditionType string) bool {
+func IsConditionTrue(status *ogxiov1beta1.OGXServerStatus, conditionType string) bool {
 	condition := GetCondition(status, conditionType)
 	return condition != nil && condition.Status == metav1.ConditionTrue
 }
 
 // IsConditionFalse returns true if the condition is false.
-func IsConditionFalse(status *llamav1alpha1.LlamaStackDistributionStatus, conditionType string) bool {
+func IsConditionFalse(status *ogxiov1beta1.OGXServerStatus, conditionType string) bool {
 	condition := GetCondition(status, conditionType)
 	return condition != nil && condition.Status == metav1.ConditionFalse
+}
+
+// setConfigGeneratedCondition sets the ConfigGenerated condition.
+func (r *OGXServerReconciler) setConfigGeneratedCondition(instance *ogxiov1beta1.OGXServer, success bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeConfigGenerated,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !success {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(&instance.Status, condition)
 }

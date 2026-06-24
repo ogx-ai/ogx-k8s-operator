@@ -1,0 +1,18 @@
+version: "2"
+distro_name: test
+apis:
+  - inference
+providers:
+  inference:
+    - provider_id: remote-vllm
+      provider_type: remote::vllm
+      config:
+        base_url: https://vllm.example.com:8000
+registered_resources:
+  models:
+    - model_id: llama3-quantized
+      model_type: llm
+      provider_id: remote-vllm
+      quantization: fp16
+server:
+  port: 8321

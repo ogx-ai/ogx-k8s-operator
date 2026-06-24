@@ -1,0 +1,14 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-rh-custom-port
+spec:
+  distribution:
+    name: rh
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://my-vllm:8000
+  network:
+    port: 9090

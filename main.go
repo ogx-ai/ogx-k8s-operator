@@ -22,9 +22,10 @@ import (
 	"fmt"
 	"os"
 
-	llamaxk8siov1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/llamastack/llama-stack-k8s-operator/controllers"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/cluster"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"github.com/ogx-ai/ogx-k8s-operator/controllers"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -61,15 +62,32 @@ var (
 func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(llamaxk8siov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(ogxiov1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
-func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo, directClient client.Reader) error {
-	reconciler, err := controllers.NewLlamaStackDistributionReconciler(ctx, cli, scheme, clusterInfo, directClient)
-	if err != nil {
-		return fmt.Errorf("failed to create reconciler: %w", err)
+func setupWebhook(mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
+	distNames := make([]string, 0, len(clusterInfo.DistributionImages))
+	for name := range clusterInfo.DistributionImages {
+		distNames = append(distNames, name)
 	}
+	return ogxiov1beta1.SetupWebhookWithManager(mgr, distNames)
+}
+
+func setupReconciler(ctx context.Context, setupClient client.Client, mgr ctrl.Manager, clusterInfo *cluster.ClusterInfo) error {
+	operatorNamespace, err := deploy.GetOperatorNamespace()
+	if err != nil {
+		return fmt.Errorf("failed to get operator namespace: %w", err)
+	}
+
+	configMap, err := controllers.InitializeOperatorConfigMap(ctx, setupClient, operatorNamespace)
+	if err != nil {
+		return fmt.Errorf("failed to initialize operator config: %w", err)
+	}
+
+	imageMappingOverrides := controllers.ParseImageMappingOverrides(ctx, configMap.Data)
+
+	reconciler := controllers.NewOGXServerReconciler(mgr.GetClient(), scheme, clusterInfo, imageMappingOverrides, operatorNamespace)
 	if err = reconciler.SetupWithManager(ctx, mgr); err != nil {
 		return fmt.Errorf("failed to create controller: %w", err)
 	}
@@ -78,7 +96,7 @@ func setupReconciler(ctx context.Context, cli client.Client, mgr ctrl.Manager, c
 
 func newCacheOptions() cache.Options {
 	managedBySelector := labels.SelectorFromSet(labels.Set{
-		"app.kubernetes.io/managed-by": "llama-stack-operator",
+		"app.kubernetes.io/managed-by": "ogx-operator",
 	})
 	managedByFilter := cache.ByObject{Label: managedBySelector}
 
@@ -86,6 +104,11 @@ func newCacheOptions() cache.Options {
 		DefaultTransform: cache.TransformStripManagedFields(),
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.ConfigMap{}: {
+				Label: labels.SelectorFromSet(labels.Set{
+					controllers.WatchLabelKey: controllers.WatchLabelValue,
+				}),
+			},
+			&corev1.Secret{}: {
 				Label: labels.SelectorFromSet(labels.Set{
 					controllers.WatchLabelKey: controllers.WatchLabelValue,
 				}),
@@ -139,7 +162,7 @@ func main() {
 		Cache:                      newCacheOptions(),
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
-		LeaderElectionID:           "54e06e98.llamastack.io",
+		LeaderElectionID:           "54e06e98.ogx.io",
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
@@ -185,7 +208,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo, setupClient); err != nil {
+	if err := setupWebhook(mgr, clusterInfo); err != nil {
+		setupLog.Error(err, "failed to set up webhook")
+		os.Exit(1)
+	}
+
+	if err := setupReconciler(ctx, setupClient, mgr, clusterInfo); err != nil {
 		setupLog.Error(err, "failed to set up reconciler")
 		os.Exit(1)
 	}

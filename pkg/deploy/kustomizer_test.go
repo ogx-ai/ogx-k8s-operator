@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy/plugins"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,7 +28,7 @@ import (
 
 const manifestBasePath = "manifests/base"
 
-func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, string, *llamav1alpha1.LlamaStackDistribution) {
+func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, string, *ogxiov1beta1.OGXServer) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second) // to avlid client rate limit due to too many test in parallel
@@ -42,14 +42,19 @@ func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, s
 		require.NoError(t, k8sClient.Delete(context.Background(), ns))
 	})
 
-	owner := &llamav1alpha1.LlamaStackDistribution{
+	owner := &ogxiov1beta1.OGXServer{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "llamastack.io/v1alpha1",
-			Kind:       "LlamaStackDistribution",
+			APIVersion: "ogx.io/v1beta1",
+			Kind:       "OGXServer",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ownerName,
 			Namespace: testNs,
+		},
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{
+				Name: "starter",
+			},
 		},
 	}
 	ownerGVK := owner.GroupVersionKind()
@@ -57,7 +62,7 @@ func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, s
 	require.NoError(t, k8sClient.Create(ctx, owner))
 	require.NotEmpty(t, owner.UID)
 
-	createdOwner := &llamav1alpha1.LlamaStackDistribution{}
+	createdOwner := &ogxiov1beta1.OGXServer{}
 	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: owner.Name, Namespace: owner.Namespace}, createdOwner))
 	createdOwner.SetGroupVersionKind(ownerGVK)
 
@@ -95,12 +100,14 @@ spec:
 
 		// given an owner with an empty spec to verify that the default value logic
 		// in the field transformer plugin is correctly triggered
-		owner := &llamav1alpha1.LlamaStackDistribution{
+		owner := &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-instance",
 				Namespace: "test-render-ns",
 			},
-			Spec: llamav1alpha1.LlamaStackDistributionSpec{},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
+			},
 		}
 
 		// when we call RenderManifest
@@ -145,7 +152,7 @@ metadata:
   name: deployment`
 		require.NoError(t, fsys.WriteFile(filepath.Join(defaultPath, "deployment.yaml"), []byte(deploymentContent)))
 
-		owner := &llamav1alpha1.LlamaStackDistribution{
+		owner := &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-instance",
 				Namespace: "test-fallback-ns",
@@ -177,7 +184,7 @@ resources:
 `
 		require.NoError(t, fsys.WriteFile(filepath.Join(manifestBasePath, "kustomization.yaml"), []byte(kustomizationContent)))
 
-		owner := &llamav1alpha1.LlamaStackDistribution{
+		owner := &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-instance",
 				Namespace: "test-error-ns",
@@ -310,21 +317,26 @@ func TestApplyResources(t *testing.T) {
 		// given
 		ctx, testNs, owner := setupApplyResourcesTest(t, "does-not-steal-owner")
 
-		ownerOther := &llamav1alpha1.LlamaStackDistribution{
+		ownerOther := &ogxiov1beta1.OGXServer{
 			TypeMeta: metav1.TypeMeta{
-				APIVersion: "llamastack.io/v1alpha1",
-				Kind:       "LlamaStackDistribution",
+				APIVersion: "ogx.io/v1beta1",
+				Kind:       "OGXServer",
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-owner-other",
 				Namespace: testNs,
 			},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{
+					Name: "starter",
+				},
+			},
 		}
 		require.NoError(t, k8sClient.Create(ctx, ownerOther))
 
-		createdOwnerOther := &llamav1alpha1.LlamaStackDistribution{}
+		createdOwnerOther := &ogxiov1beta1.OGXServer{}
 		require.NoError(t, k8sClient.Get(ctx, client.ObjectKeyFromObject(ownerOther), createdOwnerOther))
-		createdOwnerOther.SetGroupVersionKind(llamav1alpha1.GroupVersion.WithKind("LlamaStackDistribution"))
+		createdOwnerOther.SetGroupVersionKind(ogxiov1beta1.GroupVersion.WithKind("OGXServer"))
 
 		existingSvc := &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
@@ -539,13 +551,9 @@ func TestFilterExcludeKinds(t *testing.T) {
 func TestSetDefaultPort(t *testing.T) {
 	// arrange
 	// instance with no custom port and service with empty port values
-	instance := &llamav1alpha1.LlamaStackDistribution{
-		Spec: llamav1alpha1.LlamaStackDistributionSpec{
-			Server: llamav1alpha1.ServerSpec{
-				ContainerSpec: llamav1alpha1.ContainerSpec{
-					Port: 0, // no port configured
-				},
-			},
+	instance := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
 		},
 	}
 
@@ -559,7 +567,7 @@ func TestSetDefaultPort(t *testing.T) {
 		Mappings: []plugins.FieldMapping{
 			{
 				SourceValue:       getServicePort(instance), // tests getServicePort() integration with kustomizer
-				DefaultValue:      llamav1alpha1.DefaultServerPort,
+				DefaultValue:      ogxiov1beta1.DefaultServerPort,
 				TargetField:       "/spec/ports/0/port",
 				TargetKind:        "Service",
 				CreateIfNotExists: true,
@@ -583,20 +591,21 @@ func TestSetDefaultPort(t *testing.T) {
 	require.True(t, ok)
 	actualPort, ok := ports[0].(map[string]any)["port"]
 	require.True(t, ok)
-	require.Equal(t, int(llamav1alpha1.DefaultServerPort), actualPort)
+	require.Equal(t, int(ogxiov1beta1.DefaultServerPort), actualPort)
 }
 
 func TestRemoveDeploymentReplicas(t *testing.T) {
 	t.Parallel()
 
-	instance := &llamav1alpha1.LlamaStackDistribution{
+	instance := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "example",
 			Namespace: "llama",
 		},
-		Spec: llamav1alpha1.LlamaStackDistributionSpec{
-			Server: llamav1alpha1.ServerSpec{
-				Autoscaling: &llamav1alpha1.AutoscalingSpec{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Autoscaling: &ogxiov1beta1.AutoscalingSpec{
 					MaxReplicas: 5,
 				},
 			},
@@ -1056,12 +1065,13 @@ func ptr[T any](v T) *T {
 
 func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
 	t.Run("includes Recreate strategy when storage is configured", func(t *testing.T) {
-		owner := &llamav1alpha1.LlamaStackDistribution{
+		owner := &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-			Spec: llamav1alpha1.LlamaStackDistributionSpec{
-				Replicas: 1,
-				Server: llamav1alpha1.ServerSpec{
-					Storage: &llamav1alpha1.StorageSpec{},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
+				Workload: &ogxiov1beta1.WorkloadSpec{
+					Replicas: ptr(int32(1)),
+					Storage:  &ogxiov1beta1.PVCStorageSpec{},
 				},
 			},
 		}
@@ -1081,11 +1091,11 @@ func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
 	})
 
 	t.Run("does not include strategy when storage is nil", func(t *testing.T) {
-		owner := &llamav1alpha1.LlamaStackDistribution{
+		owner := &ogxiov1beta1.OGXServer{
 			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-			Spec: llamav1alpha1.LlamaStackDistributionSpec{
-				Replicas: 1,
-				Server:   llamav1alpha1.ServerSpec{},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
+				Workload:     &ogxiov1beta1.WorkloadSpec{Replicas: ptr(int32(1))},
 			},
 		}
 
@@ -1096,6 +1106,32 @@ func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
 				t.Fatal("should not include strategy mapping when storage is nil")
 			}
 		}
+	})
+}
+
+func TestCheckCRDExists(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns true for registered CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "ogxservers.ogx.io")
+		require.NoError(t, err)
+		assert.True(t, exists, "ogxservers.ogx.io CRD should exist in envtest")
+	})
+
+	t.Run("returns false for non-existent CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "fakes.nonexistent.example.com")
+		require.NoError(t, err)
+		assert.False(t, exists, "non-existent CRD should return false")
+	})
+}
+
+func TestMonitoringCRDsAvailable(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns false when monitoring CRDs are not installed", func(t *testing.T) {
+		available, err := MonitoringCRDsAvailable(ctx, k8sClient)
+		require.NoError(t, err)
+		assert.False(t, available, "monitoring CRDs should not be available in envtest")
 	})
 }
 

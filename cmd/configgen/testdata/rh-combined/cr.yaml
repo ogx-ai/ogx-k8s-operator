@@ -1,0 +1,19 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-rh-combined
+spec:
+  distribution:
+    name: rh
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://my-vllm:8000
+  resources:
+    models:
+    - name: llama3
+  disabledAPIs:
+  - batches
+  network:
+    port: 9090

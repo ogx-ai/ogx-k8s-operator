@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -19,16 +19,14 @@ import (
 )
 
 const (
-	rolloutTestNS           = "llama-stack-rollout-test"
+	rolloutTestNS           = "ogx-rollout-test"
 	rolloutTestTimeout      = 5 * time.Minute
 	rolloutCRName           = "rollout-test"
 	ollamaInferenceModelEnv = "OLLAMA_INFERENCE_MODEL"
 )
 
-// TestRolloutWithStorage verifies that updating a LlamaStackDistribution
+// TestRolloutWithStorage verifies that updating an OGXServer
 // with persistent storage completes without RWO PVC multi-attach deadlock.
-// Requires a multi-node cluster. Cordons the initial pod's node to force
-// cross-node scheduling, guaranteeing the RWO conflict if strategy is wrong.
 func TestRolloutWithStorage(t *testing.T) {
 	if TestOpts.SkipCreation {
 		t.Skip("Skipping rollout test suite")
@@ -44,8 +42,8 @@ func TestRolloutWithStorage(t *testing.T) {
 		testCreateRolloutNamespace(t)
 	})
 
-	t.Run("should create distribution with storage", func(t *testing.T) {
-		testCreateDistributionWithStorage(t)
+	t.Run("should create OGXServer with storage", func(t *testing.T) {
+		testCreateServerWithStorage(t)
 	})
 
 	t.Run("should use Recreate strategy when storage is configured", func(t *testing.T) {
@@ -77,33 +75,33 @@ func testCreateRolloutNamespace(t *testing.T) {
 	}
 }
 
-func testCreateDistributionWithStorage(t *testing.T) {
+func testCreateServerWithStorage(t *testing.T) {
 	t.Helper()
 
-	cr := &v1alpha1.LlamaStackDistribution{
+	replicas := int32(1)
+	cr := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rolloutCRName,
 			Namespace: rolloutTestNS,
 		},
-		Spec: v1alpha1.LlamaStackDistributionSpec{
-			Replicas: 1,
-			Server: v1alpha1.ServerSpec{
-				Distribution: v1alpha1.DistributionType{
-					Name: starterDistType,
-				},
-				ContainerSpec: v1alpha1.ContainerSpec{
-					Name: "llama-stack",
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{
+				Name: starterDistType,
+			},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Replicas: &replicas,
+				Storage:  &ogxiov1beta1.PVCStorageSpec{},
+				Overrides: &ogxiov1beta1.WorkloadOverrides{
 					Env: []corev1.EnvVar{
 						{Name: ollamaInferenceModelEnv, Value: "llama3.2:1b"},
 						{Name: "OLLAMA_URL", Value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"},
 					},
 				},
-				Storage: &v1alpha1.StorageSpec{},
 			},
 		},
 	}
 
-	t.Log("Creating LlamaStackDistribution with persistent storage")
+	t.Log("Creating OGXServer with persistent storage")
 	require.NoError(t, TestEnv.Client.Create(TestEnv.Ctx, cr))
 
 	err := EnsureResourceReady(t, TestEnv, schema.GroupVersionKind{
@@ -144,10 +142,8 @@ func testRolloutAfterEnvVarUpdate(t *testing.T) {
 	cordonNodeForTest(t, initialNodeName)
 
 	t.Log("Updating OLLAMA_INFERENCE_MODEL to trigger rollout")
-	updateDistributionEnvVar(t, rolloutTestNS, rolloutCRName, ollamaInferenceModelEnv, "llama3.2:3b")
+	updateServerEnvVar(t, rolloutTestNS, rolloutCRName, ollamaInferenceModelEnv, "llama3.2:3b")
 
-	// Poll until the operator reconciles the env var into the Deployment,
-	// otherwise the old (still-ready) Deployment passes readiness immediately.
 	t.Log("Waiting for operator to update Deployment with new env var")
 	waitForDeploymentEnvVar(t, rolloutTestNS, rolloutCRName, ollamaInferenceModelEnv, "llama3.2:3b")
 
@@ -195,8 +191,6 @@ func testNoFailedAttachVolumeEvents(t *testing.T) {
 
 	for _, event := range eventList.Items {
 		if event.Reason == "FailedAttachVolume" {
-			// Transient during cross-node volume migration with Recreate strategy.
-			// A permanent deadlock (RollingUpdate) would have timed out above.
 			t.Logf("Transient FailedAttachVolume (expected): %s", event.Message)
 		}
 	}
@@ -205,13 +199,13 @@ func testNoFailedAttachVolumeEvents(t *testing.T) {
 func testRolloutCleanup(t *testing.T) {
 	t.Helper()
 
-	distribution := &v1alpha1.LlamaStackDistribution{
+	server := &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rolloutCRName,
 			Namespace: rolloutTestNS,
 		},
 	}
-	err := TestEnv.Client.Delete(TestEnv.Ctx, distribution)
+	err := TestEnv.Client.Delete(TestEnv.Ctx, server)
 	if err != nil && !k8serrors.IsNotFound(err) {
 		require.NoError(t, err)
 	}
@@ -222,8 +216,7 @@ func testRolloutCleanup(t *testing.T) {
 	require.NoError(t, err, "Deployment should be deleted")
 }
 
-// cordonNodeForTest marks a node as unschedulable and registers a
-// t.Cleanup to uncordon it when the test finishes.
+// cordonNodeForTest marks a node as unschedulable and registers cleanup.
 func cordonNodeForTest(t *testing.T, nodeName string) {
 	t.Helper()
 
@@ -249,22 +242,28 @@ func cordonNodeForTest(t *testing.T, nodeName string) {
 	})
 }
 
-// updateDistributionEnvVar updates an env var on a LlamaStackDistribution,
-// retrying on conflict.
-func updateDistributionEnvVar(t *testing.T, namespace, name, envName, newValue string) {
+// updateServerEnvVar updates an env var on an OGXServer, retrying on conflict.
+func updateServerEnvVar(t *testing.T, namespace, name, envName, newValue string) {
 	t.Helper()
 
 	err := wait.PollUntilContextTimeout(TestEnv.Ctx, time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
-		latest := &v1alpha1.LlamaStackDistribution{}
+		latest := &ogxiov1beta1.OGXServer{}
 		if getErr := TestEnv.Client.Get(ctx, client.ObjectKey{
 			Namespace: namespace, Name: name,
 		}, latest); getErr != nil {
 			return false, getErr
 		}
 
-		for i, env := range latest.Spec.Server.ContainerSpec.Env {
+		if latest.Spec.Workload == nil {
+			latest.Spec.Workload = &ogxiov1beta1.WorkloadSpec{}
+		}
+		if latest.Spec.Workload.Overrides == nil {
+			latest.Spec.Workload.Overrides = &ogxiov1beta1.WorkloadOverrides{}
+		}
+
+		for i, env := range latest.Spec.Workload.Overrides.Env {
 			if env.Name == envName {
-				latest.Spec.Server.ContainerSpec.Env[i].Value = newValue
+				latest.Spec.Workload.Overrides.Env[i].Value = newValue
 				break
 			}
 		}
@@ -280,8 +279,7 @@ func updateDistributionEnvVar(t *testing.T, namespace, name, envName, newValue s
 	require.NoError(t, err, "Failed to update CR env var "+envName)
 }
 
-// waitForDeploymentEnvVar polls until the Deployment's container spec
-// reflects the expected env var value.
+// waitForDeploymentEnvVar polls until the Deployment reflects the expected env var value.
 func waitForDeploymentEnvVar(t *testing.T, namespace, name, envName, expectedValue string) {
 	t.Helper()
 
