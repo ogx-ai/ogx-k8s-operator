@@ -1,0 +1,20 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-responses-config
+spec:
+  distribution:
+    name: test
+  providers:
+    responses:
+      inline:
+        builtin:
+          vectorStoresConfig:
+            defaultProviderId: milvus
+            defaultEmbeddingModel:
+              providerId: vllm
+              modelId: granite-embedding
+              embeddingDimensions: 768
+          compactionConfig:
+            summarizationModel: llama3
+            defaultCompactThreshold: 10

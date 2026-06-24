@@ -1,19 +1,21 @@
-# CA Bundle Configuration for LlamaStackDistribution
+# CA Bundle Configuration for OGXServer
 
-This document explains how to configure custom CA bundles for LlamaStackDistribution to enable secure communication with external LLM providers using self-signed certificates.
+This document explains how to configure custom CA bundles for OGXServer to enable secure communication with external LLM providers using self-signed certificates.
 
 ## Overview
 
 The CA bundle configuration allows you to:
 - Use self-signed certificates for external LLM API connections
 - Trust custom Certificate Authorities (CAs) for secure communication
-- Mount CA certificates from ConfigMaps into the LlamaStack server pods
+- Mount CA certificates from ConfigMaps into the OGX server pods
+
+Source ConfigMaps must live in the **same namespace** as the OGXServer and must include the label **`ogx.io/watch: "true"`** so the operator can watch them for changes.
 
 ## How It Works
 
 When you configure a CA bundle:
 
-1. **ConfigMap Storage**: CA certificates are stored in a Kubernetes ConfigMap (source ConfigMap)
+1. **ConfigMap Storage**: CA certificates are stored in a Kubernetes ConfigMap (source ConfigMap) in the same namespace as the OGXServer, with `ogx.io/watch: "true"` on the ConfigMap metadata
 2. **Controller Processing**: The operator controller reads and validates certificates from the source ConfigMap(s)
 3. **Concatenation**: Valid certificates are concatenated into a single PEM file using Go's `encoding/pem` package
 4. **Managed ConfigMap**: The operator creates a managed ConfigMap named `{instance-name}-ca-bundle` containing the concatenated bundle
@@ -26,7 +28,7 @@ When you configure a CA bundle:
 The operator processes CA bundle certificates in the controller before deployment:
 
 **Processing Steps:**
-1. The controller reads CA certificate data from the source ConfigMap(s) specified in `tlsConfig.caBundle`
+1. The controller reads CA certificate data from the source ConfigMap(s) specified in `spec.tls.trust.caCertificates`
 2. Each certificate is validated using Go's `encoding/pem` package to ensure proper PEM format
 3. Valid `CERTIFICATE` blocks are extracted and concatenated into a single PEM file
 4. The concatenated bundle is stored in a managed ConfigMap named `{instance-name}-ca-bundle` with key `ca-bundle.crt`
@@ -46,46 +48,46 @@ The operator processes CA bundle certificates in the controller before deploymen
 ### Basic CA Bundle Configuration
 
 ```yaml
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: my-llama-stack
+  name: my-ogx-server
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
-        # configMapNamespace: default  # Optional - defaults to CR namespace
-        # configMapKey: ca-bundle.crt           # Optional - defaults to "ca-bundle.crt"
+  distribution:
+    name: hf-serverless
+  tls:
+    trust:
+      caCertificates:
+        - name: my-ca-bundle
+          key: ca-bundle.crt
 ```
 
-### Multiple CA Bundle Keys Configuration (RHOAI Pattern)
+### Multiple CA Sources (RHOAI Pattern)
 
 ```yaml
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: my-llama-stack
+  name: my-ogx-server
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: odh-trusted-ca-bundle
-        # configMapNamespace: default  # Optional - defaults to CR namespace
-        configMapKeys:                   # Multiple keys from same ConfigMap
-          - ca-bundle.crt                # CNO-injected cluster CAs
-          - odh-ca-bundle.crt           # User-specified custom CAs
+  distribution:
+    name: hf-serverless
+  tls:
+    trust:
+      caCertificates:
+        - name: odh-trusted-ca-bundle
+          key: ca-bundle.crt        # CNO-injected cluster CAs
+        - name: odh-trusted-ca-bundle
+          key: odh-ca-bundle.crt    # User-specified custom CAs
 ```
 
 ### Configuration Fields
 
-- `configMapName` (required): Name of the ConfigMap containing CA certificates
-- `configMapNamespace` (optional): Namespace of the ConfigMap. Defaults to the same namespace as the LlamaStackDistribution
-- `configMapKeys` (optional): Array of keys within the ConfigMap containing CA bundle data. All certificates from these keys will be concatenated into a single CA bundle file. If not specified, defaults to `["ca-bundle.crt"]`
+- `spec.tls.trust.caCertificates` (array of ConfigMapKeyRef): Each entry references a specific key in a ConfigMap containing PEM-encoded CA certificates. All certificates from all entries are concatenated into a single CA bundle file.
+  - `name` (required): Name of the ConfigMap containing the CA certificate.
+  - `key` (required): Key within the ConfigMap containing the PEM-encoded certificate data.
+
+**ConfigMap requirements:** The referenced ConfigMap must include `metadata.labels["ogx.io/watch"]` set to `"true"`.
 
 ## Examples
 
@@ -96,69 +98,62 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-ca-bundle
+  labels:
+    ogx.io/watch: "true"
 data:
   ca-bundle.crt: |
     -----BEGIN CERTIFICATE-----
     # ... your CA certificate data here ...
     -----END CERTIFICATE-----
 ---
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: secure-llama-stack
+  name: secure-ogx-server
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
+  distribution:
+    name: hf-serverless
+  tls:
+    trust:
+      caCertificates:
+        - name: my-ca-bundle
+          key: ca-bundle.crt
 ```
 
 ### Example 2: Custom Key Name
+
+Reference a non-default key name from the ConfigMap:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: my-ca-bundle
+  labels:
+    ogx.io/watch: "true"
 data:
   custom-ca.pem: |
     -----BEGIN CERTIFICATE-----
     # ... your CA certificate data here ...
     -----END CERTIFICATE-----
 ---
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: secure-llama-stack
+  name: secure-ogx-server
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: my-ca-bundle
-        configMapKey: custom-ca.pem
+  distribution:
+    name: hf-serverless
+  tls:
+    trust:
+      caCertificates:
+        - name: my-ca-bundle
+          key: custom-ca.pem
 ```
 
-### Example 3: Cross-Namespace CA Bundle
+### Example 3: Same Namespace Only
 
-```yaml
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
-metadata:
-  name: secure-llama-stack
-  namespace: my-namespace
-spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: global-ca-bundle
-        configMapNamespace: kube-system
-```
+CA bundle ConfigMaps must be in the **same namespace** as the OGXServer. There is no cross-namespace reference support; create or copy the bundle ConfigMap into the OGXServer namespace before referencing it.
 
 ### Example 4: RHOAI Pattern with Multiple CA Sources
 
@@ -168,6 +163,7 @@ kind: ConfigMap
 metadata:
   name: odh-trusted-ca-bundle
   labels:
+    ogx.io/watch: "true"
     config.openshift.io/inject-trusted-cabundle: "true"
 data:
   ca-bundle.crt: |
@@ -184,23 +180,31 @@ data:
     # ... custom CA certificate 2 ...
     -----END CERTIFICATE-----
 ---
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: rhoai-llama-stack
+  name: rhoai-ogx-server
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    tlsConfig:
-      caBundle:
-        configMapName: odh-trusted-ca-bundle
-        configMapKeys:
-          - ca-bundle.crt      # Cluster CAs
-          - odh-ca-bundle.crt  # Custom CAs
+  distribution:
+    name: hf-serverless
+  tls:
+    trust:
+      caCertificates:
+        - name: odh-trusted-ca-bundle
+          key: ca-bundle.crt
+        - name: odh-trusted-ca-bundle
+          key: odh-ca-bundle.crt
 ```
 
 ## Creating CA Bundle ConfigMaps
+
+Every CA bundle ConfigMap must be labeled so the operator watches it:
+
+```yaml
+metadata:
+  labels:
+    ogx.io/watch: "true"
+```
 
 ### From Certificate Files
 
@@ -212,6 +216,9 @@ kubectl create configmap my-ca-bundle --from-file=ca-bundle.crt=/path/to/your/ca
 kubectl create configmap my-ca-bundle \
   --from-file=ca-bundle.crt=/path/to/your/ca1.crt \
   --from-file=additional-ca.crt=/path/to/your/ca2.crt
+
+# Label for OGX (required before the operator will track updates)
+kubectl label configmap my-ca-bundle ogx.io/watch=true
 ```
 
 ### From Certificate Content
@@ -219,6 +226,7 @@ kubectl create configmap my-ca-bundle \
 ```bash
 # Create a ConfigMap with certificate content
 kubectl create configmap my-ca-bundle --from-literal=ca-bundle.crt="$(cat /path/to/your/ca.crt)"
+kubectl label configmap my-ca-bundle ogx.io/watch=true
 ```
 
 ## Use Cases
@@ -229,36 +237,39 @@ When using private cloud LLM providers with self-signed certificates:
 
 ```yaml
 spec:
-  server:
-    distribution:
-      name: hf-serverless
-    containerSpec:
+  distribution:
+    name: hf-serverless
+  workload:
+    overrides:
       env:
-      - name: HF_API_KEY
-        valueFrom:
-          secretKeyRef:
-            name: hf-api-key
-            key: token
-    userConfig:
-      configMapName: llama-stack-config
-    tlsConfig:
-      caBundle:
-        configMapName: private-cloud-ca-bundle
+        - name: HF_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: hf-api-key
+              key: token
+  overrideConfig:
+    name: ogx-config
+    key: config.yaml
+  tls:
+    trust:
+      caCertificates:
+        - name: private-cloud-ca-bundle
+          key: ca-bundle.crt
 ```
 
 ### 2. Internal Enterprise APIs
 
-For enterprise environments with internal CAs:
+For enterprise environments with internal CAs, place the CA bundle ConfigMap in the same namespace as the OGXServer and reference it by name:
 
 ```yaml
 spec:
-  server:
-    distribution:
-      name: hf-endpoint
-    tlsConfig:
-      caBundle:
-        configMapName: enterprise-ca-bundle
-        configMapNamespace: security-system
+  distribution:
+    name: hf-endpoint
+  tls:
+    trust:
+      caCertificates:
+        - name: enterprise-ca-bundle
+          key: ca-bundle.crt
 ```
 
 ### 3. Development/Testing
@@ -267,13 +278,13 @@ For development environments with self-signed certificates:
 
 ```yaml
 spec:
-  server:
-    distribution:
-      name: ollama
-    tlsConfig:
-      caBundle:
-        configMapName: dev-ca-bundle
-        configMapKey: development-ca.pem
+  distribution:
+    name: ollama
+  tls:
+    trust:
+      caCertificates:
+        - name: dev-ca-bundle
+          key: development-ca.pem
 ```
 
 ## Troubleshooting
@@ -284,12 +295,13 @@ spec:
 2. **Permission Denied**: Check that the operator has permissions to read the ConfigMap
 3. **Invalid Certificate**: Verify the certificate format is correct (PEM format)
 4. **Pod Not Restarting**: ConfigMap changes trigger automatic pod restarts via annotations
+5. **ConfigMap Not Watched**: Ensure the source ConfigMap has label `ogx.io/watch: "true"`
 
 ### Common Error Messages and Solutions
 
 #### "CA bundle key not found in ConfigMap"
 - **Cause**: The specified key doesn't exist in the ConfigMap data
-- **Solution**: Check the key name in your LlamaStackDistribution spec, default is "ca-bundle.crt"
+- **Solution**: Check the `key` field in your `spec.tls.trust.caCertificates` entry matches an existing key in the ConfigMap
 - **Example**: Verify `kubectl get configmap my-ca-bundle -o yaml` shows your expected key
 
 #### "Invalid CA bundle format"
@@ -298,9 +310,9 @@ spec:
 - **Example**: Valid format starts with `-----BEGIN CERTIFICATE-----`
 
 #### "Referenced CA bundle ConfigMap not found"
-- **Cause**: The ConfigMap specified in tlsConfig.caBundle.configMapName doesn't exist
-- **Solution**: Create the ConfigMap first, then apply the LlamaStackDistribution
-- **Example**: `kubectl create configmap my-ca-bundle --from-file=ca-bundle.crt=my-ca.crt`
+- **Cause**: The ConfigMap specified in `spec.tls.trust.caCertificates[].name` doesn't exist or is not in the same namespace as the OGXServer
+- **Solution**: Create the ConfigMap in the OGX namespace first, label it with `ogx.io/watch=true`, then apply the OGXServer
+- **Example**: `kubectl create configmap my-ca-bundle --from-file=ca-bundle.crt=my-ca.crt && kubectl label configmap my-ca-bundle ogx.io/watch=true`
 
 #### "No valid certificates found in CA bundle"
 - **Cause**: The ConfigMap contains data but no parseable certificates
@@ -319,13 +331,13 @@ spec:
 kubectl get configmap my-ca-bundle -o yaml
 
 # Check pod environment variables
-kubectl describe pod <llama-stack-pod-name>
+kubectl describe pod <ogx-pod-name>
 
 # Check mounted certificates
-kubectl exec <llama-stack-pod-name> -- ls -la /etc/ssl/certs/ca-bundle/
+kubectl exec <ogx-pod-name> -- ls -la /etc/ssl/certs/ca-bundle/
 
 # Check SSL_CERT_FILE environment variable
-kubectl exec <llama-stack-pod-name> -- env | grep SSL_CERT_FILE
+kubectl exec <ogx-pod-name> -- env | grep SSL_CERT_FILE
 
 # Validate certificate format locally
 openssl x509 -text -noout -in ca-bundle.crt
@@ -339,10 +351,11 @@ openssl verify -CAfile ca-bundle.crt server.crt
 
 ### Validation Checklist
 
-Before deploying a LlamaStackDistribution with CA bundle:
+Before deploying an OGXServer with CA bundle:
 
-- [ ] ConfigMap exists in the correct namespace
-- [ ] ConfigMap contains the specified key (default: "ca-bundle.crt")
+- [ ] ConfigMap exists in the **same namespace** as the OGXServer
+- [ ] ConfigMap has label `ogx.io/watch: "true"`
+- [ ] ConfigMap contains the key referenced in `spec.tls.trust.caCertificates[].key`
 - [ ] Certificate data is in PEM format
 - [ ] Certificate data contains valid X.509 certificates
 - [ ] Operator has read permissions on the ConfigMap
@@ -353,7 +366,7 @@ Before deploying a LlamaStackDistribution with CA bundle:
 
 1. **ConfigMap Security**: ConfigMaps are stored in plain text in etcd. Consider using appropriate RBAC policies
 2. **Certificate Rotation**: Update ConfigMaps when certificates expire or are rotated
-3. **Namespace Isolation**: Use appropriate namespaces to isolate CA bundles
+3. **Namespace Isolation**: CA bundle ConfigMaps must reside in the same namespace as the OGXServer; use namespaces to isolate workloads and secrets
 4. **Audit Trail**: Monitor ConfigMap changes in production environments
 5. **Principle of Least Privilege**: Only grant necessary permissions to access CA bundle ConfigMaps
 6. **Resource Limits**: The operator enforces limits during certificate concatenation (10MB max bundle size, 1000 max certificates) to prevent resource exhaustion
@@ -365,4 +378,4 @@ Before deploying a LlamaStackDistribution with CA bundle:
 - ConfigMap size limits apply (1MB by default for source ConfigMaps)
 - Maximum bundle size is 10MB and maximum 1000 certificates (enforced by controller)
 - Certificate validation is handled by Go's `encoding/pem` and `crypto/x509` packages in the controller
-- Cross-namespace ConfigMap access requires appropriate RBAC permissions
+- The CA bundle ConfigMap must be in the same namespace as the OGXServer (cross-namespace references are not supported)

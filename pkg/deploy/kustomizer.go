@@ -9,9 +9,9 @@ import (
 	"slices"
 	"sort"
 
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/compare"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy/plugins"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/compare"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy/plugins"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -41,7 +41,7 @@ const deploymentKind = "Deployment"
 func RenderManifest(
 	fs filesys.FileSystem,
 	manifestPath string,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	ownerInstance *ogxiov1beta1.OGXServer,
 ) (*resmap.ResMap, error) {
 	// fallback to the 'default' directory' if we cannot initially find
 	// the kustomization file
@@ -67,7 +67,7 @@ func ApplyResources(
 	ctx context.Context,
 	cli client.Client,
 	scheme *runtime.Scheme,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	ownerInstance *ogxiov1beta1.OGXServer,
 	resMap *resmap.ResMap,
 ) error {
 	for _, res := range (*resMap).Resources() {
@@ -85,10 +85,10 @@ func manageResource(
 	cli client.Client,
 	scheme *runtime.Scheme,
 	res *resource.Resource,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	ownerInstance *ogxiov1beta1.OGXServer,
 ) error {
 	// prevent the controller from trying to apply changes to its own CR
-	if res.GetKind() == llamav1alpha1.LlamaStackDistributionKind && res.GetName() == ownerInstance.Name && res.GetNamespace() == ownerInstance.Namespace {
+	if res.GetKind() == ogxiov1beta1.OGXServerKind && res.GetName() == ownerInstance.Name && res.GetNamespace() == ownerInstance.Namespace {
 		return nil
 	}
 
@@ -127,21 +127,22 @@ func manageResource(
 }
 
 // createResource creates a new resource, setting an owner reference only if it's namespace-scoped.
+// PersistentVolumeClaims are intentionally excluded from ownerRef to prevent
+// data loss on CR deletion — PVCs must be cleaned up explicitly by users.
 func createResource(
 	ctx context.Context,
 	cli client.Client,
 	obj *unstructured.Unstructured,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	ownerInstance *ogxiov1beta1.OGXServer,
 	scheme *runtime.Scheme,
 	gvk schema.GroupVersionKind,
 ) error {
-	// Check if the resource is cluster-scoped (like a ClusterRole) to avoid
-	// incorrectly setting a namespace-bound owner reference on it.
 	isClusterScoped, err := isClusterScoped(cli.RESTMapper(), gvk)
 	if err != nil {
 		return fmt.Errorf("failed to determine resource scope: %w", err)
 	}
-	if !isClusterScoped {
+	skipOwnerRef := isClusterScoped || gvk.Kind == "PersistentVolumeClaim"
+	if !skipOwnerRef {
 		if err := ctrl.SetControllerReference(ownerInstance, obj, scheme); err != nil {
 			return fmt.Errorf("failed to set controller reference for %s: %w", gvk.Kind, err)
 		}
@@ -159,7 +160,7 @@ func isClusterScoped(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool,
 }
 
 // patchResource patches an existing resource, but only if we own it.
-func patchResource(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
+func patchResource(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured, ownerInstance *ogxiov1beta1.OGXServer) error {
 	logger := log.FromContext(ctx)
 
 	// Critical safety check to prevent the operator from "stealing" or
@@ -213,12 +214,12 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 		existing,
 		client.RawPatch(k8stypes.ApplyPatchType, data),
 		client.ForceOwnership,
-		client.FieldOwner(ownerInstance.GetName()),
+		client.FieldOwner("ogx-operator"),
 	)
 }
 
 // applyPlugins runs all Go-based transformations on the resource map.
-func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
+func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
 	namePrefixPlugin := plugins.CreateNamePrefixPlugin(plugins.NamePrefixConfig{
 		Prefix: ownerInstance.GetName(),
 		// Exclude Deployment to maintain backward compatibility with existing deployment names
@@ -258,10 +259,10 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStack
 }
 
 // applyNetworkPolicyTransformer applies the NetworkPolicy transformer plugin.
-func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *llamav1alpha1.LlamaStackDistribution) error {
+func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
 	operatorNS, err := GetOperatorNamespace()
 	if err != nil {
-		operatorNS = "llama-stack-k8s-operator-system"
+		operatorNS = "ogx-k8s-operator-system"
 	}
 
 	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
@@ -307,7 +308,7 @@ func removeDeploymentReplicas(resMap resmap.ResMap) error {
 }
 
 // getFieldMappings returns essential field mappings for kustomize transformation.
-func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plugins.FieldMapping {
+func getFieldMappings(ownerInstance *ogxiov1beta1.OGXServer) []plugins.FieldMapping {
 	instanceName := ownerInstance.GetName()
 	instanceNamespace := ownerInstance.GetNamespace()
 	serviceAccountName := instanceName + "-sa"
@@ -315,11 +316,11 @@ func getFieldMappings(ownerInstance *llamav1alpha1.LlamaStackDistribution) []plu
 	storageSize := getStorageSize(ownerInstance)
 	instanceLabelPath := "/app.kubernetes.io~1instance"
 
-	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, ownerInstance.Spec.Replicas)
+	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, GetEffectiveReplicas(ownerInstance))
 
 	// When persistent storage is configured, use Recreate strategy to avoid
 	// RWO PVC multi-attach deadlock during rolling updates
-	if ownerInstance.Spec.Server.Storage != nil {
+	if ownerInstance.Spec.Workload != nil && ownerInstance.Spec.Workload.Storage != nil {
 		mappings = append(mappings, plugins.FieldMapping{
 			SourceValue:       "Recreate",
 			TargetField:       "/spec/strategy/type",
@@ -338,21 +339,21 @@ func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName stri
 	return []plugins.FieldMapping{
 		{
 			SourceValue:       storageSize,
-			DefaultValue:      llamav1alpha1.DefaultStorageSize.String(),
+			DefaultValue:      ogxiov1beta1.DefaultStorageSize.String(),
 			TargetField:       "/spec/resources/requests/storage",
 			TargetKind:        "PersistentVolumeClaim",
 			CreateIfNotExists: true,
 		},
 		{
 			SourceValue:       servicePort,
-			DefaultValue:      llamav1alpha1.DefaultServerPort,
+			DefaultValue:      ogxiov1beta1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/port",
 			TargetKind:        "Service",
 			CreateIfNotExists: true,
 		},
 		{
 			SourceValue:       servicePort,
-			DefaultValue:      llamav1alpha1.DefaultServerPort,
+			DefaultValue:      ogxiov1beta1.DefaultServerPort,
 			TargetField:       "/spec/ports/0/targetPort",
 			TargetKind:        "Service",
 			CreateIfNotExists: true,
@@ -421,29 +422,29 @@ func buildFieldMappings(instanceName, instanceNamespace, serviceAccountName stri
 }
 
 // getStorageSize extracts the storage size from the CR spec.
-func getStorageSize(instance *llamav1alpha1.LlamaStackDistribution) string {
-	if instance.Spec.Server.Storage != nil && instance.Spec.Server.Storage.Size != nil {
-		return instance.Spec.Server.Storage.Size.String()
+func getStorageSize(instance *ogxiov1beta1.OGXServer) string {
+	if instance.Spec.Workload != nil && instance.Spec.Workload.Storage != nil && instance.Spec.Workload.Storage.Size != nil {
+		return instance.Spec.Workload.Storage.Size.String()
 	}
 	// Returning an empty string signals the field transformer to use the default value.
 	return ""
 }
 
 // getServicePort returns the service port or nil if not specified.
-func getServicePort(instance *llamav1alpha1.LlamaStackDistribution) any {
-	if instance.Spec.Server.ContainerSpec.Port != 0 {
-		return instance.Spec.Server.ContainerSpec.Port
+func getServicePort(instance *ogxiov1beta1.OGXServer) any {
+	if instance.Spec.Network != nil && instance.Spec.Network.Port != 0 {
+		return instance.Spec.Network.Port
 	}
 	// Returning nil signals the field transformer to use the default value.
 	return nil
 }
 
-func isAutoscalingEnabled(instance *llamav1alpha1.LlamaStackDistribution) bool {
-	if instance == nil || instance.Spec.Server.Autoscaling == nil {
+func isAutoscalingEnabled(instance *ogxiov1beta1.OGXServer) bool {
+	if instance == nil || instance.Spec.Workload == nil || instance.Spec.Workload.Autoscaling == nil {
 		return false
 	}
 
-	return instance.Spec.Server.Autoscaling.MaxReplicas > 0
+	return instance.Spec.Workload.Autoscaling.MaxReplicas > 0
 }
 
 // ManifestContext provides the necessary context for complex resource rendering.
@@ -451,6 +452,7 @@ type ManifestContext struct {
 	ResolvedImage           string
 	ConfigMapHash           string
 	CABundleHash            string
+	SecretHash              string
 	ContainerSpec           map[string]any
 	PodSpec                 map[string]any
 	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec
@@ -461,7 +463,7 @@ type ManifestContext struct {
 func RenderManifestWithContext(
 	fs filesys.FileSystem,
 	manifestsPath string,
-	ownerInstance *llamav1alpha1.LlamaStackDistribution,
+	ownerInstance *ogxiov1beta1.OGXServer,
 	manifestCtx *ManifestContext,
 ) (*resmap.ResMap, error) {
 	// First, render the base manifests
@@ -597,6 +599,9 @@ func addConfigMapAnnotations(data map[string]any, manifestCtx *ManifestContext) 
 	}
 	if manifestCtx.CABundleHash != "" {
 		annotations["configmap.hash/ca-bundle"] = manifestCtx.CABundleHash
+	}
+	if manifestCtx.SecretHash != "" {
+		annotations["secret.hash/referenced"] = manifestCtx.SecretHash
 	}
 
 	return nil
@@ -741,7 +746,7 @@ func hasLegacyCABundleVolumes(ctx context.Context, deployment *unstructured.Unst
 
 // hasStaleUserConfigVolume returns true when the existing Deployment has a "user-config"
 // volume that is absent from the desired Deployment spec. This happens when
-// spec.server.userConfig is removed from the LLSD resource: the volume persists because
+// spec.overrideConfig is removed from the OGXServer resource: the volume persists because
 // it was applied via cli.Create (no SSA field manager tracking), so a subsequent SSA patch
 // cannot remove it. Using cli.Update instead performs a full spec replacement.
 func hasStaleUserConfigVolume(desired, existing *appsv1.Deployment) bool {
@@ -803,4 +808,42 @@ func CheckClusterRoleExists(ctx context.Context, cli client.Client, crb *unstruc
 		return false, err
 	}
 	return false, nil
+}
+
+// CheckCRDExists checks whether a CustomResourceDefinition is registered on the cluster.
+// Returns true if the CRD exists, false if not found.
+func CheckCRDExists(ctx context.Context, cli client.Client, crdName string) (bool, error) {
+	crd := &unstructured.Unstructured{}
+	crd.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apiextensions.k8s.io",
+		Version: "v1",
+		Kind:    "CustomResourceDefinition",
+	})
+
+	err := cli.Get(ctx, client.ObjectKey{Name: crdName}, crd)
+	if err != nil {
+		if k8serr.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// MonitoringCRDsAvailable checks whether the prometheus-operator CRDs
+// (ServiceMonitor and PrometheusRule) are registered on the cluster.
+func MonitoringCRDsAvailable(ctx context.Context, cli client.Client) (bool, error) {
+	for _, crdName := range []string{
+		"servicemonitors.monitoring.coreos.com",
+		"prometheusrules.monitoring.coreos.com",
+	} {
+		exists, err := CheckCRDExists(ctx, cli, crdName)
+		if err != nil {
+			return false, fmt.Errorf("failed to check CRD %s: %w", crdName, err)
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
 }

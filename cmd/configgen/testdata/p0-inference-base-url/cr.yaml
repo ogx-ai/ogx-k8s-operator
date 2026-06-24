@@ -1,0 +1,32 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p0-inference-base-url
+spec:
+  distribution:
+    name: test
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://vllm.example.com:8000
+        openai:
+        - endpoint: https://api.openai.com/v1
+          apiKey:
+            name: openai-secret
+            key: api-key
+        azure:
+        - endpoint: https://my-resource.openai.azure.com/openai/v1
+          apiKey:
+            name: azure-secret
+            key: api-key
+        watsonx:
+        - endpoint: https://us-south.ml.cloud.ibm.com
+          apiKey:
+            name: watsonx-secret
+            key: api-key
+        bedrock:
+        - region: us-west-2
+          apiKey:
+            name: bedrock-secret
+            key: api-key

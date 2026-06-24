@@ -1,0 +1,15 @@
+version: "2"
+distro_name: test
+apis:
+  - vector_io
+providers:
+  vector_io:
+    - provider_id: remote-milvus
+      provider_type: remote::milvus
+      config:
+        uri: https://milvus.example.com:19530
+        token: ${env.OGX_REMOTE_MILVUS_TOKEN}
+        consistency_level: Strong
+registered_resources: {}
+server:
+  port: 8321

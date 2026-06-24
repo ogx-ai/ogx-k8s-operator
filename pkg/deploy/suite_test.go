@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	llamav1alpha1 "github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	err = llamav1alpha1.AddToScheme(scheme.Scheme)
+	err = ogxiov1beta1.AddToScheme(scheme.Scheme)
 	if err != nil {
 		logf.Log.Error(err, "failed to add scheme")
 		os.Exit(1)

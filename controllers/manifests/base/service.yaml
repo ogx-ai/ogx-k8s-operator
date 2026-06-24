@@ -5,7 +5,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    app: llama-stack
+    app: ogx
     app.kubernetes.io/instance: ""  # Will be set by field transformation
   ports:
   - name: http
