@@ -1,10 +1,10 @@
-# Deploying the `llama-stack-k8s-operator` as an OpenShift Catalog Item
+# Deploying the `ogx-k8s-operator` as an OpenShift Catalog Item
 
-This document outlines the steps required to package the `llama-stack-k8s-operator` into an Operator Bundle and make it available as a catalog item in OpenShift's OperatorHub.
+This document outlines the steps required to package the `ogx-k8s-operator` into an Operator Bundle and make it available as a catalog item in OpenShift's OperatorHub.
 
 ## Overview
 
-To expose the `llama-stack-k8s-operator` through the OpenShift OperatorHub, we need to package it according to the Operator Lifecycle Manager (OLM) specifications. This involves creating an Operator Bundle, building a bundle image, compiling a custom catalog image, and finally, registering this catalog with OpenShift using a `CatalogSource`.
+To expose the `ogx-k8s-operator` through the OpenShift OperatorHub, we need to package it according to the Operator Lifecycle Manager (OLM) specifications. This involves creating an Operator Bundle, building a bundle image, compiling a custom catalog image, and finally, registering this catalog with OpenShift using a `CatalogSource`.
 
 ## 2 Prerequisites
 
@@ -22,11 +22,11 @@ Follow these steps to prepare and deploy your operator.
 
 ### Clone the Operator Repository
 
-Start by cloning the `llama-stack-k8s-operator` repository to your local machine:
+Start by cloning the `ogx-k8s-operator` repository to your local machine:
 
 ```bash
-git clone https://github.com/llamastack/llama-stack-k8s-operator.git
-cd llama-stack-k8s-operator
+git clone https://github.com/ogx-ai/ogx-k8s-operator.git
+cd ogx-k8s-operator
 ```
 
 ### Set Env Variables
@@ -44,8 +44,8 @@ The operator's container image needs to be built and pushed to a container regis
 **Note:** Replace `<your-namespace>` with your actual registry and namespace.
 
 ```bash
-make image-build IMG=$REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator:$TAG
-podman push $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator:$TAG
+make image-build IMG=$REGISTRY/$REGISTRY_NAMESPACE/ogx-k8s-operator:$TAG
+podman push $REGISTRY/$REGISTRY_NAMESPACE/ogx-k8s-operator:$TAG
 ```
 
 ### 3.3. Generate the Operator Bundle
@@ -58,7 +58,7 @@ An Operator Bundle is a directory containing the necessary manifests that descri
 make bundle
 ```
 
-After running `make bundle`, inspect the contents of the newly created `bundle/manifests/bases` directory. Pay close attention to the `llama-stack-k8s-operator.clusterserviceversion.yaml` file. You may need to edit this file to:
+After running `make bundle`, inspect the contents of the newly created `bundle/manifests/bases` directory. Pay close attention to the `ogx-k8s-operator.clusterserviceversion.yaml` file. You may need to edit this file to:
 
   * **`spec.installModes`**: Should be se to `AllNamespaces`
   * **`spec.replaces`**: If you have previous versions of the operator, this field is crucial for OLM to manage upgrades.
@@ -71,8 +71,8 @@ After running `make bundle`, inspect the contents of the newly created `bundle/m
 The generated bundle needs to be packaged into its own container image.
 
 ```bash
-make bundle-build BUNDLE_IMG=$REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator-bundle:$TAG
-podman push $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator-bundle:$TAG
+make bundle-build BUNDLE_IMG=$REGISTRY/$REGISTRY_NAMESPACE/ogx-k8s-operator-bundle:$TAG
+podman push $REGISTRY/$REGISTRY_NAMESPACE/ogx-k8s-operator-bundle:$TAG
 ```
 
 ### 3.5. Create a Custom Catalog (Index) Image
@@ -86,17 +86,17 @@ We'll use the `opm` (Operator Package Manager) CLI tool, which is part of the Op
 #    This creates a Dockerfile for the catalog and an empty index.yaml.
 #    You can create a new directory for your catalog, e.g., 'catalog_dir'.
 mkdir -p catalog_dir
-opm init llama-stack-catalog --output yaml > catalog_dir/index.yaml
+opm init ogx-catalog --output yaml > catalog_dir/index.yaml
 
 # 2. Add your operator bundle to the catalog.
 #    Replace with your actual bundle image.
 opm index add \
-  --bundles $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-operator-bundle:$TAG \
-  --tag $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-catalog:$TAG \
+  --bundles $REGISTRY/$REGISTRY_NAMESPACE/ogx-k8s-operator-bundle:$TAG \
+  --tag $REGISTRY/$REGISTRY_NAMESPACE/ogx-catalog:$TAG \
   --build-tool podman
 
 # 3. Push the catalog image to your registry.
-podman push $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-catalog:$TAG
+podman push $REGISTRY/$REGISTRY_NAMESPACE/ogx-catalog:$TAG
 ```
 
 ### 3.6. Create a `CatalogSource` in OpenShift
@@ -109,14 +109,14 @@ Create a YAML file (e.g., `.openshift/catalog-item.yaml`):
 apiVersion: operators.coreos.com/v1alpha1
 kind: CatalogSource
 metadata:
-  name: llama-stack-catalog
+  name: ogx-catalog
   namespace: openshift-marketplace # Standard namespace for CatalogSources
   labels:
     environment: dev
 spec:
   sourceType: grpc
-  image: $REGISTRY/$REGISTRY_NAMESPACE/llama-stack-catalog:$TAG # Your catalog image from Step 3.5
-  displayName: "Llama Stack Operator Catalog (dev)"
+  image: $REGISTRY/$REGISTRY_NAMESPACE/ogx-catalog:$TAG # Your catalog image from Step 3.5
+  displayName: "OGX Operator Catalog (dev)"
   publisher: "Red Hat Community"
   updateStrategy:
     registryPoll:
@@ -135,5 +135,5 @@ After applying the `CatalogSource`, allow a few moments for OpenShift to process
 
 1.  Log in to the OpenShift Web Console.
 2.  Navigate to **Operators \> OperatorHub**.
-3.  In the "Catalog Sources" filter, you should see "Llama Stack Operator Catalog" listed.
-4.  Filter by this catalog, and your `LlamaStack` operator should appear, ready for installation.
+3.  In the "Catalog Sources" filter, you should see "OGX Operator Catalog" listed.
+4.  Filter by this catalog, and your OGX K8s operator should appear, ready for installation.

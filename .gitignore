@@ -35,6 +35,9 @@ config/manifests/bases/llama-stack-k8s-operator.clusterserviceversion.yaml
 
 .DS_Store
 
+# Local env files for hack scripts
+hack/*.env
+
 # SDD and Claude Code directories
 .claude
 .specify

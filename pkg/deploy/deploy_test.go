@@ -47,8 +47,8 @@ func TestApplyDeploymentPreservesSelector(t *testing.T) {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "llamastack",
-							Image: "quay.io/llamastack/llama-stack-k8s-operator:v0.0.1",
+							Name:  "ogx",
+							Image: "quay.io/ogx-ai/ogx-k8s-operator:v0.0.1",
 						},
 					},
 				},
@@ -84,8 +84,8 @@ func TestApplyDeploymentPreservesSelector(t *testing.T) {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "llamastack",
-							Image: "quay.io/llamastack/llama-stack-k8s-operator:v0.0.2",
+							Name:  "ogx",
+							Image: "quay.io/ogx-ai/ogx-k8s-operator:v0.0.2",
 						},
 					},
 				},
@@ -104,7 +104,7 @@ func TestApplyDeploymentPreservesSelector(t *testing.T) {
 	require.Equal(t, "initial", foundDeployment.Spec.Selector.MatchLabels["app"])
 
 	// And the other updates should be applied
-	require.Equal(t, "quay.io/llamastack/llama-stack-k8s-operator:v0.0.2", foundDeployment.Spec.Template.Spec.Containers[0].Image)
+	require.Equal(t, "quay.io/ogx-ai/ogx-k8s-operator:v0.0.2", foundDeployment.Spec.Template.Spec.Containers[0].Image)
 }
 
 func TestApplyDeploymentDoesNotOverrideHPAScale(t *testing.T) {
@@ -152,8 +152,8 @@ func TestApplyDeploymentDoesNotOverrideHPAScale(t *testing.T) {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "llamastack",
-							Image: "quay.io/llamastack/llama-stack-k8s-operator:v0.0.1",
+							Name:  "ogx",
+							Image: "quay.io/ogx-ai/ogx-k8s-operator:v0.0.1",
 						},
 					},
 				},

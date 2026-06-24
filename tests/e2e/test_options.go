@@ -22,7 +22,7 @@ func NewTestOptions() *TestOptions {
 		SkipValidation: false,
 		SkipCreation:   false,
 		SkipDeletion:   false,
-		OperatorNS:     "llama-stack-k8s-operator-system",
+		OperatorNS:     "ogx-k8s-operator-system",
 	}
 }
 

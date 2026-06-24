@@ -662,6 +662,14 @@ func TestCEL_OGXServerSpec_OverrideConfigExclusivity(t *testing.T) {
 			},
 			wantError: "overrideConfig and disabledAPIs are mutually exclusive",
 		},
+		{
+			name: "overrideConfig with baseConfig is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.OverrideConfig = &ConfigMapKeyRef{Name: "my-config", Key: "config.yaml"}
+				o.Spec.BaseConfig = &ConfigMapKeyRef{Name: "base-config", Key: "config.yaml"}
+			},
+			wantError: "overrideConfig and baseConfig are mutually exclusive",
+		},
 	}
 
 	for _, tt := range tests {
@@ -757,6 +765,20 @@ func TestCEL_OGXServerSpec_DisabledAPIsProviderConflict(t *testing.T) {
 				}
 			},
 			wantError: "files cannot be both in providers and disabledAPIs",
+		},
+		{
+			name: "file_processors in both disabledAPIs and providers is invalid",
+			mutate: func(o *OGXServer) {
+				o.Spec.DisabledAPIs = []string{"file_processors"}
+				o.Spec.Providers = &ProvidersSpec{
+					FileProcessors: &FileProcessorsProvidersSpec{
+						Inline: &FileProcessorsInlineProviders{
+							PyPDF: &InlinePyPDFFileProcessorProvider{},
+						},
+					},
+				}
+			},
+			wantError: "file_processors cannot be both in providers and disabledAPIs",
 		},
 	}
 
@@ -864,6 +886,56 @@ func TestCEL_WorkloadOverrides(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCEL_RegistryRefreshIntervalSeconds(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-regref")
+
+	tests := []struct {
+		name      string
+		mutate    func(*OGXServer)
+		wantError string
+	}{
+		{
+			name:   "field omitted is valid",
+			mutate: func(_ *OGXServer) {},
+		},
+		{
+			name: "value of 1 is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.RegistryRefreshIntervalSeconds = ptr(int32(1))
+			},
+		},
+		{
+			name: "large value is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.RegistryRefreshIntervalSeconds = ptr(int32(86400))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			tt.mutate(obj)
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected success, got: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+			} else {
+				requireCELError(t, err, tt.wantError)
+			}
+		})
+	}
+
+	t.Run("value of 0 is rejected by minimum constraint", func(t *testing.T) {
+		raw := validUnstructuredOGXServer(t, uniqueName(), ns)
+		setNestedField(raw, int64(0), "spec", "registryRefreshIntervalSeconds")
+		err := createUnstructured(t, raw)
+		requireAPIError(t, err, "should be greater than or equal to 1")
+	})
 }
 
 func TestCEL_VectorIndexConfig(t *testing.T) {

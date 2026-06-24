@@ -57,7 +57,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
   - `OGXServerSpec` — `distribution`, `providers`, `resources`, `storage`, `disabledAPIs` (renamed from `disabled`, Enum: agents/inference/tool_runtime/vector_io), **`network`**, **`caBundle`** (top-level), `workload`, `overrideConfig` (CEL: `providers`/`resources`/`storage`/`disabledAPIs` mutually exclusive with `overrideConfig`; cross-field disabled+providers conflict validation)
   - `OGXServerPhase` — `Pending`, `Initializing`, `Ready`, `Failed`, `Terminating`
   - Status types: `ProviderHealthStatus`, `ProviderInfo`, `DistributionConfig`, `VersionInfo` (with `ServerVersion` not `LlamaStackServerVersion`), `ResolvedDistributionStatus` (`Image`, `ConfigSource`, `ConfigHash`), `ConfigGenerationStatus` (`ObservedGeneration`, `ConfigMapName`, `GeneratedAt`, `ProviderCount`, `ResourceCount`, `ConfigVersion`), `OGXServerStatus` (with `ExternalURL` replacing `RouteURL`, pointer `*ResolvedDistributionStatus`, pointer `*ConfigGenerationStatus`)
-  - Root: `OGXServer`, `OGXServerList` with kubebuilder markers (`shortName=ogxs`, printer columns including Distribution/Config/Providers at priority=1, subresource:status)
+  - Root: `OGXServer`, `OGXServerList` with kubebuilder markers (`shortName=ogxserver`, printer columns including Distribution/Config/Providers at priority=1, subresource:status)
   - `init()` registering types with SchemeBuilder
 - [ ] T003a Add validating admission webhook for OGXServer that enforces constraints CEL markers cannot express: distribution name validation against embedded registry, cross-slice provider ID uniqueness (global, not per-slice), and model provider reference validation
 - [ ] T004 Add adoption annotation constants and helpers to `api/v1beta1/ogxserver_types.go`:
@@ -83,8 +83,8 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
 
 - [ ] T011 Update `config/crd/kustomization.yaml`: base path to `ogx.io_ogxservers.yaml`, update patch references
 - [ ] T012 Rename `config/crd/patches/cainjection_in_llamastackdistributions.yaml` → `config/crd/patches/cainjection_in_ogxservers.yaml` and update content
-- [ ] T013 Rename `config/rbac/llsd_editor_role.yaml` → `config/rbac/ogxs_editor_role.yaml`, update role name and API group
-- [ ] T014 Rename `config/rbac/llsd_viewer_role.yaml` → `config/rbac/ogxs_viewer_role.yaml`, update role name and API group
+- [ ] T013 Rename `config/rbac/llsd_editor_role.yaml` → `config/rbac/ogxserver_editor_role.yaml`, update role name and API group
+- [ ] T014 Rename `config/rbac/llsd_viewer_role.yaml` → `config/rbac/ogxserver_viewer_role.yaml`, update role name and API group
 - [ ] T015 Update `config/default/kustomization.yaml`: namespace to `ogx-k8s-operator-system`, namePrefix to `ogx-k8s-operator-`, labels to `app.kubernetes.io/name: ogx-k8s-operator`
 - [ ] T016 Update `config/default/manager_labels_patch.yaml`: label values
 - [ ] T017 Update `config/manager/manager.yaml`, `config/manager/pdb.yaml`: label values
@@ -242,7 +242,7 @@ This is a **breaking change**. The old `LlamaStackDistribution` CRD (`llamastack
     5. (Optional) Add `ogx.io/adopt-networking` annotation
     6. Clean up: `kubectl delete crd llamastackdistributions.llamastack.io`
   - NetworkPolicy impact explanation (old `app: llama-stack` selector vs new `app: ogx`)
-  - Verification commands (`kubectl get ogxs`, check conditions, check events)
+  - Verification commands (`kubectl get ogxserver`, check conditions, check events)
   - Rollback section
   - Deprecation notice for adoption annotations (future removal target)
 

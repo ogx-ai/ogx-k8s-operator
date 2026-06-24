@@ -1,6 +1,6 @@
-# Contributing to Llama Stack K8s Operator
+# Contributing to OGX K8s Operator
 
-Thank you for your interest in contributing to the Llama Stack K8s Operator! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to the OGX K8s Operator! This document provides guidelines and instructions for contributing to this project.
 
 ## Development Setup
 
@@ -131,9 +131,9 @@ make test TEST_PKGS=./pkg/deploy TEST_FLAGS="-v -run TestRenderManifest"
 // Good: Descriptive test names that explain behavior
 {
     name: "No storage configuration - should use emptyDir",
-    buildInstance: func(namespace string) *llamav1alpha1.LlamaStackDistribution {
-        return NewDistributionBuilder().
-            WithStorage(nil). // Clear intent: testing emptyDir behavior
+    buildInstance: func(namespace string) *ogxiov1beta1.OGXServer {
+        return NewServerBuilder().
+            WithStorage(nil).
             Build()
     },
 },

@@ -1,0 +1,10 @@
+version: '2'
+distro_name: starter
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: remote-vllm
+    provider_type: remote::vllm
+    config:
+      url: http://vllm:8000

@@ -36,7 +36,7 @@ import (
 // Constants for validation limits.
 const (
 	// FSGroup is the filesystem group ID for the pod.
-	// This is the default group ID for the llama-stack server.
+	// This is the default group ID for the ogx server.
 	FSGroup = int64(1001)
 	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
 	instanceLabelKey = "app.kubernetes.io/instance"
@@ -46,6 +46,32 @@ var (
 	// defaultHPACPUUtilization defines the fallback HPA CPU target percentage.
 	defaultHPACPUUtilization = int32(80) //nolint:mnd // standard HPA default
 )
+
+type runtimeConfigRef struct {
+	ConfigMapName string
+	ConfigMapKey  string
+	Generated     bool
+}
+
+func resolveRuntimeConfigRef(instance *ogxiov1beta1.OGXServer, pendingGeneratedConfigMapName string) *runtimeConfigRef {
+	if overrideConfig := instance.Spec.OverrideConfig; overrideConfig != nil &&
+		overrideConfig.Name != "" && overrideConfig.Key != "" {
+		return &runtimeConfigRef{
+			ConfigMapName: overrideConfig.Name,
+			ConfigMapKey:  overrideConfig.Key,
+		}
+	}
+
+	if pendingGeneratedConfigMapName != "" {
+		return &runtimeConfigRef{
+			ConfigMapName: pendingGeneratedConfigMapName,
+			ConfigMapKey:  generatedConfigKeyName,
+			Generated:     true,
+		}
+	}
+
+	return nil
+}
 
 // Probes configuration.
 const (
@@ -64,26 +90,26 @@ func getManagedCABundleConfigMapName(instance *ogxiov1beta1.OGXServer) string {
 var startupScript = `
 set -e
 
-# Determine which CLI to use based on llama-stack version
+# Determine which CLI to use based on ogx version
 VERSION_CODE=$(python -c "
 import sys
 from importlib.metadata import version
 from packaging import version as pkg_version
 
 try:
-    llama_version = version('llama_stack')
-    print(f'Detected llama-stack version: {llama_version}', file=sys.stderr)
+    ogx_version = version('ogx')
+    print(f'Detected ogx version: {ogx_version}', file=sys.stderr)
 
-    v = pkg_version.parse(llama_version)
+    v = pkg_version.parse(ogx_version)
     # Use base_version to ignore pre-release/post-release/dev suffixes
     # This ensures that 0.3.0rc2, 0.3.0alpha1, etc. are treated as 0.3.0
     base_v = pkg_version.parse(v.base_version)
 
     if base_v < pkg_version.parse('0.2.17'):
-        print('Using legacy module path (llama_stack.distribution.server.server)', file=sys.stderr)
+        print('Using legacy module path (ogx.distribution.server.server)', file=sys.stderr)
         print(0)
     elif base_v < pkg_version.parse('0.3.0'):
-        print('Using core module path (llama_stack.core.server.server)', file=sys.stderr)
+        print('Using core module path (ogx.core.server.server)', file=sys.stderr)
         print(1)
     else:
         print('Using uvicorn CLI command', file=sys.stderr)
@@ -93,19 +119,19 @@ except Exception as e:
     print(2)
 ")
 
-PORT=${LLS_PORT:-8321}
-WORKERS=${LLS_WORKERS:-1}
+PORT=${OGX_PORT:-8321}
+WORKERS=${OGX_WORKERS:-1}
 
 # Execute the appropriate CLI based on version
 case $VERSION_CODE in
-    0) python3 -m llama_stack.distribution.server.server --config /etc/llama-stack/config.yaml ;;
-    1) python3 -m llama_stack.core.server.server /etc/llama-stack/config.yaml ;;
-    2) exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+    0) python3 -m ogx.distribution.server.server --config /etc/ogx/config.yaml ;;
+    1) python3 -m ogx.core.server.server /etc/ogx/config.yaml ;;
+    2) exec uvicorn ogx.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
     *) echo "Invalid version code: $VERSION_CODE, using uvicorn CLI command"; \
-       exec uvicorn llama_stack.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
+       exec uvicorn ogx.core.server.server:create_app --host 0.0.0.0 --port "$PORT" --workers "$WORKERS" --factory ;;
 esac`
 
-const llamaStackConfigPath = "/etc/llama-stack/config.yaml"
+const ogxConfigPath = "/etc/ogx/config.yaml"
 
 // getHealthProbe returns the health probe handler for the container.
 func getHealthProbe(instance *ogxiov1beta1.OGXServer) corev1.ProbeHandler {
@@ -129,7 +155,14 @@ func getStartupProbe(instance *ogxiov1beta1.OGXServer) *corev1.Probe {
 }
 
 // buildContainerSpec creates the container specification.
-func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, image string) corev1.Container {
+func buildContainerSpec(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	image string,
+	runtimeConfig *runtimeConfigRef,
+	secretEnvVars []corev1.EnvVar,
+) corev1.Container {
 	workers, workersSet := getEffectiveWorkers(instance)
 	container := corev1.Container{
 		Name:         ogxiov1beta1.DefaultContainerName,
@@ -138,9 +171,9 @@ func buildContainerSpec(ctx context.Context, r *OGXServerReconciler, instance *o
 		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
 		StartupProbe: getStartupProbe(instance),
 	}
-	configureContainerEnvironment(ctx, r, instance, &container)
-	configureContainerMounts(ctx, r, instance, &container)
-	configureContainerCommands(instance, &container)
+	configureContainerEnvironment(ctx, r, instance, &container, secretEnvVars)
+	configureContainerMounts(ctx, r, instance, runtimeConfig, &container)
+	configureContainerCommands(instance, runtimeConfig, &container)
 	return container
 }
 
@@ -220,7 +253,7 @@ func getEffectiveWorkers(instance *ogxiov1beta1.OGXServer) (int32, bool) {
 }
 
 // configureContainerEnvironment sets up environment variables for the container.
-func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container, secretEnvVars []corev1.EnvVar) {
 	mountPath := getMountPath(instance)
 	workers, _ := getEffectiveWorkers(instance)
 
@@ -236,7 +269,6 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 	// Add CA bundle environment variable if any CA bundles are configured
 	// (explicit or auto-detected ODH bundles)
 	if hasAnyCABundle(ctx, r, instance) {
-		// Set SSL_CERT_FILE to point to the managed CA bundle file
 		container.Env = append(container.Env, corev1.EnvVar{
 			Name:  "SSL_CERT_FILE",
 			Value: ManagedCABundleFilePath,
@@ -246,32 +278,64 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 	// Always provide worker/port/config env for uvicorn; workers default to 1 when unspecified.
 	container.Env = append(container.Env,
 		corev1.EnvVar{
-			Name:  "LLS_WORKERS",
+			Name:  "OGX_WORKERS",
 			Value: strconv.Itoa(int(workers)),
 		},
 		corev1.EnvVar{
-			Name:  "LLS_PORT",
+			Name:  "OGX_PORT",
 			Value: strconv.Itoa(int(getContainerPort(instance))),
 		},
 		corev1.EnvVar{
-			Name:  "LLAMA_STACK_CONFIG",
-			Value: llamaStackConfigPath,
+			Name:  "OGX_CONFIG",
+			Value: ogxConfigPath,
 		},
 	)
 
-	// Finally, add the user provided env vars
+	if instance.Spec.RegistryRefreshIntervalSeconds != nil {
+		container.Env = append(container.Env, corev1.EnvVar{
+			Name:  "OGX_REGISTRY_REFRESH_INTERVAL_SECONDS",
+			Value: strconv.Itoa(int(*instance.Spec.RegistryRefreshIntervalSeconds)),
+		})
+	}
+	// Inject pre-computed secret env vars for provider/storage references.
+	// These are computed once in buildManifestContext to avoid redundant tree walks.
+	if len(secretEnvVars) > 0 {
+		container.Env = append(container.Env, secretEnvVars...)
+	}
+
+	// Apply user-provided env vars, letting them override operator defaults.
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
-		container.Env = append(container.Env, instance.Spec.Workload.Overrides.Env...)
+		overrides := make(map[string]corev1.EnvVar, len(instance.Spec.Workload.Overrides.Env))
+		for _, e := range instance.Spec.Workload.Overrides.Env {
+			overrides[e.Name] = e
+		}
+		deduped := make([]corev1.EnvVar, 0, len(container.Env))
+		for _, e := range container.Env {
+			if _, ok := overrides[e.Name]; ok {
+				continue
+			}
+			deduped = append(deduped, e)
+		}
+		deduped = append(deduped, instance.Spec.Workload.Overrides.Env...)
+		container.Env = deduped
 	}
 }
 
 // configureContainerMounts sets up volume mounts for the container.
-func configureContainerMounts(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+func configureContainerMounts(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	container *corev1.Container,
+) {
 	// Add volume mount for storage
 	addStorageVolumeMount(instance, container)
 
-	// Add ConfigMap volume mount if user config is specified
-	addUserConfigVolumeMount(instance, container)
+	// Mount the final runtime config when it comes from overrideConfig or
+	// operator-generated config. spec.baseConfig is an input to generation only
+	// and is never mounted into the pod directly.
+	addRuntimeConfigVolumeMount(runtimeConfig, container)
 
 	// Add CA bundle volume mount if TLS config is specified or auto-detected
 	addCABundleVolumeMount(ctx, r, instance, container)
@@ -295,13 +359,8 @@ func hasAnyCABundle(ctx context.Context, r *OGXServerReconciler, instance *ogxio
 }
 
 // configureContainerCommands sets up container commands and args.
-func configureContainerCommands(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	// Override the container entrypoint to use the custom config file if user config is specified
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
-		// Override the container entrypoint to use the custom config file instead of the default
-		// template. The script will determine the llama-stack version and use the appropriate module
-		// path to start the server.
-
+func configureContainerCommands(instance *ogxiov1beta1.OGXServer, runtimeConfig *runtimeConfigRef, container *corev1.Container) {
+	if runtimeConfig != nil {
 		container.Command = []string{"/bin/sh", "-c", startupScript}
 		container.Args = []string{}
 	}
@@ -334,12 +393,14 @@ func addStorageVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.C
 	})
 }
 
-// addUserConfigVolumeMount adds the user config volume mount to the container if specified.
-func addUserConfigVolumeMount(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
-	if instance.Spec.OverrideConfig != nil && instance.Spec.OverrideConfig.Name != "" {
+// addRuntimeConfigVolumeMount mounts the final runtime config.yaml into the pod.
+// The mounted ConfigMap comes from either spec.overrideConfig or the operator's
+// generated ConfigMap. spec.baseConfig is not mounted directly.
+func addRuntimeConfigVolumeMount(runtimeConfig *runtimeConfigRef, container *corev1.Container) {
+	if runtimeConfig != nil {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "user-config",
-			MountPath: "/etc/llama-stack/",
+			MountPath: "/etc/ogx/",
 			ReadOnly:  true,
 		})
 	}
@@ -379,7 +440,14 @@ func createCABundleVolume(managedConfigMapName string) corev1.Volume {
 }
 
 // configurePodStorage configures the pod storage and returns the complete pod spec.
-func configurePodStorage(ctx context.Context, r *OGXServerReconciler, instance *ogxiov1beta1.OGXServer, container corev1.Container, effectivePVCName string) corev1.PodSpec {
+func configurePodStorage(
+	ctx context.Context,
+	r *OGXServerReconciler,
+	instance *ogxiov1beta1.OGXServer,
+	runtimeConfig *runtimeConfigRef,
+	container corev1.Container,
+	effectivePVCName string,
+) corev1.PodSpec {
 	fsGroup := FSGroup
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
@@ -394,8 +462,8 @@ func configurePodStorage(ctx context.Context, r *OGXServerReconciler, instance *
 	// Configure TLS CA bundle (with auto-detection support)
 	configureTLSCABundle(ctx, r, instance, &podSpec)
 
-	// Configure user config
-	configureUserConfig(instance, &podSpec)
+	// Configure the final runtime config volume.
+	configureRuntimeConfigVolume(runtimeConfig, &podSpec)
 
 	// Apply pod overrides including ServiceAccount, volumes, and volume mounts
 	configurePodOverrides(instance, &podSpec)
@@ -451,10 +519,11 @@ func configureTLSCABundle(ctx context.Context, r *OGXServerReconciler, instance 
 	podSpec.Volumes = append(podSpec.Volumes, volume)
 }
 
-// configureUserConfig handles user configuration setup.
-func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
-	overrideConfig := instance.Spec.OverrideConfig
-	if overrideConfig == nil || overrideConfig.Name == "" || overrideConfig.Key == "" {
+// configureRuntimeConfigVolume adds the ConfigMap volume that provides the
+// runtime config.yaml consumed by the container. Override config takes
+// precedence over generated config, and spec.baseConfig is never mounted.
+func configureRuntimeConfigVolume(runtimeConfig *runtimeConfigRef, podSpec *corev1.PodSpec) {
+	if runtimeConfig == nil {
 		return
 	}
 
@@ -463,11 +532,11 @@ func configureUserConfig(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSp
 		VolumeSource: corev1.VolumeSource{
 			ConfigMap: &corev1.ConfigMapVolumeSource{
 				LocalObjectReference: corev1.LocalObjectReference{
-					Name: overrideConfig.Name,
+					Name: runtimeConfig.ConfigMapName,
 				},
 				Items: []corev1.KeyToPath{
 					{
-						Key:  overrideConfig.Key,
+						Key:  runtimeConfig.ConfigMapKey,
 						Path: "config.yaml",
 					},
 				},

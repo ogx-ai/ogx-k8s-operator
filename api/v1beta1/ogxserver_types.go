@@ -45,6 +45,8 @@ const (
 	DefaultMountPath = "/.ogx"
 	// OGXServerKind is the kind name for OGXServer resources.
 	OGXServerKind = "OGXServer"
+	// DefaultMetricsPortName is the port name used when a dedicated metrics port is configured.
+	DefaultMetricsPortName = "metrics"
 
 	// AdoptStorageAnnotation triggers PVC adoption from a legacy LlamaStackDistribution.
 	AdoptStorageAnnotation = "ogx.io/adopt-storage"
@@ -140,22 +142,12 @@ type ModelConfig struct {
 	Quantization string `json:"quantization,omitempty"`
 }
 
-// ResourcesSpec defines declarative registration of models, tools, and shields.
+// ResourcesSpec defines declarative registration of models.
 type ResourcesSpec struct {
 	// Models to register with inference providers.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	Models []ModelConfig `json:"models,omitempty"`
-	// Tools are tool group names to register with the toolRuntime provider.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:MinLength=1
-	Tools []string `json:"tools,omitempty"`
-	// Shields to register by name.
-	// +optional
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:items:MinLength=1
-	Shields []string `json:"shields,omitempty"`
 }
 
 // KVStorageSpec configures the key-value storage backend.
@@ -321,6 +313,22 @@ type NetworkSpec struct {
 	Policy *NetworkPolicySpec `json:"policy,omitempty"`
 }
 
+// MonitoringSpec configures Prometheus monitoring for this OGXServer instance.
+type MonitoringSpec struct {
+	// Enabled controls whether the operator creates monitoring resources
+	// (ServiceMonitor, PrometheusRule) for this server.
+	// Defaults to true. Set to false to disable monitoring without removing the config.
+	// +optional
+	// +kubebuilder:default:=true
+	Enabled *bool `json:"enabled,omitempty"`
+	// MetricsPort is the port serving the /metrics endpoint.
+	// When omitted, metrics are served on the main API port.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	MetricsPort *int32 `json:"metricsPort,omitempty"`
+}
+
 // PVCStorageSpec defines PVC storage for persistent data.
 // +kubebuilder:validation:XValidation:rule="!has(self.mountPath) || self.mountPath.size() > 0",message="mountPath must not be empty if specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.size) || quantity(self.size).isGreaterThan(quantity('0'))",message="size must be a positive quantity"
@@ -436,12 +444,14 @@ type WorkloadSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.storage)",message="overrideConfig and storage are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.disabledAPIs)",message="overrideConfig and disabledAPIs are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.baseConfig)",message="overrideConfig and baseConfig are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'inference') || !has(self.providers.inference)",message="inference cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'vector_io') || !has(self.providers.vectorIo)",message="vector_io cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'tool_runtime') || !has(self.providers.toolRuntime)",message="tool_runtime cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'files') || !has(self.providers.files)",message="files cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'batches') || !has(self.providers.batches)",message="batches cannot be both in providers and disabledAPIs"
 // +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'responses') || !has(self.providers.responses)",message="responses cannot be both in providers and disabledAPIs"
+// +kubebuilder:validation:XValidation:rule="!has(self.providers) || !has(self.disabledAPIs) || !self.disabledAPIs.exists(d, d == 'file_processors') || !has(self.providers.fileProcessors)",message="file_processors cannot be both in providers and disabledAPIs"
 //
 //nolint:lll // kubebuilder markers cannot be split across lines.
 type OGXServerSpec struct {
@@ -452,7 +462,7 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Providers *ProvidersSpec `json:"providers,omitempty"`
-	// Resources declares models, tools, and shields to register.
+	// Resources declares models to register.
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	Resources *ResourcesSpec `json:"resources,omitempty"`
@@ -464,9 +474,15 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=6
-	// +kubebuilder:validation:items:Enum=batches;inference;responses;tool_runtime;vector_io;files
+	// +kubebuilder:validation:MaxItems=7
+	// +kubebuilder:validation:items:Enum=batches;file_processors;inference;responses;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
+	// RegistryRefreshIntervalSeconds configures how often the server refreshes
+	// its model registry, in seconds. When omitted, the server's built-in
+	// default is used.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RegistryRefreshIntervalSeconds *int32 `json:"registryRefreshIntervalSeconds,omitempty"`
 	// Network defines network access controls.
 	// +optional
 	Network *NetworkSpec `json:"network,omitempty"`
@@ -477,8 +493,19 @@ type OGXServerSpec struct {
 	// Workload consolidates Kubernetes deployment settings.
 	// +optional
 	Workload *WorkloadSpec `json:"workload,omitempty"`
+	// Monitoring configures Prometheus monitoring and observability.
+	// +optional
+	Monitoring *MonitoringSpec `json:"monitoring,omitempty"`
+	// BaseConfig references a ConfigMap key containing the base config.yaml used
+	// as the starting point for declarative config generation.
+	// When set, this takes precedence over OCI label resolution.
+	// Mutually exclusive with overrideConfig.
+	// The ConfigMap must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +optional
+	BaseConfig *ConfigMapKeyRef `json:"baseConfig,omitempty"`
 	// OverrideConfig references a ConfigMap key containing a full config.yaml override.
-	// Mutually exclusive with providers, resources, storage, and disabledAPIs.
+	// Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.
 	// The ConfigMap must be in the same namespace as the OGXServer
 	// and must have the label ogx.io/watch: "true".
 	// +optional
@@ -530,7 +557,7 @@ type VersionInfo struct {
 type ResolvedDistributionStatus struct {
 	// Image is the resolved container image reference (with digest when available).
 	Image string `json:"image,omitempty"`
-	// ConfigSource indicates the config origin: "embedded" or "oci-label".
+	// ConfigSource indicates the base config origin (for example "configmap" or "oci-label").
 	ConfigSource string `json:"configSource,omitempty"`
 	// ConfigHash is the SHA256 hash of the base config used.
 	ConfigHash string `json:"configHash,omitempty"`
@@ -578,7 +605,6 @@ type OGXServerStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:shortName=ogxs
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Distribution",type="string",JSONPath=".status.resolvedDistribution.image",priority=1
@@ -609,6 +635,22 @@ type OGXServerList struct {
 
 func init() { //nolint:gochecknoinits
 	SchemeBuilder.Register(&OGXServer{}, &OGXServerList{})
+}
+
+// HasOverrideConfig returns true if the instance references an override ConfigMap.
+func (r *OGXServer) HasOverrideConfig() bool {
+	return r.Spec.OverrideConfig != nil &&
+		r.Spec.OverrideConfig.Name != "" &&
+		r.Spec.OverrideConfig.Key != ""
+}
+
+// HasDeclarativeConfig returns true if any declarative config fields are set
+// (providers, resources, storage, or disabledAPIs).
+func (r *OGXServer) HasDeclarativeConfig() bool {
+	return r.Spec.Providers != nil ||
+		r.Spec.Resources != nil ||
+		r.Spec.Storage != nil ||
+		len(r.Spec.DisabledAPIs) > 0
 }
 
 // GetAdoptStorageSource returns the legacy LLSD name from the adopt-storage annotation, or empty string.

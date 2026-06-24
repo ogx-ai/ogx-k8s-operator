@@ -45,6 +45,11 @@ func TestDeriveID(t *testing.T) {
 		{"FileSearch default", (InlineFileSearchProvider{}).DeriveID(), "inline-file-search"},
 		{"S3 default", (S3Provider{}).DeriveID(), "remote-s3"},
 		{"LocalFS default", (InlineLocalFSProvider{}).DeriveID(), "inline-localfs"},
+		{"Auto FileProcessor default", (InlineAutoFileProcessorProvider{}).DeriveID(), "inline-auto"},
+		{"PyPDF FileProcessor default", (InlinePyPDFFileProcessorProvider{}).DeriveID(), "inline-pypdf"},
+		{"MarkItDown FileProcessor default", (InlineMarkItDownFileProcessorProvider{}).DeriveID(), "inline-markitdown"},
+		{"Docling FileProcessor default", (InlineDoclingFileProcessorProvider{}).DeriveID(), "inline-docling"},
+		{"DoclingServe default", (DoclingServeProvider{}).DeriveID(), "remote-docling-serve"},
 		{"Custom remote", (CustomProvider{Type: "remote::llama-guard"}).DeriveID(), "remote-llama-guard"},
 		{"Custom inline", (CustomProvider{Type: "inline::my-thing"}).DeriveID(), "inline-my-thing"},
 		{"Custom explicit ID", (CustomProvider{RoutedProviderBase: RoutedProviderBase{ID: "my-guard"}, Type: "remote::llama-guard"}).DeriveID(), "my-guard"},
@@ -635,7 +640,7 @@ func TestCollectValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := &OGXServerValidator{EmbeddedDistributionNames: knownNames}
+			v := &OGXServerValidator{KnownDistributionNames: knownNames}
 			errs := v.collectValidationErrors(tt.server)
 			if len(errs) != tt.wantErrs {
 				t.Errorf("collectValidationErrors() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)

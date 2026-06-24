@@ -51,6 +51,11 @@ func setupApplyResourcesTest(t *testing.T, ownerName string) (context.Context, s
 			Name:      ownerName,
 			Namespace: testNs,
 		},
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{
+				Name: "starter",
+			},
+		},
 	}
 	ownerGVK := owner.GroupVersionKind()
 
@@ -320,6 +325,11 @@ func TestApplyResources(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-owner-other",
 				Namespace: testNs,
+			},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{
+					Name: "starter",
+				},
 			},
 		}
 		require.NoError(t, k8sClient.Create(ctx, ownerOther))
@@ -1096,6 +1106,32 @@ func TestGetFieldMappings_RecreateStrategyWithStorage(t *testing.T) {
 				t.Fatal("should not include strategy mapping when storage is nil")
 			}
 		}
+	})
+}
+
+func TestCheckCRDExists(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns true for registered CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "ogxservers.ogx.io")
+		require.NoError(t, err)
+		assert.True(t, exists, "ogxservers.ogx.io CRD should exist in envtest")
+	})
+
+	t.Run("returns false for non-existent CRD", func(t *testing.T) {
+		exists, err := CheckCRDExists(ctx, k8sClient, "fakes.nonexistent.example.com")
+		require.NoError(t, err)
+		assert.False(t, exists, "non-existent CRD should return false")
+	})
+}
+
+func TestMonitoringCRDsAvailable(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns false when monitoring CRDs are not installed", func(t *testing.T) {
+		available, err := MonitoringCRDsAvailable(ctx, k8sClient)
+		require.NoError(t, err)
+		assert.False(t, available, "monitoring CRDs should not be available in envtest")
 	})
 }
 

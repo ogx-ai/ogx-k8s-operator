@@ -25,15 +25,15 @@ jobs:
       run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Create kind config
         run: |
@@ -87,6 +87,13 @@ jobs:
           until docker exec kind-registry true 2>/dev/null; do sleep 1; done
           docker push kind-registry:5000/ogx-k8s-operator:latest
 
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.2/cert-manager.yaml
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager -n cert-manager
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager-webhook -n cert-manager
+          kubectl wait --for=condition=available --timeout=120s deployment/cert-manager-cainjector -n cert-manager
+
       - name: Deploy operator
         run: |
           # Deploy the operator
@@ -122,9 +129,18 @@ jobs:
         run: |
           kubectl -n ogx-test get all -o yaml > all.log
           kubectl -n ogx-k8s-operator-system logs deployment.apps/ogx-k8s-operator-controller-manager > controller-manager.log
+          kubectl -n ogx-k8s-operator-system logs deployment.apps/ogx-k8s-operator-controller-manager --previous > controller-manager-previous.log 2>/dev/null || true
           kubectl -n ogx-test describe all > all-describe.log
           kubectl -n ogx-test describe events > events.log
           kubectl get ogxservers --all-namespaces -o yaml > ogxservers.log
+          echo "=== Operator Pod Status ===" > operator-debug.log
+          kubectl -n ogx-k8s-operator-system get pods -o wide >> operator-debug.log 2>&1
+          echo "=== Operator Pod Describe ===" >> operator-debug.log
+          kubectl -n ogx-k8s-operator-system describe pods -l control-plane=controller-manager >> operator-debug.log 2>&1
+          echo "=== Node Memory Pressure ===" >> operator-debug.log
+          kubectl describe nodes | grep -A5 "MemoryPressure\|memory\|OOMKill" >> operator-debug.log 2>&1
+          echo "=== Operator Events ===" >> operator-debug.log
+          kubectl -n ogx-k8s-operator-system get events --sort-by='.lastTimestamp' >> operator-debug.log 2>&1
 
       - name: Upload all logs to artifacts
         if: ${{ always() }}
