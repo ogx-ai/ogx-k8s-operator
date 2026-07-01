@@ -1,0 +1,4 @@
+version: '2'
+distro_name: test
+apis:
+- responses

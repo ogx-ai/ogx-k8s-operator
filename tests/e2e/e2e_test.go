@@ -4,7 +4,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 )
 
 func TestE2E(t *testing.T) {
@@ -13,11 +13,9 @@ func TestE2E(t *testing.T) {
 	t.Run("validation", TestValidationSuite)
 
 	// Run combined creation and deletion tests for multiple distributions
-	// starter: newer image currently being actively updated
 	distributions := []string{"starter"}
 	for _, dist := range distributions {
 		t.Run("creation-deletion-"+dist, func(t *testing.T) {
-			// Set distribution type for this test run
 			t.Logf("Testing distribution: %s", dist)
 			runCreationDeletionSuiteForDistribution(t, dist)
 		})
@@ -37,18 +35,16 @@ func runCreationDeletionSuiteForDistribution(t *testing.T, distType string) {
 	}
 
 	var creationFailed bool
-	var createdDistribution *v1alpha1.LlamaStackDistribution
+	var createdServer *ogxiov1beta1.OGXServer
 
-	// Run all creation tests
 	t.Run("creation", func(t *testing.T) {
-		createdDistribution = runCreationTestsForDistribution(t, distType)
+		createdServer = runCreationTestsForDistribution(t, distType)
 		creationFailed = t.Failed()
 	})
 
-	// Run deletion tests only if creation passed
-	if !creationFailed && !TestOpts.SkipDeletion && createdDistribution != nil {
+	if !creationFailed && !TestOpts.SkipDeletion && createdServer != nil {
 		t.Run("deletion", func(t *testing.T) {
-			runDeletionTests(t, createdDistribution)
+			runDeletionTests(t, createdServer)
 		})
 	} else {
 		if TestOpts.SkipDeletion {

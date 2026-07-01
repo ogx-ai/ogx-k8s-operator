@@ -69,6 +69,14 @@ linters:
       ignore-string-values: "true|false"
     errcheck:
       check-type-assertions: true
+    recvcheck:
+      # controller-gen generates DeepCopy/DeepCopyInto with pointer receivers,
+      # but our Provider.DeriveID() methods use value receivers for generic
+      # constraint satisfaction. Exclude the generated methods to avoid false
+      # positives on every CRD type.
+      exclusions:
+        - "*.DeepCopyInto"
+        - "*.DeepCopy"
     exhaustive:
       check:
         - switch

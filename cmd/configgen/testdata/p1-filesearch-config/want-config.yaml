@@ -1,0 +1,18 @@
+version: "2"
+distro_name: test
+apis:
+  - tool_runtime
+providers:
+  tool_runtime:
+    - provider_id: inline-file-search
+      provider_type: inline::rag-runtime
+      config:
+        vector_stores_config:
+          default_provider_id: pgvector
+          default_embedding_model:
+            provider_id: vllm
+            model_id: granite-embedding
+            embedding_dimensions: 384
+registered_resources: {}
+server:
+  port: 8321

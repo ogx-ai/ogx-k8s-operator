@@ -4,23 +4,21 @@ package e2e
 import (
 	"testing"
 
-	"github.com/llamastack/llama-stack-k8s-operator/api/v1alpha1"
+	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// runDeletionTests runs deletion tests for a specific distribution.
-func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
+// runDeletionTests runs deletion tests for a specific OGXServer.
+func runDeletionTests(t *testing.T, instance *ogxiov1beta1.OGXServer) {
 	t.Helper()
 
-	t.Run("should delete LlamaStackDistribution CR and cleanup resources", func(t *testing.T) {
-		// Delete the instance
+	t.Run("should delete OGXServer CR and cleanup resources", func(t *testing.T) {
 		err := TestEnv.Client.Delete(TestEnv.Ctx, instance)
 		require.NoError(t, err)
 
-		// Wait for deployment to be deleted
 		err = EnsureResourceDeleted(t, TestEnv, schema.GroupVersionKind{
 			Group:   "apps",
 			Version: "v1",
@@ -28,7 +26,6 @@ func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
 		}, instance.Name, instance.Namespace, ResourceReadyTimeout)
 		require.NoError(t, err, "Deployment should be deleted")
 
-		// Wait for service to be deleted
 		err = EnsureResourceDeleted(t, TestEnv, schema.GroupVersionKind{
 			Group:   "",
 			Version: "v1",
@@ -36,15 +33,13 @@ func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
 		}, instance.Name+"-service", instance.Namespace, ResourceReadyTimeout)
 		require.NoError(t, err, "Service should be deleted")
 
-		// Wait for CR to be deleted
 		err = EnsureResourceDeleted(t, TestEnv, schema.GroupVersionKind{
-			Group:   "llamastack.io",
-			Version: "v1alpha1",
-			Kind:    "LlamaStackDistribution",
+			Group:   "ogx.io",
+			Version: "v1beta1",
+			Kind:    "OGXServer",
 		}, instance.Name, instance.Namespace, ResourceReadyTimeout)
 		require.NoError(t, err, "CR should be deleted")
 
-		// Verify no orphaned resources
 		podList := &corev1.PodList{}
 		err = TestEnv.Client.List(TestEnv.Ctx, podList, client.InNamespace(instance.Namespace))
 		require.NoError(t, err)
@@ -52,7 +47,6 @@ func runDeletionTests(t *testing.T, instance *v1alpha1.LlamaStackDistribution) {
 			require.NotEqual(t, instance.Name, pod.Labels["app"], "Found orphaned pod")
 		}
 
-		// Verify no orphaned configmaps
 		configMapList := &corev1.ConfigMapList{}
 		err = TestEnv.Client.List(TestEnv.Ctx, configMapList, client.InNamespace(instance.Namespace))
 		require.NoError(t, err)

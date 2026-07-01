@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/llamastack/llama-stack-k8s-operator/pkg/deploy"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
 	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,10 +32,29 @@ func NewClusterInfo(ctx context.Context, client client.Client, embeddedDistribut
 		return nil, fmt.Errorf("failed to parse embedded distributions JSON: %w", err)
 	}
 
+	applyRelatedImageOverrides(distributionImages)
+
 	return &ClusterInfo{
 		OperatorNamespace:  operatorNamespace,
 		DistributionImages: distributionImages,
 	}, nil
+}
+
+// applyRelatedImageOverrides overrides distribution images with RELATED_IMAGE_* env vars
+// when set. OLM injects these with mirrored image digests for disconnected environments.
+func applyRelatedImageOverrides(distributionImages map[string]string) {
+	for name := range distributionImages {
+		envKey := DistributionEnvVarKey(name)
+		if override := os.Getenv(envKey); override != "" {
+			distributionImages[name] = override
+		}
+	}
+}
+
+// DistributionEnvVarKey converts a distribution name to its RELATED_IMAGE_* env var name.
+// Example: "remote-vllm" becomes "RELATED_IMAGE_REMOTE_VLLM".
+func DistributionEnvVarKey(name string) string {
+	return "RELATED_IMAGE_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 }
 
 // PerformUpgradeCleanup performs one-time cleanup operations for seamless upgrades.
@@ -89,7 +110,7 @@ func cleanupLegacyClusterRoleBindings(ctx context.Context, client client.Client,
 // shouldDeleteLegacyClusterRoleBinding determines if a ClusterRoleBinding should be deleted.
 func shouldDeleteLegacyClusterRoleBinding(crb *rbacv1.ClusterRoleBinding) bool {
 	// Only delete ClusterRoleBindings that were created by our operator
-	if managedBy, exists := crb.Labels["app.kubernetes.io/managed-by"]; !exists || managedBy != "llama-stack-operator" {
+	if managedBy, exists := crb.Labels["app.kubernetes.io/managed-by"]; !exists || managedBy != "ogx-operator" {
 		return false
 	}
 

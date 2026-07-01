@@ -1,0 +1,14 @@
+version: "2"
+distro_name: test
+apis:
+  - batches
+providers:
+  batches:
+    - provider_id: inline-reference
+      provider_type: inline::batch-reference
+      config:
+        max_concurrent_batches: 5
+        max_concurrent_requests_per_batch: 10
+registered_resources: {}
+server:
+  port: 8321

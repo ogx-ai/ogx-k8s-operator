@@ -1,0 +1,21 @@
+version: "2"
+distro_name: test
+apis:
+  - responses
+providers:
+  responses:
+    - provider_id: inline-builtin
+      provider_type: inline::responses
+      config:
+        vector_stores_config:
+          default_provider_id: milvus
+          default_embedding_model:
+            provider_id: vllm
+            model_id: granite-embedding
+            embedding_dimensions: 768
+        compaction_config:
+          summarization_model: llama3
+          default_compact_threshold: 10
+registered_resources: {}
+server:
+  port: 8321

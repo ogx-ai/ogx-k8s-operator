@@ -3,7 +3,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: hpa
   labels:
-    app: llama-stack
+    app: ogx
     app.kubernetes.io/instance: ""
 spec:
   minReplicas: 1

@@ -1,0 +1,16 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-p1-model-quantization
+spec:
+  distribution:
+    name: test
+  providers:
+    inference:
+      remote:
+        vllm:
+        - endpoint: https://vllm.example.com:8000
+  resources:
+    models:
+    - name: llama3-quantized
+      quantization: fp16

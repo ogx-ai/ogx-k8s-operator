@@ -1,0 +1,15 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test-rh-override-storage
+spec:
+  distribution:
+    name: rh
+  storage:
+    kv:
+      type: sqlite
+    sql:
+      type: postgres
+      connectionString:
+        name: pg-secret
+        key: conn-string

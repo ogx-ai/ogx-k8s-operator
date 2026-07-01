@@ -1,80 +1,24 @@
-apiVersion: v1
-kind: ConfigMap
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
 metadata:
-  name: llama-stack-config
-data:
-  config.yaml: |
-    # Llama Stack Configuration
-    version: '2'
-    image_name: starter
-    apis:
-    - inference
-    providers:
-      inference:
-      - provider_id: ollama
-        provider_type: "remote::ollama"
-        config:
-          url: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
-    models:
-      - model_id: "llama3.2:1b"
-        provider_id: ollama
-        model_type: llm
-    server:
-      port: 8321
-    storage:
-      backends:
-        kv_default:
-          type: kv_sqlite
-          db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/ollama}/kvstore.db
-        sql_default:
-          type: sql_sqlite
-          db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/ollama}/sqlstore.db
-      stores:
-        metadata:
-          backend: kv_default
-          namespace: registry
-        inference:
-          backend: sql_default
-          table_name: inference_store
-          max_write_queue_size: 10000
-          num_writers: 4
-        conversations:
-          backend: sql_default
-          table_name: openai_conversations
-        prompts:
-          backend: kv_default
-          namespace: prompts
----
-apiVersion: llamastack.io/v1alpha1
-kind: LlamaStackDistribution
-metadata:
-  name: llamastack-with-config
+  name: ogxserver-with-ca-bundle
 spec:
-  replicas: 1
-  server:
-    distribution:
-      name: starter
-    containerSpec:
-      port: 8321
+  distribution:
+    name: starter
+  overrideConfig:
+    name: starter-config
+    key: config.yaml
+  tls:
+    trust:
+      caCertificates:
+        - name: custom-ca-bundle
+          key: ca-bundle.crt
+  network:
+    port: 8321
+  workload:
+    overrides:
       env:
       - name: INFERENCE_MODEL
         value: "llama3.2:1b"
       - name: OLLAMA_URL
         value: "http://ollama-server-service.ollama-dist.svc.cluster.local:11434"
-    userConfig:
-      configMapName: llama-stack-config
-      # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
-    tlsConfig:
-      caBundle:
-        configMapName: custom-ca-bundle
-        # configMapNamespace: ""  # Optional - defaults to the same namespace as the CR
-        # configMapKeys not specified - defaults to ["ca-bundle.crt"]
-        # configMapKeys: # Specify multiple keys to concatenate into a single CA bundle
-        #   - ca-bundle1.crt
-        #   - ca-bundle2.crt
-        # Note: The operator will automatically:
-        #   1. Validate and extract valid certificates from all specified ConfigMap keys
-        #   2. Concatenate them into a single PEM file
-        #   3. Create a managed ConfigMap named {instance-name}-ca-bundle
-        #   4. Mount the bundle at /etc/ssl/certs/ca-bundle/ca-bundle.crt
-        #   5. Set SSL_CERT_FILE environment variable automatically

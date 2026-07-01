@@ -1,0 +1,22 @@
+version: "2"
+distro_name: test
+apis:
+  - vector_io
+providers:
+  vector_io:
+    - provider_id: remote-qdrant
+      provider_type: remote::qdrant
+      config:
+        url: https://qdrant.example.com
+        host: qdrant-host
+        port: 6333
+        api_key: ${env.OGX_REMOTE_QDRANT_API_KEY}
+        location: us-east-1
+        grpc_port: 6334
+        prefer_grpc: true
+        https: true
+        prefix: my-prefix
+        timeout: 60
+registered_resources: {}
+server:
+  port: 8321
