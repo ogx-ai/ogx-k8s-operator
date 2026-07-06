@@ -1,0 +1,11 @@
+
+name: Build CPU-only vLLM Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This is a placeholder job to make the workflow discoverable by the GitHub API."

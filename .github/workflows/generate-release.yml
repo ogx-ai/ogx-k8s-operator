@@ -1,0 +1,339 @@
+name: Generate Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operator_version:
+        description: 'Operator version to release (e.g., "0.2.1")'
+        required: true
+        type: string
+      llamastack_version:
+        description: 'LlamaStack distribution version (e.g., "0.2.12")'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  GIT_USER_NAME: github-actions[bot]
+  GIT_USER_EMAIL: github-actions[bot]@users.noreply.github.com
+
+jobs:
+  test-e2e:
+    uses: ./.github/workflows/run-e2e-test.yml
+
+  generate-release:
+    runs-on: ubuntu-24.04
+    needs: test-e2e
+    if: always()
+    outputs:
+      operator_version: ${{ steps.validate.outputs.operator_version }}
+      llamastack_version: ${{ steps.validate.outputs.llamastack_version }}
+      release_branch: ${{ steps.validate.outputs.release_branch }}
+      e2e_success: ${{ needs.test-e2e.outputs.success }}
+      e2e_summary: ${{ needs.test-e2e.outputs.summary }}
+      e2e_run_url: ${{ needs.test-e2e.outputs.run_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0  # Need full history to check existing tags
+
+      - name: Validate inputs
+        id: validate
+        shell: bash
+        run: |
+          # Validate version formats and check for existing releases
+          [[ "${{ github.event.inputs.operator_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid operator version format"; exit 1; }
+          [[ "${{ github.event.inputs.llamastack_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Error: Invalid llamastack version format"; exit 1; }
+
+          # Check for existing tag idempotently
+          if git tag -l | grep -q "^v${{ github.event.inputs.operator_version }}$"; then
+            echo "Tag v${{ github.event.inputs.operator_version }} already exists - verifying consistency..."
+
+            # Get the commit SHA that the existing tag points to
+            tag_sha=$(git rev-list -n 1 "v${{ github.event.inputs.operator_version }}")
+            current_sha=$(git rev-parse HEAD)
+
+            if [ "$tag_sha" != "$current_sha" ]; then
+              echo "Error: Tag v${{ github.event.inputs.operator_version }} exists but points to different commit ($tag_sha vs $current_sha)"
+              exit 1
+            fi
+
+            echo "✅ Tag v${{ github.event.inputs.operator_version }} already exists and points to current commit - release is idempotent"
+          else
+            echo "✅ Tag v${{ github.event.inputs.operator_version }} does not exist - proceeding with new release"
+          fi
+
+          # Extract major.minor for branch name (e.g., "0.2.1" -> "0.2")
+          major_minor=$(echo "${{ github.event.inputs.operator_version }}" | cut -d. -f1-2)
+
+          # Set outputs for later steps
+          echo "operator_version=${{ github.event.inputs.operator_version }}" >> $GITHUB_OUTPUT
+          echo "llamastack_version=${{ github.event.inputs.llamastack_version }}" >> $GITHUB_OUTPUT
+          echo "release_branch=release-$major_minor" >> $GITHUB_OUTPUT
+
+      - name: Configure git
+        shell: bash
+        run: |
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Create or checkout release branch
+        shell: bash
+        run: |
+          release_branch="${{ steps.validate.outputs.release_branch }}"
+
+          # Check if release branch exists remotely
+          if git ls-remote --heads origin | grep -q "refs/heads/$release_branch"; then
+            echo "Checking out existing release branch: $release_branch"
+            git fetch origin "$release_branch"
+            git checkout "$release_branch"
+            git pull origin "$release_branch"
+          else
+            echo "Creating new release branch: $release_branch"
+            git checkout -b "$release_branch"
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 #v 6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          # Use the make release command to update all necessary files
+          make release VERSION=${{ steps.validate.outputs.operator_version }} LLAMASTACK_VERSION=${{ steps.validate.outputs.llamastack_version }}
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-commit checks
+        uses: pre-commit/action@576ff52938d158a24ac7e009dfa94b1455e7df99
+        continue-on-error: true
+        id: precommit
+        env:
+          IMG: quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+
+      - name: Handle pre-commit changes
+        shell: bash
+        env:
+          IMG: quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+        run: |
+          # Check if there are any modified files after pre-commit
+          if [ "${{ steps.precommit.outcome }}" = "failure" ]; then
+            echo "📝 Pre-commit checks failed - checking for file modifications"
+
+            # Show what files exist and their status
+            echo "Git status before staging:"
+            git status --porcelain
+
+            git add .
+
+            echo "Git status after staging:"
+            git status --porcelain
+
+            # Check if there are staged changes
+            if git diff --staged --quiet; then
+              echo "⚠️  No staged changes detected, but pre-commit failed"
+              echo "This suggests pre-commit failed due to issues that weren't auto-fixable"
+              echo "❌ Pre-commit checks failed without auto-fixes"
+              exit 1
+            else
+              echo "📝 Staged changes detected - committing them"
+              git commit -s -m "Apply pre-commit fixes for release ${{ steps.validate.outputs.operator_version }}" \
+                           -m "- Auto-format and regenerate release manifests" \
+                           -m "- Ensure consistency after release preparation"
+              git push origin "${{ steps.validate.outputs.release_branch }}"
+
+              # Re-run pre-commit to ensure all checks pass
+              echo "🔄 Re-running pre-commit to verify all checks pass"
+              pre-commit run --show-diff-on-failure --color=always --all-files
+              echo "✅ Pre-commit checks passed after applying fixes"
+            fi
+          else
+            echo "✅ Pre-commit checks passed"
+          fi
+
+      - name: Run unit and integration tests
+        shell: bash
+        run: |
+          make test
+
+      - name: Check E2E Test Results
+        run: |
+          echo "E2E Test Results:"
+          echo "Success: ${{ needs.test-e2e.outputs.success }}"
+          echo "Summary: ${{ needs.test-e2e.outputs.summary }}"
+          echo "Run URL: ${{ needs.test-e2e.outputs.run_url }}"
+
+          if [ "${{ needs.test-e2e.outputs.success }}" != "true" ]; then
+            echo "E2E tests failed - release cannot proceed"
+            echo "Check detailed logs: ${{ needs.test-e2e.outputs.run_url }}"
+            exit 1
+          else
+            echo "E2E tests passed - proceeding with release"
+          fi
+
+      - name: Validate release image build
+        shell: bash
+        run: |
+          make image-build IMG=quay.io/ogx-ai/ogx-k8s-operator:v${{ steps.validate.outputs.operator_version }}
+
+      - name: Commit and push changes
+        shell: bash
+        run: |
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit - release files are already up to date"
+          else
+            git commit -s -m "v${{ steps.validate.outputs.operator_version }}" \
+                         -m "- Update operator version to v${{ steps.validate.outputs.operator_version }}" \
+                         -m "- Update LlamaStack distributions to ${{ steps.validate.outputs.llamastack_version }}" \
+                         -m "- Generate release manifests"
+            git push origin "${{ steps.validate.outputs.release_branch }}"
+            echo "✅ Committed release changes to ${{ steps.validate.outputs.release_branch }}"
+          fi
+
+  build-release-arch:
+    needs: generate-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      operator_version: ${{ needs.generate-release.outputs.operator_version }}
+      release_branch: ${{ needs.generate-release.outputs.release_branch }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ env.release_branch }}
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Log in to Quay.io
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.APP_QUAY_USERNAME }}
+          password: ${{ secrets.APP_QUAY_TOKEN }}
+
+      - name: Build and push single-arch release image
+        run: |
+          make image-build-push-single \
+            CONTAINER_TOOL=docker \
+            PLATFORM=${{ matrix.platform }} \
+            IMG=quay.io/ogx-ai/ogx-k8s-operator:v${{ env.operator_version }}-${{ matrix.arch }}
+
+  finalize-release:
+    needs: [generate-release, build-release-arch]
+    runs-on: ubuntu-24.04
+    env:
+      operator_version: ${{ needs.generate-release.outputs.operator_version }}
+      llamastack_version: ${{ needs.generate-release.outputs.llamastack_version }}
+      release_branch: ${{ needs.generate-release.outputs.release_branch }}
+      IMG: quay.io/ogx-ai/ogx-k8s-operator
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ env.release_branch }}
+          fetch-depth: 0
+
+      - name: Configure git
+        shell: bash
+        run: |
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
+
+      - name: Create and push the release tag
+        shell: bash
+        run: |
+          if git tag -l | grep -q "^v${{ env.operator_version }}$"; then
+            echo "✅ Tag v${{ env.operator_version }} already exists - skipping creation"
+          else
+            git tag -a "v${{ env.operator_version }}" -m "Release v${{ env.operator_version }}"
+            git push origin "v${{ env.operator_version }}"
+            echo "✅ Created tag v${{ env.operator_version }}"
+          fi
+
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          if gh release view "v${{ env.operator_version }}" >/dev/null 2>&1; then
+            echo "✅ GitHub release v${{ env.operator_version }} already exists - skipping creation"
+          else
+            RELEASE_NOTES="## What's Changed
+
+            - Updated operator version to v${{ env.operator_version }}
+            - Updated LlamaStack distributions to ${{ env.llamastack_version }}
+            - Generated updated release manifests
+
+            ## Installation
+
+            Install the operator using kubectl:
+
+            \`\`\`bash
+            kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/v${{ env.operator_version }}/release/operator.yaml
+            \`\`\`
+
+            ## Container Images
+
+            - Operator: \`quay.io/ogx-ai/ogx-k8s-operator:v${{ env.operator_version }}\`
+            - LlamaStack distributions: \`docker.io/llamastack/distribution-*:${{ env.llamastack_version }}\`"
+
+            gh release create "v${{ env.operator_version }}" \
+              --title "v${{ env.operator_version }}" \
+              --notes "$RELEASE_NOTES"
+
+            echo "🎉 Created GitHub release v${{ env.operator_version }}"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+
+      - name: Log in to Quay.io
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: quay.io
+          username: ${{ secrets.APP_QUAY_USERNAME }}
+          password: ${{ secrets.APP_QUAY_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.IMG }}:v${{ env.operator_version }} \
+            ${{ env.IMG }}:v${{ env.operator_version }}-amd64 \
+            ${{ env.IMG }}:v${{ env.operator_version }}-arm64
+          echo "✅ Pushed multi-arch image: ${{ env.IMG }}:v${{ env.operator_version }}"
+
+      - name: Release complete
+        shell: bash
+        run: |
+          echo "🚀 Release v${{ env.operator_version }} completed successfully!"
+          echo "📦 Container image: ${{ env.IMG }}:v${{ env.operator_version }}"
+          echo "📝 Release notes: https://github.com/${{ github.repository }}/releases/tag/v${{ env.operator_version }}"
+          echo "🔧 Install with: kubectl apply -f https://raw.githubusercontent.com/ogx-ai/ogx-k8s-operator/v${{ env.operator_version }}/release/operator.yaml"
+          echo "🌿 Release branch: ${{ env.release_branch }}"

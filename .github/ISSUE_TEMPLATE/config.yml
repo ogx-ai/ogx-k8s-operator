@@ -1,0 +1,9 @@
+blank_issues_enabled: true
+
+contact_links:
+  - name: Have you read the Kubernetes Deployment Guide?
+    url: https://llama-stack.readthedocs.io/en/latest/deploying/index.html#kubernetes-deployment-guide
+    about: Much help can be found in the docs
+  - name: Chat on Discord
+    url: https://discord.gg/llama-stack
+    about: Maybe chatting with the community can help

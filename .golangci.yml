@@ -1,0 +1,170 @@
+version: "2"
+
+run:
+  timeout: 10m
+
+linters:
+  default: all
+  disable:
+    - depguard # [replaced by gomodguard] checks if package imports are in a list of acceptable packages
+    - exhaustruct # Prevents empty struct. We use a lot of these so I think it is safe to disable.
+    - forbidigo
+    - gochecknoglobals # Prevents use of global vars.
+    - gomoddirectives # Doesnot allow replace in go mod file
+    - nestif
+    - nilnil
+    - paralleltest # [too many false positives] detects missing usage of t.Parallel() method in your Go test
+    - tagliatelle
+    - varnamelen # doesnot allow shorter names like c,k etc. But golang prefers short named vars.
+    - wsl # [deprecated] whitespace linter
+    - wsl_v5 # [too strict and mostly code is not more readable] whitespace linter forces you to use empty lines
+    - wrapcheck # check if this is required. Prevents direct return of err.
+    - err113 # Too strict and conflicts with our error handling approach, using errorlint instead
+    - nonamedreturns # Too restrictive and not compatible with our code style
+    - nlreturn # [too strict and mostly code is not more readable] checks for a new line before return and branch statements to increase code clarity
+    - testpackage # Too restrictive for our test organization
+    - copyloopvar # Requires Go 1.22
+    - intrange # Requires Go 1.22
+    # New linters in v2 that need to be disabled for compatibility
+    - funcorder # Too strict about function ordering (new in v2)
+    - godoclint # Too strict about godoc format (new in v2)
+    - modernize # Suggests Go 1.22+ idioms (new in v2)
+    - noinlineerr # Too strict about inline error handling (new in v2)
+    - embeddedstructfieldcheck # Too strict about embedded struct formatting (new in v2)
+
+  exclusions:
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - errcheck
+          - dupl
+          - gosec
+          - funlen
+      - path: '^tests/'
+        linters:
+          - errcheck
+          - dupl
+          - gosec
+          - funlen
+          - staticcheck
+          - prealloc
+      - path: zz_generated
+        linters:
+          - lll
+
+  settings:
+    gocyclo:
+      min-complexity: 30
+    lll:
+      line-length: 180
+    gci:
+      sections:
+        - standard
+        - default
+        - blank
+        - dot
+      skip-generated: false
+      custom-order: true
+    goconst:
+      ignore-string-values: "true|false"
+    errcheck:
+      check-type-assertions: true
+    recvcheck:
+      # controller-gen generates DeepCopy/DeepCopyInto with pointer receivers,
+      # but our Provider.DeriveID() methods use value receivers for generic
+      # constraint satisfaction. Exclude the generated methods to avoid false
+      # positives on every CRD type.
+      exclusions:
+        - "*.DeepCopyInto"
+        - "*.DeepCopy"
+    exhaustive:
+      check:
+        - switch
+      default-signifies-exhaustive: true
+    funlen:
+      lines: 100
+      statements: 100
+      ignore-comments: true
+    nolintlint:
+      allow-no-explanation: [funlen, lll]
+      require-specific: true
+    ireturn:
+      allow:
+        # defaults https://golangci-lint.run/usage/linters/#ireturn
+        - anon
+        - error
+        - empty
+        - stdlib
+        - sigs.k8s.io/controller-runtime/pkg/client.Client
+    revive:
+      rules:
+        - name: dot-imports
+          arguments:
+            - allowedPackages:
+                - github.com/onsi/ginkgo/v2
+                - github.com/onsi/gomega
+                - github.com/onsi/gomega/gstruct
+    perfsprint:
+      sprintf1: false
+      strconcat: false
+    gocritic:
+      enabled-checks:
+        - deferInLoop
+        - unnecessaryDefer
+    govet:
+      disable:
+        - fieldalignment # Too aggressive about struct field alignment
+      enable:
+        - shadow
+        - assign
+        - atomic
+        - bools
+        - buildtag
+        - cgocall
+        - composites
+        - copylocks
+        - deepequalerrors
+        - errorsas
+        - findcall
+        - httpresponse
+        - ifaceassert
+        - loopclosure
+        - lostcancel
+        - nilfunc
+        - nilness
+        - printf
+        - reflectvaluecompare
+        - shift
+        - sigchanyzer
+        - sortslice
+        - stdmethods
+        - stringintconv
+        - structtag
+        - testinggoroutine
+        - tests
+        - unmarshal
+        - unreachable
+        - unsafeptr
+        - unusedresult
+    errorlint:
+      errorf: true
+      asserts: true
+      errorf-multi: true
+    usetesting:
+      allow-non-string: true
+    mnd:
+      ignored-functions:
+        - time.Duration
+        - time.Sleep
+        - time.Second
+      ignored-numbers:
+        - "0"
+        - "1"
+        - "2"
+        - "5"
+        - "10"
+        - "100"
+
+issues:
+  exclude-dirs:
+    - apis

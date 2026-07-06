@@ -1,0 +1,40 @@
+version: "2"
+distro_name: test
+apis:
+  - file_processors
+providers:
+  file_processors:
+    - provider_id: remote-docling-serve
+      provider_type: "remote::docling-serve"
+      config:
+        api_key: ${env.OGX_REMOTE_DOCLING_SERVE_API_KEY}
+        base_url: "http://docling.example.com:5001/v1"
+        default_chunk_size_tokens: 2048
+    - provider_id: inline-auto
+      provider_type: "inline::auto"
+      config:
+        clean_text: false
+        default_chunk_overlap_tokens: 500
+        default_chunk_size_tokens: 1000
+        extract_metadata: true
+    - provider_id: inline-pypdf
+      provider_type: "inline::pypdf"
+      config:
+        clean_text: true
+        default_chunk_overlap_tokens: 200
+        default_chunk_size_tokens: 600
+        extract_metadata: false
+    - provider_id: inline-markitdown
+      provider_type: "inline::markitdown"
+      config:
+        default_chunk_overlap_tokens: 300
+        default_chunk_size_tokens: 900
+    - provider_id: inline-docling
+      provider_type: "inline::docling"
+      config:
+        default_chunk_overlap_tokens: 100
+        default_chunk_size_tokens: 1200
+        do_ocr: false
+registered_resources: {}
+server:
+  port: 8321

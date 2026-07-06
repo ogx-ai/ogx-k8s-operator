@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment  # Will be set to instance.Name by field transformation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ogx
+      app.kubernetes.io/instance: ""
+  template:
+    metadata:
+      labels:
+        app: ogx
+        app.kubernetes.io/instance: ""
+      annotations: {}
+    spec:
+      serviceAccountName: sa
+      containers: []  # Will be populated by controller
+      volumes: []     # Will be populated by controller

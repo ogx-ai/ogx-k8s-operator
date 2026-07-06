@@ -1,0 +1,90 @@
+# Status Conditions Contract
+#
+# Defines the status conditions reported by the v1alpha2 controller.
+# All conditions use the standard metav1.Condition format.
+
+conditions:
+  - type: ConfigGenerated
+    description: "Indicates whether config.yaml was successfully generated from the CR spec"
+    true:
+      reason: ConfigGenerationSucceeded
+      message_template: "Generated config.yaml with {providerCount} providers and {resourceCount} models"
+    false:
+      reasons:
+        - reason: ConfigGenerationFailed
+          message_template: "Failed to generate config.yaml: {error}"
+        - reason: BaseConfigRequired
+          message_template: "Direct image references require either overrideConfig.configMapName or OCI config labels on the image"
+        - reason: UnsupportedConfigVersion
+          message_template: "Unsupported config.yaml version {version}. Supported versions: {list}"
+        - reason: UpgradeConfigFailure
+          message_template: "Config generation failed after operator upgrade: {error}"
+        - reason: MissingProviderForResource
+          message_template: "{resourceType} requires at least one {providerType} provider to be configured"
+
+  - type: DeploymentUpdated
+    description: "Indicates whether the Deployment spec reflects the current desired configuration"
+    true:
+      reason: DeploymentUpdateSucceeded
+      message_template: "Deployment updated with config {configMapName}"
+    false:
+      reasons:
+        - reason: DeploymentUpdateFailed
+          message_template: "Failed to update Deployment: {error}"
+        - reason: DeploymentUpdateSkipped
+          message_template: "Config unchanged, no Deployment update needed"
+
+  - type: Available
+    description: "Indicates whether at least one Pod is ready with the current configuration"
+    true:
+      reason: MinimumReplicasAvailable
+      message_template: "{available}/{desired} replicas available with current config"
+    false:
+      reasons:
+        - reason: ReplicasUnavailable
+          message_template: "{available}/{desired} replicas available"
+        - reason: RolloutInProgress
+          message_template: "Rolling update in progress: {updated}/{desired} updated"
+
+  - type: SecretsResolved
+    description: "Indicates whether all secretKeyRef references in the spec are valid"
+    true:
+      reason: AllSecretsFound
+      message_template: "Resolved {count} secret references"
+    false:
+      reasons:
+        - reason: SecretNotFound
+          message_template: "Secret \"{name}\" not found in namespace \"{namespace}\". Referenced by: {fieldPath}"
+        - reason: SecretKeyMissing
+          message_template: "Key \"{key}\" not found in Secret \"{name}/{namespace}\". Referenced by: {fieldPath}"
+
+# --- Phase Transitions ---
+phases:
+  Pending:
+    description: "CR accepted, awaiting distribution resolution"
+    transitions_to: [Initializing, Failed]
+  Initializing:
+    description: "Distribution resolved, config generated, Deployment created/updated"
+    transitions_to: [Ready, Failed]
+  Ready:
+    description: "At least one Pod running with current config"
+    transitions_to: [Initializing, Failed]
+  Failed:
+    description: "Config generation, validation, or deployment failed"
+    transitions_to: [Initializing, Pending]
+  Terminating:
+    description: "CR being deleted, owned resources cleaning up"
+    transitions_to: []
+
+# --- Validation Error Format ---
+validation_errors:
+  format: "Kubernetes API field.ErrorList"
+  example:
+    field: "spec.providers.inference[0].apiKey.secretKeyRef.name"
+    type: "FieldValueNotFound"
+    message: "Secret \"vllm-creds\" not found in namespace \"default\""
+  guidelines:
+    - Include the full field path from spec root
+    - Use present tense ("not found" not "was not found")
+    - Include the specific value that caused the error
+    - Suggest remediation when possible

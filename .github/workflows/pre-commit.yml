@@ -1,0 +1,40 @@
+name: Pre-commit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go env
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        env:
+          SKIP: no-commit-to-branch
+
+      - name: Verify if there are any diff files after pre-commit
+        run: |
+          git diff --exit-code || (echo "There are uncommitted changes, run pre-commit locally and commit again" && exit 1)
+
+      - name: Verify if there are any new files after pre-commit
+        run: |
+          unstaged_files=$(git ls-files --others --exclude-standard)
+          if [ -n "$unstaged_files" ]; then
+            echo "There are uncommitted new files, run pre-commit locally and commit again"
+            echo "$unstaged_files"
+            exit 1
+          fi

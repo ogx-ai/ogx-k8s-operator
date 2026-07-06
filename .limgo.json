@@ -1,0 +1,16 @@
+{
+  "coverage": {
+    "global": {
+      "statements": 0,
+      "lines": 0,
+      "branches": 0
+    }
+  },
+  "statistic": {
+    "excludes": [
+      "test_*",
+      "tests/.*",
+      "zz_generated.deepcopy.go"
+    ]
+  }
+}

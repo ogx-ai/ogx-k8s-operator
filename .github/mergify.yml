@@ -1,0 +1,90 @@
+pull_request_rules:
+- name: keep PRs up to date with main
+  conditions:
+    - -conflict
+    - -draft
+    - -closed
+    - -merged
+    - label!=do-not-merge
+  actions:
+    update: {}
+
+- name: auto-merge GitHub Actions dependency bumps
+  description: >
+    Automatic merge of GitHub Actions dependency bump PRs with 1 approval
+  conditions:
+    - "#approved-reviews-by>=1"
+    - "#changes-requested-reviews-by=0"
+    - base=main
+    - label!=do-not-merge
+    - label!=needs-rebase
+    - check-success=pre-commit
+    - check-success=e2e-tests
+    - check-success=tests
+    - or:
+      - title~=(?i)bump.*action
+      - title~=(?i)update.*github.*action
+      - label=dependencies
+      - files~=^\.github/workflows/
+  actions:
+    merge:
+      method: squash
+      commit_message_template: |
+        {{ title }} (#{{ number }})
+
+        {{ body }}
+
+        {% for user in approved_reviews_by %}
+        Approved-by: {{ user }}
+        {% endfor %}
+    delete_head_branch:
+
+- name: auto-merge
+  description: >
+    Automatic merge of PRs to main
+  conditions:
+    - "#approved-reviews-by>=2"
+    - "#changes-requested-reviews-by=0"
+    - base=main
+    - label!=do-not-merge
+    - label!=needs-rebase
+    - check-success=pre-commit
+    - check-success=e2e-tests
+    - check-success=tests
+    # - check-success=build-latest-image # TODO: uncomment this when the credentials are added to the repo
+
+  actions:
+    merge:
+      method: squash
+      commit_message_template: |
+        {{ title }} (#{{ number }})
+
+        {{ body }}
+
+        {% for user in approved_reviews_by %}
+        Approved-by: {{ user }}
+        {% endfor %}
+    delete_head_branch:
+
+- name: ping author on conflicts and add 'needs-rebase' label
+  conditions:
+      - conflict
+      - -closed
+  actions:
+    label:
+      add:
+        - needs-rebase
+    comment:
+      message: >
+       This pull request has merge conflicts that must be resolved before it
+       can be merged. @{{author}} please rebase it.
+       https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/syncing-a-fork
+
+- name: remove 'needs-rebase' label when conflict is resolved
+  conditions:
+      - -conflict
+      - -closed
+  actions:
+    label:
+      remove:
+        - needs-rebase

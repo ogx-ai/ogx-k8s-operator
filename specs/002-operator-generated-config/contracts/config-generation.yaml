@@ -1,0 +1,143 @@
+# Config Generation Contract
+#
+# Defines the interface between the CRD spec and the generated config.yaml.
+# This contract specifies how CRD fields map to config.yaml structure.
+
+# --- Input: v1alpha2 Spec ---
+# The config generator receives the full LlamaStackDistributionSpec
+# plus the resolved container image reference.
+
+# --- Output: GeneratedConfig ---
+output:
+  configYAML: "string"        # Final config.yaml content (YAML format)
+  envVars: "[]EnvVar"         # Environment variable definitions for Deployment
+  contentHash: "string"       # SHA256 of configYAML (for change detection)
+  providerCount: "int"        # Count of configured providers (for status)
+  resourceCount: "int"        # Count of registered resources (for status)
+  configVersion: "int"        # Detected config.yaml schema version
+
+# --- Provider Field Mapping ---
+provider_mapping:
+  # CRD field → config.yaml field
+  provider: provider_type     # With "remote::" prefix (e.g., vllm → remote::vllm)
+  endpoint: config.url
+  apiKey: config.api_key      # Via env var substitution: ${env.LLSD_<PROVIDER_ID>_API_KEY}
+  secretRefs.<key>: config.<key>  # Each entry resolved to env var: ${env.LLSD_<PROVIDER_ID>_<KEY>}
+  settings.*: config.*        # Merged into provider config section (NO secret resolution)
+  id: provider_id             # Direct mapping
+
+# --- Env Var Naming Convention ---
+env_var_naming:
+  pattern: "LLSD_{PROVIDER_ID}_{FIELD}"
+  normalization:
+    - Uppercase all characters
+    - Replace hyphens (-) with underscores (_)
+  examples:
+    - provider_id: "vllm-primary"
+      field: "apiKey"
+      result: "LLSD_VLLM_PRIMARY_API_KEY"
+    - provider_id: "pgvector"
+      field: "host"
+      result: "LLSD_PGVECTOR_HOST"
+
+# --- Resource Registration Mapping ---
+resource_mapping:
+  models:
+    simple_string:
+      # "llama3.2-8b" → registered with first inference provider
+      provider_assignment: first_inference_provider_in_list_order
+    object_form:
+      # {name: "llama3.2-70b", provider: "vllm-primary"} → registered with specified provider
+      provider_assignment: explicit_provider_id
+
+  tools:
+    # "websearch" → registered as tool group with toolRuntime provider
+    registration: tool_group
+    provider_assignment: first_toolRuntime_provider  # From user config or base config
+    error_when_missing: "resources.tools requires at least one toolRuntime provider to be configured"
+
+  shields:
+    # "llama-guard" → registered with safety provider
+    registration: shield
+    provider_assignment: first_safety_provider  # From user config or base config
+    error_when_missing: "resources.shields requires at least one safety provider to be configured"
+
+# --- Merge Rules ---
+merge_rules:
+  providers:
+    strategy: replace_by_api_type
+    description: >
+      When user specifies providers for an API type, ALL base config providers
+      for that API type are replaced. Base providers with unmatched IDs are NOT
+      preserved. If the user wants to keep a base provider, they must re-declare
+      it in their provider list.
+    examples:
+      - description: "Full replacement"
+        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        user: [{id: custom-inf, provider: ollama, endpoint: "http://ollama:11434"}]
+        result: [{provider_id: custom-inf, provider_type: "remote::ollama", config: {url: "http://ollama:11434"}}]
+        note: "base-inf is removed because user specified inference providers"
+      - description: "No user providers for API type"
+        base: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        user: []  # providers.inference not specified
+        result: [{provider_id: base-inf, provider_type: "remote::vllm"}]
+        note: "Base providers preserved when user does not specify that API type"
+
+  storage:
+    strategy: merge_by_subsection
+    description: "kv and sql independently replaced if specified"
+
+  resources:
+    strategy: additive
+    description: "User resources added to base registered_resources"
+
+  disabled:
+    strategy: subtractive
+    description: "Remove disabled APIs from generated config"
+
+  scalars:
+    strategy: override
+    description: "User value replaces base value"
+
+# --- Secret Resolution ---
+secret_resolution:
+  description: >
+    Secrets are resolved from two explicit typed fields only: apiKey and secretRefs.
+    The settings map is NEVER inspected for secret references. This eliminates
+    heuristic matching (any map with name+key fields) and provides a clear,
+    unambiguous boundary for secret resolution.
+  sources:
+    - field: "apiKey.secretKeyRef"
+      env_var_suffix: "API_KEY"
+      description: "Standard API key authentication"
+    - field: "secretRefs.<key>.secretKeyRef"
+      env_var_suffix: "<KEY uppercased, hyphens to underscores>"
+      description: "Named secret references for provider-specific connection fields"
+  examples:
+    - provider_id: "pgvector"
+      field: "secretRefs.host"
+      secret: {name: pg-creds, key: host}
+      env_var: "LLSD_PGVECTOR_HOST"
+      config_value: "${env.LLSD_PGVECTOR_HOST}"
+    - provider_id: "vllm-primary"
+      field: "apiKey"
+      secret: {name: vllm-creds, key: token}
+      env_var: "LLSD_VLLM_PRIMARY_API_KEY"
+      config_value: "${env.LLSD_VLLM_PRIMARY_API_KEY}"
+
+# --- ConfigMap Naming ---
+configmap:
+  pattern: "{cr-name}-config-{hash[:8]}"
+  hash_algorithm: SHA256
+  hash_input: configYAML content
+  immutable: true
+  owner_reference: true
+  retention: 2  # Keep last 2 for debugging
+
+# --- Determinism Guarantee ---
+determinism:
+  constraint: "Same inputs MUST produce identical configYAML output"
+  implications:
+    - Map iteration must use sorted keys
+    - No timestamps or random values in output
+    - YAML serialization must be stable

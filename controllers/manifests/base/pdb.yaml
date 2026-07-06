@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb
+  labels:
+    app: ogx
+    app.kubernetes.io/instance: ""
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ogx
+      app.kubernetes.io/instance: ""

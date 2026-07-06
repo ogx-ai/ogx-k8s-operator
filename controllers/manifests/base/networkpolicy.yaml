@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: ogx
+      app.kubernetes.io/instance: ""
+  policyTypes:
+  - Ingress
+  ingress: []
+  # Ingress rules are populated dynamically by the NetworkPolicy transformer plugin
+  # based on spec.network.networkPolicy configuration

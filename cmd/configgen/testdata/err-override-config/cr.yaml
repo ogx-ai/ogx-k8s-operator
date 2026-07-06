@@ -1,0 +1,10 @@
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test
+spec:
+  distribution:
+    name: starter
+  overrideConfig:
+    name: my-config
+    key: config.yaml

@@ -1,0 +1,18 @@
+domain: ogx.io
+layout:
+- go.kubebuilder.io/v4
+plugins:
+  manifests.sdk.operatorframework.io/v2: {}
+  scorecard.sdk.operatorframework.io/v2: {}
+projectName: ogx-k8s-operator
+repo: github.com/ogx-ai/ogx-k8s-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: ogx.io
+  kind: OGXServer
+  path: github.com/ogx-ai/ogx-k8s-operator/api/v1beta1
+  version: v1beta1
+version: "3"
