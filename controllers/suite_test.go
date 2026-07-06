@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -85,6 +86,12 @@ func TestMain(m *testing.M) {
 	err = rbacv1.AddToScheme(scheme.Scheme)
 	if err != nil {
 		logf.Log.Error(err, "failed to add rbacv1 scheme")
+		os.Exit(1)
+	}
+
+	err = monitoringv1.AddToScheme(scheme.Scheme)
+	if err != nil {
+		logf.Log.Error(err, "failed to add monitoringv1 scheme")
 		os.Exit(1)
 	}
 

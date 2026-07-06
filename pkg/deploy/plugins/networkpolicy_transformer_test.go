@@ -209,3 +209,60 @@ func TestNetworkPolicyTransformer_NoRouterPeersWhenNetworkSpecNil(t *testing.T) 
 	// Should NOT have OpenShift router namespace selector when network spec is nil
 	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: ingress")
 }
+
+func TestNetworkPolicyTransformer_MonitoringIngressWhenMetricsPortSet(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		NetworkSpec:       nil,
+		MetricsPort:       9464,
+	})
+
+	err = transformer.Transform(rm)
+	require.NoError(t, err)
+
+	transformedRes := rm.Resources()[0]
+	yamlBytes, err := transformedRes.AsYAML()
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+
+	assert.Contains(t, yamlStr, "network.openshift.io/policy-group: monitoring")
+	assert.Contains(t, yamlStr, "port: 9464")
+}
+
+func TestNetworkPolicyTransformer_NoMonitoringIngressWhenMetricsPortZero(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		NetworkSpec:       nil,
+		MetricsPort:       0,
+	})
+
+	err = transformer.Transform(rm)
+	require.NoError(t, err)
+
+	transformedRes := rm.Resources()[0]
+	yamlBytes, err := transformedRes.AsYAML()
+	require.NoError(t, err)
+
+	yamlStr := string(yamlBytes)
+
+	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: monitoring")
+}

@@ -35,6 +35,7 @@ const (
 	// Allow traffic from OpenShift router namespaces.
 	openShiftIngressPolicyGroupLabelKey   = "network.openshift.io/policy-group"
 	openShiftIngressPolicyGroupLabelValue = "ingress"
+	openShiftMonitoringPolicyGroupValue   = "monitoring"
 )
 
 // NetworkPolicyTransformerConfig holds the configuration for the NetworkPolicy transformer.
@@ -47,6 +48,8 @@ type NetworkPolicyTransformerConfig struct {
 	OperatorNamespace string
 	// NetworkSpec is the network configuration from the CR spec.
 	NetworkSpec *ogxiov1beta1.NetworkSpec
+	// MetricsPort is the port for Prometheus scraping. 0 means monitoring is disabled.
+	MetricsPort int32
 }
 
 // CreateNetworkPolicyTransformer creates a transformer for NetworkPolicy resources.
@@ -180,12 +183,14 @@ func (t *networkPolicyTransformer) buildIngressRules() []any {
 		},
 	}
 
-	return []any{
-		map[string]any{
-			"from":  peers,
-			"ports": portRule,
-		},
-	}
+	monitoringRules := t.buildMonitoringIngressRules()
+	rules := make([]any, 0, 1+len(monitoringRules))
+	rules = append(rules, map[string]any{
+		"from":  peers,
+		"ports": portRule,
+	})
+	rules = append(rules, monitoringRules...)
+	return rules
 }
 
 func (t *networkPolicyTransformer) buildPeers() []any {
@@ -226,6 +231,33 @@ func (t *networkPolicyTransformer) buildRouterPeers() []any {
 			"namespaceSelector": map[string]any{
 				"matchLabels": map[string]any{
 					openShiftIngressPolicyGroupLabelKey: openShiftIngressPolicyGroupLabelValue,
+				},
+			},
+		},
+	}
+}
+
+// buildMonitoringIngressRules adds an ingress rule allowing Prometheus scraping on the metrics port.
+func (t *networkPolicyTransformer) buildMonitoringIngressRules() []any {
+	if t.config.MetricsPort == 0 {
+		return nil
+	}
+
+	return []any{
+		map[string]any{
+			"from": []any{
+				map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{
+							openShiftIngressPolicyGroupLabelKey: openShiftMonitoringPolicyGroupValue,
+						},
+					},
+				},
+			},
+			"ports": []any{
+				map[string]any{
+					"protocol": "TCP",
+					"port":     t.config.MetricsPort,
 				},
 			},
 		},
