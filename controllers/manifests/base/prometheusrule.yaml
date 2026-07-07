@@ -1,0 +1,29 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: prometheus-rules
+spec:
+  groups:
+  - name: ogx.rules
+    interval: 60s
+    rules:
+    - record: ogx:api_info
+      labels:
+        api: inference
+      expr: clamp_max(sum(ogx_requests_total{api="inference"}) or vector(0), 1)
+    - record: ogx:api_info
+      labels:
+        api: vector_io
+      expr: clamp_max(sum(ogx_requests_total{api="vector_io"}) or vector(0), 1)
+    - record: ogx:api_info
+      labels:
+        api: responses
+      expr: clamp_max(sum(ogx_requests_total{api="responses"}) or vector(0), 1)
+    - record: ogx:api_info
+      labels:
+        api: rag
+      expr: clamp_max(sum(ogx_vector_io_queries_total) or vector(0), 1)
+    - record: ogx:api_info
+      labels:
+        api: agentic
+      expr: clamp_max(sum(ogx_tool_runtime_invocations_total) or vector(0), 1)

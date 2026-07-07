@@ -40,6 +40,8 @@ const (
 	FSGroup = int64(1001)
 	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
 	instanceLabelKey = "app.kubernetes.io/instance"
+	// defaultMetricsPort is the default port for the OGX metrics endpoint.
+	defaultMetricsPort = int32(9464)
 )
 
 var (
@@ -154,6 +156,17 @@ func getStartupProbe(instance *ogxiov1beta1.OGXServer) *corev1.Probe {
 	}
 }
 
+func isMonitoringDisabled(instance *ogxiov1beta1.OGXServer) bool {
+	return instance.Spec.Monitoring != nil && instance.Spec.Monitoring.Enabled != nil && !*instance.Spec.Monitoring.Enabled
+}
+
+func getMetricsPort(instance *ogxiov1beta1.OGXServer) int32 {
+	if instance.Spec.Monitoring != nil && instance.Spec.Monitoring.MetricsPort != nil {
+		return *instance.Spec.Monitoring.MetricsPort
+	}
+	return defaultMetricsPort
+}
+
 // buildContainerSpec creates the container specification.
 func buildContainerSpec(
 	ctx context.Context,
@@ -164,11 +177,18 @@ func buildContainerSpec(
 	secretEnvVars []corev1.EnvVar,
 ) corev1.Container {
 	workers, workersSet := getEffectiveWorkers(instance)
+	ports := []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}}
+	if !isMonitoringDisabled(instance) {
+		ports = append(ports, corev1.ContainerPort{
+			Name:          "metrics",
+			ContainerPort: getMetricsPort(instance),
+		})
+	}
 	container := corev1.Container{
 		Name:         ogxiov1beta1.DefaultContainerName,
 		Image:        image,
 		Resources:    resolveContainerResources(instance, workers, workersSet),
-		Ports:        []corev1.ContainerPort{{ContainerPort: getContainerPort(instance)}},
+		Ports:        ports,
 		StartupProbe: getStartupProbe(instance),
 	}
 	configureContainerEnvironment(ctx, r, instance, &container, secretEnvVars)
@@ -297,6 +317,15 @@ func configureContainerEnvironment(ctx context.Context, r *OGXServerReconciler, 
 			Value: strconv.Itoa(int(*instance.Spec.RegistryRefreshIntervalSeconds)),
 		})
 	}
+
+	if !isMonitoringDisabled(instance) {
+		container.Env = append(container.Env,
+			corev1.EnvVar{Name: "OGX_METRICS_ENDPOINT_ENABLED", Value: "1"},
+			corev1.EnvVar{Name: "OGX_METRICS_HOST", Value: "0.0.0.0"},
+			corev1.EnvVar{Name: "OGX_METRICS_PORT", Value: strconv.Itoa(int(getMetricsPort(instance)))},
+		)
+	}
+
 	// Inject pre-computed secret env vars for provider/storage references.
 	// These are computed once in buildManifestContext to avoid redundant tree walks.
 	if len(secretEnvVars) > 0 {

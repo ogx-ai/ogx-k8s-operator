@@ -10,6 +10,8 @@ resources:
 - hpa.yaml
 - pdb.yaml
 - rolebinding.yaml
+- prometheusrule.yaml
+- servicemonitor.yaml
 
 labels:
 - includeSelectors: false
