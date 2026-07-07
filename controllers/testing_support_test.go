@@ -307,7 +307,7 @@ func AssertServiceAndDeploymentPortsAlign(t *testing.T, service *corev1.Service,
 	t.Helper()
 	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
 	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
-	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
+	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers[0].Ports, "Container should have at least one port")
 
 	serviceTargetPort := service.Spec.Ports[0].TargetPort.IntVal
 	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
@@ -357,7 +357,7 @@ func hasMatchingIngressRule(
 func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networkingv1.NetworkPolicy, deployment *appsv1.Deployment, operatorNamespace string) {
 	t.Helper()
 	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
-	require.Len(t, deployment.Spec.Template.Spec.Containers[0].Ports, 1, "Container should have exactly one port")
+	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers[0].Ports, "Container should have at least one port")
 	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 
 	sameNamespacePredicate := func(peer networkingv1.NetworkPolicyPeer) bool {

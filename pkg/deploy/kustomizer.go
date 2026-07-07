@@ -265,11 +265,22 @@ func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1
 		operatorNS = "ogx-k8s-operator-system"
 	}
 
+	var metricsPort int32
+	monitoring := ownerInstance.Spec.Monitoring
+	if monitoring == nil || monitoring.Enabled == nil || *monitoring.Enabled {
+		if monitoring != nil && monitoring.MetricsPort != nil {
+			metricsPort = *monitoring.MetricsPort
+		} else {
+			metricsPort = 9464
+		}
+	}
+
 	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
 		InstanceName:      ownerInstance.GetName(),
 		ServicePort:       GetServicePort(ownerInstance),
 		OperatorNamespace: operatorNS,
 		NetworkSpec:       ownerInstance.Spec.Network,
+		MetricsPort:       metricsPort,
 	})
 
 	return npTransformer.Transform(*resMap)
