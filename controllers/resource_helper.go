@@ -300,22 +300,27 @@ func configureContainerEnvironment(
 		container.Env = append(container.Env, secretEnvVars...)
 	}
 
-	// Apply user-provided env vars, letting them override operator defaults.
-	if instance.Spec.Workload != nil && instance.Spec.Workload.Overrides != nil {
-		overrides := make(map[string]corev1.EnvVar, len(instance.Spec.Workload.Overrides.Env))
-		for _, e := range instance.Spec.Workload.Overrides.Env {
-			overrides[e.Name] = e
-		}
-		deduped := make([]corev1.EnvVar, 0, len(container.Env))
-		for _, e := range container.Env {
-			if _, ok := overrides[e.Name]; ok {
-				continue
-			}
-			deduped = append(deduped, e)
-		}
-		deduped = append(deduped, instance.Spec.Workload.Overrides.Env...)
-		container.Env = deduped
+	applyEnvOverrides(instance, container)
+}
+
+// applyEnvOverrides merges user-provided env vars, letting them override operator defaults.
+func applyEnvOverrides(instance *ogxiov1beta1.OGXServer, container *corev1.Container) {
+	if instance.Spec.Workload == nil || instance.Spec.Workload.Overrides == nil {
+		return
 	}
+	overrides := make(map[string]corev1.EnvVar, len(instance.Spec.Workload.Overrides.Env))
+	for _, e := range instance.Spec.Workload.Overrides.Env {
+		overrides[e.Name] = e
+	}
+	deduped := make([]corev1.EnvVar, 0, len(container.Env))
+	for _, e := range container.Env {
+		if _, ok := overrides[e.Name]; ok {
+			continue
+		}
+		deduped = append(deduped, e)
+	}
+	deduped = append(deduped, instance.Spec.Workload.Overrides.Env...)
+	container.Env = deduped
 }
 
 // configureContainerMounts sets up volume mounts for the container.
