@@ -26,6 +26,7 @@ import (
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -63,6 +64,7 @@ func init() { //nolint:gochecknoinits
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(ogxiov1beta1.AddToScheme(scheme))
+	utilruntime.Must(monitoringv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

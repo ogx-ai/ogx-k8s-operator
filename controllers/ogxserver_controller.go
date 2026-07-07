@@ -42,6 +42,7 @@ import (
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
+	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -49,6 +50,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -244,6 +246,10 @@ func (r *OGXServerReconciler) determineKindsToExclude(instance *ogxiov1beta1.OGX
 		kinds = append(kinds, "HorizontalPodAutoscaler")
 	}
 
+	if isMonitoringDisabled(instance) {
+		kinds = append(kinds, "PrometheusRule", "ServiceMonitor")
+	}
+
 	return kinds
 }
 
@@ -282,6 +288,17 @@ func (r *OGXServerReconciler) reconcileAllManifestResources(
 	}
 
 	kindsToExclude := r.determineKindsToExclude(instance, effectivePVCName)
+
+	if !slices.Contains(kindsToExclude, "PrometheusRule") {
+		monitoringAvailable, monErr := deploy.MonitoringCRDsAvailable(ctx, r.Client)
+		if monErr != nil {
+			return fmt.Errorf("failed to check monitoring CRD availability: %w", monErr)
+		}
+		if !monitoringAvailable {
+			kindsToExclude = append(kindsToExclude, "PrometheusRule", "ServiceMonitor")
+		}
+	}
+
 	filteredResMap, err := deploy.FilterExcludeKinds(resMap, kindsToExclude)
 	if err != nil {
 		return fmt.Errorf("failed to filter manifests: %w", err)
@@ -324,6 +341,10 @@ func (r *OGXServerReconciler) deleteExcludedResources(ctx context.Context, insta
 			logger.Error(err, "Failed to delete HorizontalPodAutoscaler")
 			return err
 		}
+	}
+
+	if err := r.deleteMonitoringResourcesIfExcluded(ctx, instance, kindsToExclude); err != nil {
+		return err
 	}
 
 	return nil
@@ -408,6 +429,80 @@ func (r *OGXServerReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.
 	logger.Info("Deleting HorizontalPodAutoscaler as feature is disabled", "hpa", hpaName)
 	if err := r.Delete(ctx, hpa); err != nil {
 		return fmt.Errorf("failed to delete HorizontalPodAutoscaler: %w", err)
+	}
+
+	return nil
+}
+
+func (r *OGXServerReconciler) deleteMonitoringResourcesIfExcluded(ctx context.Context, instance *ogxiov1beta1.OGXServer, kindsToExclude []string) error {
+	logger := log.FromContext(ctx)
+
+	if slices.Contains(kindsToExclude, "PrometheusRule") {
+		if err := r.deletePrometheusRuleIfExists(ctx, instance); err != nil {
+			logger.Error(err, "Failed to delete PrometheusRule")
+			return err
+		}
+	}
+
+	if slices.Contains(kindsToExclude, "ServiceMonitor") {
+		if err := r.deleteServiceMonitorIfExists(ctx, instance); err != nil {
+			logger.Error(err, "Failed to delete ServiceMonitor")
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *OGXServerReconciler) deletePrometheusRuleIfExists(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	logger := log.FromContext(ctx)
+
+	promRule := &monitoringv1.PrometheusRule{}
+	promRuleName := instance.Name + "-prometheus-rules"
+	key := types.NamespacedName{Name: promRuleName, Namespace: instance.Namespace}
+
+	if err := r.Get(ctx, key, promRule); err != nil {
+		if k8serrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get PrometheusRule: %w", err)
+	}
+
+	if !metav1.IsControlledBy(promRule, instance) {
+		logger.V(1).Info("PrometheusRule not owned by this instance, skipping deletion", "prometheusRule", promRuleName)
+		return nil
+	}
+
+	logger.Info("Deleting PrometheusRule as monitoring is disabled", "prometheusRule", promRuleName)
+	if err := r.Delete(ctx, promRule); err != nil {
+		return fmt.Errorf("failed to delete PrometheusRule: %w", err)
+	}
+
+	return nil
+}
+
+func (r *OGXServerReconciler) deleteServiceMonitorIfExists(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	logger := log.FromContext(ctx)
+
+	sm := &monitoringv1.ServiceMonitor{}
+	smName := instance.Name + "-service-monitor"
+	key := types.NamespacedName{Name: smName, Namespace: instance.Namespace}
+
+	if err := r.Get(ctx, key, sm); err != nil {
+		if k8serrors.IsNotFound(err) || apimeta.IsNoMatchError(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get ServiceMonitor: %w", err)
+	}
+
+	if !metav1.IsControlledBy(sm, instance) {
+		logger.V(1).Info("ServiceMonitor not owned by this instance, skipping deletion", "serviceMonitor", smName)
+		return nil
+	}
+
+	logger.Info("Deleting ServiceMonitor as monitoring is disabled", "serviceMonitor", smName)
+	if err := r.Delete(ctx, sm); err != nil {
+		return fmt.Errorf("failed to delete ServiceMonitor: %w", err)
 	}
 
 	return nil
