@@ -190,7 +190,7 @@ metadata:
   name: prometheus-rules
 spec:
   groups:
-  - name: ogx.rules
+  - name: telemetry.rules
     interval: 60s
     rules:
     - record: ogx:api_info
