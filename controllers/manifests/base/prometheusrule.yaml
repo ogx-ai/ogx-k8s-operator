@@ -4,7 +4,7 @@ metadata:
   name: prometheus-rules
 spec:
   groups:
-  - name: ogx.rules
+  - name: telemetry.rules
     interval: 60s
     rules:
     - record: ogx:api_info
@@ -22,8 +22,8 @@ spec:
     - record: ogx:api_info
       labels:
         api: rag
-      expr: clamp_max(sum(ogx_vector_io_queries_total) or vector(0), 1)
+      expr: clamp_max(sum(ogx_vector_io_documents_retrieved_total) or vector(0), 1)
     - record: ogx:api_info
       labels:
         api: agentic
-      expr: clamp_max(sum(ogx_tool_runtime_invocations_total) or vector(0), 1)
+      expr: clamp_max(sum(ogx_responses_agentic_calls_total) or vector(0), 1)
