@@ -8,6 +8,6 @@ spec:
       app.kubernetes.io/managed-by: ogx-operator
       app.kubernetes.io/part-of: ogx
   endpoints:
-  - targetPort: 9464
-    path: /v1/metrics
+  - targetPort: metrics
+    path: /metrics
     interval: 60s
