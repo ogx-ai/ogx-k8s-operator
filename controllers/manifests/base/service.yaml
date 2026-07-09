@@ -10,3 +10,7 @@ spec:
   ports:
   - name: http
     protocol: TCP
+  - name: metrics
+    port: 9464
+    targetPort: 9464
+    protocol: TCP

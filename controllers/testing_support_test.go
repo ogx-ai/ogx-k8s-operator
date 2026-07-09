@@ -299,19 +299,35 @@ func AssertPVCHasSize(t *testing.T, pvc *corev1.PersistentVolumeClaim, expectedS
 
 func AssertServicePortMatches(t *testing.T, service *corev1.Service, expectedPort corev1.ServicePort) {
 	t.Helper()
-	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
-	require.Equal(t, expectedPort, service.Spec.Ports[0], "Service port should match expected")
+	require.GreaterOrEqual(t, len(service.Spec.Ports), 1, "Service should have at least one port")
+	var found bool
+	for _, p := range service.Spec.Ports {
+		if p.Name == expectedPort.Name {
+			require.Equal(t, expectedPort, p, "Service port should match expected")
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "Service should contain port named %q", expectedPort.Name)
 }
 
 func AssertServiceAndDeploymentPortsAlign(t *testing.T, service *corev1.Service, deployment *appsv1.Deployment) {
 	t.Helper()
-	require.Len(t, service.Spec.Ports, 1, "Service should have exactly one port")
+	require.NotEmpty(t, service.Spec.Ports, "Service should have at least one port")
 	require.Len(t, deployment.Spec.Template.Spec.Containers, 1, "Deployment should have exactly one container")
-	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers[0].Ports, "Container should have at least one port")
+	containerPorts := deployment.Spec.Template.Spec.Containers[0].Ports
+	require.NotEmpty(t, containerPorts, "Container should have at least one port")
 
-	serviceTargetPort := service.Spec.Ports[0].TargetPort.IntVal
-	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
-	require.Equal(t, serviceTargetPort, containerPort, "Service target port should match deployment container port")
+	for _, sp := range service.Spec.Ports {
+		var matched bool
+		for _, cp := range containerPorts {
+			if sp.TargetPort.IntVal == cp.ContainerPort {
+				matched = true
+				break
+			}
+		}
+		require.True(t, matched, "Service target port %d should match a deployment container port", sp.TargetPort.IntVal)
+	}
 }
 
 func AssertServiceSelectorMatches(t *testing.T, service *corev1.Service, expectedSelector map[string]string) {

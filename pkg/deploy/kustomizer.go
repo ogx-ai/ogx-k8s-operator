@@ -255,6 +255,12 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) 
 		}
 	}
 
+	if isMonitoringDisabledForDeploy(ownerInstance) {
+		if err := removeServiceMetricsPort(*resMap); err != nil {
+			return fmt.Errorf("failed to remove metrics port from Service: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -318,6 +324,60 @@ func removeDeploymentReplicas(resMap resmap.ResMap) error {
 	return nil
 }
 
+func isMonitoringDisabledForDeploy(instance *ogxiov1beta1.OGXServer) bool {
+	return instance.Spec.Monitoring != nil && instance.Spec.Monitoring.Enabled != nil && !*instance.Spec.Monitoring.Enabled
+}
+
+func filterOutMetricsPort(ports []any) []any {
+	var filtered []any
+	for _, p := range ports {
+		port, ok := p.(map[string]any)
+		if !ok {
+			filtered = append(filtered, p)
+			continue
+		}
+		if port["name"] == "metrics" {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
+}
+
+// removeServiceMetricsPort strips the metrics port from the Service when monitoring
+// is disabled. The base service.yaml includes the metrics port by default; this
+// function removes it so the Service only exposes the API port.
+func removeServiceMetricsPort(resMap resmap.ResMap) error {
+	for _, res := range resMap.Resources() {
+		if res.GetKind() != "Service" {
+			continue
+		}
+
+		data, err := parseResourceYAML(res)
+		if err != nil {
+			return err
+		}
+
+		spec, ok := data["spec"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		ports, ok := spec["ports"].([]any)
+		if !ok || len(ports) < 2 {
+			continue
+		}
+
+		spec["ports"] = filterOutMetricsPort(ports)
+
+		if err := updateResourceFromData(res, data); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // getFieldMappings returns essential field mappings for kustomize transformation.
 func getFieldMappings(ownerInstance *ogxiov1beta1.OGXServer) []plugins.FieldMapping {
 	instanceName := ownerInstance.GetName()
@@ -328,6 +388,27 @@ func getFieldMappings(ownerInstance *ogxiov1beta1.OGXServer) []plugins.FieldMapp
 	instanceLabelPath := "/app.kubernetes.io~1instance"
 
 	mappings := buildFieldMappings(instanceName, instanceNamespace, serviceAccountName, servicePort, storageSize, instanceLabelPath, GetEffectiveReplicas(ownerInstance))
+
+	// When monitoring is enabled and the user overrides the metrics port,
+	// update the Service's second port entry (defined in base/service.yaml).
+	monitoring := ownerInstance.Spec.Monitoring
+	if monitoring == nil || monitoring.Enabled == nil || *monitoring.Enabled {
+		if monitoring != nil && monitoring.MetricsPort != nil {
+			metricsPort := *monitoring.MetricsPort
+			mappings = append(mappings,
+				plugins.FieldMapping{
+					SourceValue: metricsPort,
+					TargetField: "/spec/ports/1/port",
+					TargetKind:  "Service",
+				},
+				plugins.FieldMapping{
+					SourceValue: metricsPort,
+					TargetField: "/spec/ports/1/targetPort",
+					TargetKind:  "Service",
+				},
+			)
+		}
+	}
 
 	// When persistent storage is configured, use Recreate strategy to avoid
 	// RWO PVC multi-attach deadlock during rolling updates

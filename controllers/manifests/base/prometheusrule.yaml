@@ -7,23 +7,23 @@ spec:
   - name: telemetry.rules
     interval: 60s
     rules:
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: inference
       expr: clamp_max(sum(ogx_requests_total{api="inference"}) or vector(0), 1)
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: vector_io
       expr: clamp_max(sum(ogx_requests_total{api="vector_io"}) or vector(0), 1)
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: responses
       expr: clamp_max(sum(ogx_requests_total{api="responses"}) or vector(0), 1)
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: rag
       expr: clamp_max(sum(ogx_vector_io_documents_retrieved_total) or vector(0), 1)
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: agentic
       expr: clamp_max(sum(ogx_responses_agentic_calls_total) or vector(0), 1)
