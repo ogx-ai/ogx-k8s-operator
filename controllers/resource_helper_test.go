@@ -379,6 +379,46 @@ func TestNeedsPodDisruptionBudget(t *testing.T) {
 	}
 }
 
+func TestBuildContainerSpecRuntimeConfig(t *testing.T) {
+	t.Run("runtimeConfig sets RUN_CONFIG_PATH and preserves entrypoint", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			},
+		}
+		rc := &runtimeConfigRef{ConfigMapName: "my-config", ConfigMapKey: "config.yaml"}
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", rc, nil)
+
+		var foundRunConfig, foundOgxConfig bool
+		for _, e := range c.Env {
+			if e.Name == "RUN_CONFIG_PATH" {
+				assert.Equal(t, "/etc/ogx/config.yaml", e.Value)
+				foundRunConfig = true
+			}
+			if e.Name == "OGX_CONFIG" {
+				assert.Equal(t, "/etc/ogx/config.yaml", e.Value)
+				foundOgxConfig = true
+			}
+		}
+		assert.True(t, foundRunConfig, "expected RUN_CONFIG_PATH env var when runtimeConfig is set")
+		assert.True(t, foundOgxConfig, "expected OGX_CONFIG env var when runtimeConfig is set")
+		assert.Nil(t, c.Command, "container command should not be overridden when runtimeConfig is set")
+	})
+
+	t.Run("no runtimeConfig omits RUN_CONFIG_PATH and OGX_CONFIG", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			},
+		}
+		c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
+		for _, e := range c.Env {
+			assert.NotEqual(t, "RUN_CONFIG_PATH", e.Name, "RUN_CONFIG_PATH should not be set without runtimeConfig")
+			assert.NotEqual(t, "OGX_CONFIG", e.Name, "OGX_CONFIG should not be set without runtimeConfig")
+		}
+	})
+}
+
 func TestBuildPodDisruptionBudgetSpec(t *testing.T) {
 	t.Run("defaults when replicas > 1", func(t *testing.T) {
 		inst := &ogxiov1beta1.OGXServer{
