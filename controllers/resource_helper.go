@@ -33,20 +33,14 @@ import (
 	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Constants for validation limits.
 const (
-	// FSGroup is the filesystem group ID for the pod.
-	FSGroup = int64(1001)
-	// RunAsUserID is the UID the container runs as.
-	RunAsUserID = int64(1001)
 	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
 	instanceLabelKey = "app.kubernetes.io/instance"
 	// defaultMetricsPort is the default port for the OGX metrics endpoint.
 	defaultMetricsPort = int32(9464)
 )
 
-func boolPtr(v bool) *bool    { return &v }
-func int64Ptr(v int64) *int64 { return &v }
+func boolPtr(v bool) *bool { return &v }
 
 var (
 	// defaultHPACPUUtilization defines the fallback HPA CPU target percentage.
@@ -151,8 +145,9 @@ func buildContainerSpec(
 		StartupProbe: getStartupProbe(instance),
 		SecurityContext: &corev1.SecurityContext{
 			RunAsNonRoot:             boolPtr(true),
-			RunAsUser:                int64Ptr(RunAsUserID),
 			AllowPrivilegeEscalation: boolPtr(false),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
 	configureContainerEnvironment(ctx, r, instance, &container, runtimeConfig, secretEnvVars)
@@ -454,14 +449,11 @@ func configurePodStorage(
 	container corev1.Container,
 	effectivePVCName string,
 ) corev1.PodSpec {
-	fsGroup := FSGroup
-	runAsUser := RunAsUserID
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
 		SecurityContext: &corev1.PodSecurityContext{
-			FSGroup:      &fsGroup,
-			RunAsUser:    &runAsUser,
-			RunAsNonRoot: boolPtr(true),
+			RunAsNonRoot:   boolPtr(true),
+			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 

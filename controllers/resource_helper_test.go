@@ -77,8 +77,11 @@ func TestBuildContainerSpec(t *testing.T) {
 		require.NotNil(t, c.SecurityContext)
 		assert.Equal(t, testBoolPtr(true), c.SecurityContext.RunAsNonRoot)
 		assert.Equal(t, testBoolPtr(false), c.SecurityContext.AllowPrivilegeEscalation)
-		require.NotNil(t, c.SecurityContext.RunAsUser)
-		assert.Equal(t, RunAsUserID, *c.SecurityContext.RunAsUser)
+		assert.Nil(t, c.SecurityContext.RunAsUser)
+		require.NotNil(t, c.SecurityContext.SeccompProfile)
+		assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, c.SecurityContext.SeccompProfile.Type)
+		require.NotNil(t, c.SecurityContext.Capabilities)
+		assert.Contains(t, c.SecurityContext.Capabilities.Drop, corev1.Capability("ALL"))
 	})
 
 	t.Run("custom port and workload resources", func(t *testing.T) {
@@ -473,10 +476,11 @@ func TestConfigurePodStorageSecurityContext(t *testing.T) {
 		},
 	}
 	container := corev1.Container{Name: "test"}
-	podSpec := configurePodStorage(t.Context(), nil, instance, container, "test-pvc")
+	podSpec := configurePodStorage(t.Context(), nil, instance, nil, container, "test-pvc")
 	require.NotNil(t, podSpec.SecurityContext)
 	assert.Equal(t, testBoolPtr(true), podSpec.SecurityContext.RunAsNonRoot)
-	assert.Equal(t, FSGroup, *podSpec.SecurityContext.FSGroup)
-	require.NotNil(t, podSpec.SecurityContext.RunAsUser)
-	assert.Equal(t, RunAsUserID, *podSpec.SecurityContext.RunAsUser)
+	assert.Nil(t, podSpec.SecurityContext.FSGroup)
+	assert.Nil(t, podSpec.SecurityContext.RunAsUser)
+	require.NotNil(t, podSpec.SecurityContext.SeccompProfile)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, podSpec.SecurityContext.SeccompProfile.Type)
 }
