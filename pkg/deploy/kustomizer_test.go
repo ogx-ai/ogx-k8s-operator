@@ -220,6 +220,64 @@ spec:
 		assert.Equal(t, "test-prom-ns", res.GetNamespace())
 	})
 
+	t.Run("should render ServiceMonitor and apply name prefix", func(t *testing.T) {
+		fsys := filesys.MakeFsInMemory()
+		require.NoError(t, fsys.MkdirAll(manifestBasePath))
+
+		kustomizationContent := `
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - servicemonitor.yaml
+`
+		require.NoError(t, fsys.WriteFile(filepath.Join(manifestBasePath, "kustomization.yaml"), []byte(kustomizationContent)))
+
+		smContent := `
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: service-monitor
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/managed-by: ogx-operator
+      app.kubernetes.io/part-of: ogx
+  endpoints:
+  - targetPort: 9464
+    path: /v1/metrics
+    interval: 60s
+`
+		require.NoError(t, fsys.WriteFile(filepath.Join(manifestBasePath, "servicemonitor.yaml"), []byte(smContent)))
+
+		owner := &ogxiov1beta1.OGXServer{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-ogx",
+				Namespace: "test-sm-ns",
+			},
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "test-image:latest"},
+			},
+		}
+
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		require.NoError(t, err)
+		require.Equal(t, 1, (*resMap).Size())
+
+		res := (*resMap).Resources()[0]
+		require.Equal(t, "ServiceMonitor", res.GetKind())
+		require.Equal(t, "my-ogx-service-monitor", res.GetName())
+		assert.Equal(t, "test-sm-ns", res.GetNamespace())
+
+		yamlBytes, err := res.AsYAML()
+		require.NoError(t, err)
+		yamlStr := string(yamlBytes)
+		assert.Contains(t, yamlStr, "path: /v1/metrics")
+		assert.Contains(t, yamlStr, "targetPort: 9464")
+		assert.Contains(t, yamlStr, "interval: 60s")
+		assert.Contains(t, yamlStr, "app.kubernetes.io/managed-by: ogx-operator")
+		assert.Contains(t, yamlStr, "app.kubernetes.io/part-of: ogx")
+	})
+
 	t.Run("should return an error if a resource file is missing", func(t *testing.T) {
 		// given a kustomization.yaml that references a file that does not exist
 		fsys := filesys.MakeFsInMemory()
