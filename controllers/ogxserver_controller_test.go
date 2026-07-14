@@ -12,6 +12,7 @@ import (
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	controllers "github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -584,6 +585,94 @@ func TestNetworkPolicyConfiguration(t *testing.T) {
 
 			npKey := types.NamespacedName{Name: instance.Name + "-network-policy", Namespace: instance.Namespace}
 			AssertNetworkPolicyAbsent(t, k8sClient, npKey)
+		})
+	}
+}
+
+func TestMonitoringConfiguration(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	tests := []struct {
+		name             string
+		monitoring       *ogxiov1beta1.MonitoringSpec
+		expectMetricsEnv bool
+		expectedPort     string
+	}{
+		{
+			name:             "monitoring nil defaults to enabled",
+			monitoring:       nil,
+			expectMetricsEnv: true,
+			expectedPort:     "9464",
+		},
+		{
+			name:             "monitoring explicitly enabled",
+			monitoring:       &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(true)},
+			expectMetricsEnv: true,
+			expectedPort:     "9464",
+		},
+		{
+			name:             "monitoring disabled",
+			monitoring:       &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(false)},
+			expectMetricsEnv: false,
+		},
+		{
+			name: "custom metrics port",
+			monitoring: func() *ogxiov1beta1.MonitoringSpec {
+				port := int32(9090)
+				return &ogxiov1beta1.MonitoringSpec{MetricsPort: &port}
+			}(),
+			expectMetricsEnv: true,
+			expectedPort:     "9090",
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			namespace := createTestNamespace(t, "test-monitoring")
+			instance := NewOGXServerBuilder().
+				WithName(fmt.Sprintf("mon-%d", i)).
+				WithNamespace(namespace.Name).
+				WithDistribution("starter").
+				WithMonitoring(tt.monitoring).
+				Build()
+			require.NoError(t, k8sClient.Create(t.Context(), instance))
+			t.Cleanup(func() { _ = k8sClient.Delete(t.Context(), instance) })
+
+			ReconcileOGXServer(t, instance)
+
+			deployment := &appsv1.Deployment{}
+			waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
+
+			container := deployment.Spec.Template.Spec.Containers[0]
+			envMap := make(map[string]string)
+			for _, e := range container.Env {
+				envMap[e.Name] = e.Value
+			}
+
+			if tt.expectMetricsEnv {
+				assert.Equal(t, "1", envMap["OGX_METRICS_ENDPOINT_ENABLED"],
+					"metrics endpoint should be enabled")
+				assert.Equal(t, "0.0.0.0", envMap["OGX_METRICS_HOST"],
+					"metrics host should be 0.0.0.0")
+				assert.Equal(t, tt.expectedPort, envMap["OGX_METRICS_PORT"],
+					"metrics port should match expected")
+
+				hasMetricsPort := false
+				for _, p := range container.Ports {
+					if p.Name == "metrics" {
+						hasMetricsPort = true
+						break
+					}
+				}
+				assert.True(t, hasMetricsPort, "container should have metrics port")
+			} else {
+				_, hasMetricsEnabled := envMap["OGX_METRICS_ENDPOINT_ENABLED"]
+				assert.False(t, hasMetricsEnabled,
+					"metrics env vars should not be set when monitoring is disabled")
+
+				assert.Len(t, container.Ports, 1,
+					"only API port should exist when monitoring is disabled")
+			}
 		})
 	}
 }
