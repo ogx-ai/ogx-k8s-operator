@@ -193,7 +193,7 @@ spec:
   - name: telemetry.rules
     interval: 60s
     rules:
-    - record: ogx:api_info
+    - record: ogx:api_info:max
       labels:
         api: inference
       expr: clamp_max(ogx_requests_total{api="inference"}, 1)
