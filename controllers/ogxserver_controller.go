@@ -437,6 +437,14 @@ func (r *OGXServerReconciler) deleteHorizontalPodAutoscalerIfExists(ctx context.
 func (r *OGXServerReconciler) deleteMonitoringResourcesIfExcluded(ctx context.Context, instance *ogxiov1beta1.OGXServer, kindsToExclude []string) error {
 	logger := log.FromContext(ctx)
 
+	monitoringAvailable, err := deploy.MonitoringCRDsAvailable(ctx, r.Client)
+	if err != nil {
+		return fmt.Errorf("failed to check monitoring CRD availability: %w", err)
+	}
+	if !monitoringAvailable {
+		return nil
+	}
+
 	if slices.Contains(kindsToExclude, "PrometheusRule") {
 		if err := r.deletePrometheusRuleIfExists(ctx, instance); err != nil {
 			logger.Error(err, "Failed to delete PrometheusRule")
