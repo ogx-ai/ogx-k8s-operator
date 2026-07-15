@@ -27,6 +27,19 @@ func GetServiceName(instance *ogxiov1beta1.OGXServer) string {
 	return fmt.Sprintf("%s-service", instance.Name)
 }
 
+const defaultMetricsPort = int32(9464)
+
+func getEffectiveMetricsPort(instance *ogxiov1beta1.OGXServer) int32 {
+	monitoring := instance.Spec.Monitoring
+	if monitoring != nil && monitoring.Enabled != nil && !*monitoring.Enabled {
+		return 0
+	}
+	if monitoring != nil && monitoring.MetricsPort != nil {
+		return *monitoring.MetricsPort
+	}
+	return defaultMetricsPort
+}
+
 // GetEffectiveReplicas returns the desired replica count, defaulting to 1.
 func GetEffectiveReplicas(instance *ogxiov1beta1.OGXServer) int32 {
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Replicas != nil {
