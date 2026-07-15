@@ -237,14 +237,16 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: service-monitor
+  labels:
+    monitoring.opendatahub.io/scrape: "true"
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/managed-by: ogx-operator
       app.kubernetes.io/part-of: ogx
   endpoints:
-  - targetPort: 9464
-    path: /v1/metrics
+  - targetPort: metrics
+    path: /metrics
     interval: 60s
 `
 		require.NoError(t, fsys.WriteFile(filepath.Join(manifestBasePath, "servicemonitor.yaml"), []byte(smContent)))
@@ -271,8 +273,9 @@ spec:
 		yamlBytes, err := res.AsYAML()
 		require.NoError(t, err)
 		yamlStr := string(yamlBytes)
-		assert.Contains(t, yamlStr, "path: /v1/metrics")
-		assert.Contains(t, yamlStr, "targetPort: 9464")
+		assert.Contains(t, yamlStr, "path: /metrics")
+		assert.Contains(t, yamlStr, "targetPort: metrics")
+		assert.Contains(t, yamlStr, "monitoring.opendatahub.io/scrape: \"true\"")
 		assert.Contains(t, yamlStr, "interval: 60s")
 		assert.Contains(t, yamlStr, "app.kubernetes.io/managed-by: ogx-operator")
 		assert.Contains(t, yamlStr, "app.kubernetes.io/part-of: ogx")

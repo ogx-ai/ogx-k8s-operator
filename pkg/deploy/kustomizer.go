@@ -249,6 +249,10 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) 
 		return fmt.Errorf("failed to apply NetworkPolicy transformer: %w", err)
 	}
 
+	if err := applyServiceTransformer(resMap, ownerInstance); err != nil {
+		return fmt.Errorf("failed to apply Service transformer: %w", err)
+	}
+
 	if isAutoscalingEnabled(ownerInstance) {
 		if err := removeDeploymentReplicas(*resMap); err != nil {
 			return fmt.Errorf("failed to strip replicas for autoscaling: %w", err)
@@ -265,25 +269,25 @@ func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1
 		operatorNS = "ogx-k8s-operator-system"
 	}
 
-	var metricsPort int32
-	monitoring := ownerInstance.Spec.Monitoring
-	if monitoring == nil || monitoring.Enabled == nil || *monitoring.Enabled {
-		if monitoring != nil && monitoring.MetricsPort != nil {
-			metricsPort = *monitoring.MetricsPort
-		} else {
-			metricsPort = 9464
-		}
-	}
-
 	npTransformer := plugins.CreateNetworkPolicyTransformer(plugins.NetworkPolicyTransformerConfig{
 		InstanceName:      ownerInstance.GetName(),
 		ServicePort:       GetServicePort(ownerInstance),
 		OperatorNamespace: operatorNS,
 		NetworkSpec:       ownerInstance.Spec.Network,
-		MetricsPort:       metricsPort,
+		MetricsPort:       getEffectiveMetricsPort(ownerInstance),
 	})
 
 	return npTransformer.Transform(*resMap)
+}
+
+// applyServiceTransformer conditionally adds a metrics port to the Service.
+func applyServiceTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
+	svcTransformer := plugins.CreateServiceTransformer(plugins.ServiceTransformerConfig{
+		MetricsPort: getEffectiveMetricsPort(ownerInstance),
+		ServicePort: GetServicePort(ownerInstance),
+	})
+
+	return svcTransformer.Transform(*resMap)
 }
 
 // removeDeploymentReplicas deletes spec.replicas from Deployment manifests so that

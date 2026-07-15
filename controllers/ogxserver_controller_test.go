@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -593,27 +594,31 @@ func TestMonitoringConfiguration(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	tests := []struct {
-		name             string
-		monitoring       *ogxiov1beta1.MonitoringSpec
-		expectMetricsEnv bool
-		expectedPort     string
+		name              string
+		monitoring        *ogxiov1beta1.MonitoringSpec
+		expectMetricsEnv  bool
+		expectedPort      string
+		expectServicePort bool
 	}{
 		{
-			name:             "monitoring nil defaults to enabled",
-			monitoring:       nil,
-			expectMetricsEnv: true,
-			expectedPort:     "9464",
+			name:              "monitoring nil defaults to enabled",
+			monitoring:        nil,
+			expectMetricsEnv:  true,
+			expectedPort:      "9464",
+			expectServicePort: true,
 		},
 		{
-			name:             "monitoring explicitly enabled",
-			monitoring:       &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(true)},
-			expectMetricsEnv: true,
-			expectedPort:     "9464",
+			name:              "monitoring explicitly enabled",
+			monitoring:        &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(true)},
+			expectMetricsEnv:  true,
+			expectedPort:      "9464",
+			expectServicePort: true,
 		},
 		{
-			name:             "monitoring disabled",
-			monitoring:       &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(false)},
-			expectMetricsEnv: false,
+			name:              "monitoring disabled",
+			monitoring:        &ogxiov1beta1.MonitoringSpec{Enabled: boolPtr(false)},
+			expectMetricsEnv:  false,
+			expectServicePort: false,
 		},
 		{
 			name: "custom metrics port",
@@ -621,8 +626,9 @@ func TestMonitoringConfiguration(t *testing.T) {
 				port := int32(9090)
 				return &ogxiov1beta1.MonitoringSpec{MetricsPort: &port}
 			}(),
-			expectMetricsEnv: true,
-			expectedPort:     "9090",
+			expectMetricsEnv:  true,
+			expectedPort:      "9090",
+			expectServicePort: true,
 		},
 	}
 
@@ -672,6 +678,27 @@ func TestMonitoringConfiguration(t *testing.T) {
 
 				assert.Len(t, container.Ports, 1,
 					"only API port should exist when monitoring is disabled")
+			}
+
+			service := &corev1.Service{}
+			waitForResource(t, k8sClient, instance.Namespace, instance.Name+"-service", service)
+
+			if tt.expectServicePort {
+				var metricsServicePort *corev1.ServicePort
+				for idx := range service.Spec.Ports {
+					if service.Spec.Ports[idx].Name == "metrics" {
+						metricsServicePort = &service.Spec.Ports[idx]
+						break
+					}
+				}
+				require.NotNil(t, metricsServicePort,
+					"Service should have a metrics port when monitoring is enabled")
+				expectedMetricsPort, _ := strconv.Atoi(tt.expectedPort)
+				assert.Equal(t, int32(expectedMetricsPort), metricsServicePort.Port,
+					"Service metrics port should match expected")
+			} else {
+				assert.Len(t, service.Spec.Ports, 1,
+					"Service should have only the API port when monitoring is disabled")
 			}
 		})
 	}
