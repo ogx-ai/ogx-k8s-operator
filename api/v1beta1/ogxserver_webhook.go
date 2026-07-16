@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -39,13 +38,12 @@ type OGXServerValidator struct {
 	KnownDistributionNames []string
 }
 
-var _ admission.CustomValidator = &OGXServerValidator{}
+var _ admission.Validator[*OGXServer] = &OGXServerValidator{}
 
 // SetupWebhookWithManager registers the validating webhook.
 // knownDistNames should be the keys from the operator's distribution registry.
 func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
-	return ctrl.NewWebhookManagedBy(mgr).
-		For(&OGXServer{}).
+	return ctrl.NewWebhookManagedBy(mgr, &OGXServer{}).
 		WithValidator(&OGXServerValidator{
 			KnownDistributionNames: knownDistNames,
 		}).
@@ -55,28 +53,20 @@ func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
 //nolint:lll // kubebuilder marker cannot be split across lines.
 //+kubebuilder:webhook:path=/validate-ogx-io-v1beta1-ogxserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create;update,versions=v1beta1,name=vogxserver.kb.io,admissionReviewVersions=v1
 
-// ValidateCreate implements admission.CustomValidator.
-func (v *OGXServerValidator) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	r, ok := obj.(*OGXServer)
-	if !ok {
-		return nil, fmt.Errorf("failed to validate: expected *OGXServer, got %T", obj)
-	}
+// ValidateCreate implements admission.Validator.
+func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (admission.Warnings, error) {
 	ogxserverlog.Info("validating create", "name", r.Name)
 	return v.validate(r)
 }
 
-// ValidateUpdate implements admission.CustomValidator.
-func (v *OGXServerValidator) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	r, ok := newObj.(*OGXServer)
-	if !ok {
-		return nil, fmt.Errorf("failed to validate: expected *OGXServer, got %T", newObj)
-	}
+// ValidateUpdate implements admission.Validator.
+func (v *OGXServerValidator) ValidateUpdate(_ context.Context, _ *OGXServer, r *OGXServer) (admission.Warnings, error) {
 	ogxserverlog.Info("validating update", "name", r.Name)
 	return v.validate(r)
 }
 
-// ValidateDelete implements admission.CustomValidator.
-func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+// ValidateDelete implements admission.Validator.
+func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ *OGXServer) (admission.Warnings, error) {
 	return nil, nil
 }
 
