@@ -18,6 +18,7 @@ This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI S
     - [Deploying the OGX Server](#deploying-the-ogx-server)
     - [Runtime Config via CR](#runtime-config-via-cr)
 - [Enabling Network Policies](#enabling-network-policies)
+- [Monitoring](#monitoring)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
     - [Building the Operator](#building-the-operator)
@@ -217,6 +218,44 @@ spec:
 | `network.externalAccess.hostname` | Hostname used for external access (for example, Ingress host) |
 | `network.policy.enabled` | When `true`, the operator creates a `NetworkPolicy` for the OGXServer workload |
 | `network.policy.ingress` | Ingress rules for the policy (for example, allowed sources and ports) |
+
+## Monitoring
+
+The operator provides built-in Prometheus monitoring for OGXServer instances. Monitoring is **enabled by default** and requires no configuration when the prometheus-operator CRDs are installed on the cluster.
+
+When enabled, the operator creates:
+- A **ServiceMonitor** with label `monitoring.opendatahub.io/scrape: "true"` for ODH/RHOAI Prometheus scraping
+- A **PrometheusRule** with telemetry recording rules for Red Hat Insights
+
+Configure monitoring via `spec.monitoring`:
+
+```yaml
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: my-ogxserver
+spec:
+  distribution:
+    name: starter
+  monitoring:
+    enabled: true        # default: true
+    metricsPort: 9090    # default: 9464
+```
+
+| Field | Description |
+|-------|-------------|
+| `monitoring.enabled` | When `true` (default), the operator creates a ServiceMonitor and PrometheusRule |
+| `monitoring.metricsPort` | Port for the `/metrics` endpoint (default: 9464) |
+
+If the prometheus-operator CRDs are not installed on the cluster, monitoring resources are silently skipped.
+
+Ready-to-apply sample:
+
+```bash
+kubectl apply -f config/samples/example-with-monitoring.yaml
+```
+
+See [Monitoring Integration Guide](docs/additional/monitoring-integration.md) for detailed architecture, pipelines, and troubleshooting.
 
 ## Image Mapping Overrides
 

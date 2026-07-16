@@ -7,4 +7,5 @@ resources:
 - example-with-configmap.yaml
 - example-with-generated-config.yaml
 - example-with-ca-bundle.yaml
+- example-with-monitoring.yaml
 - example-with-network-config.yaml
