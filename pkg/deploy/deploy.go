@@ -41,10 +41,10 @@ func ApplyDeployment(ctx context.Context, cli client.Client, scheme *runtime.Sch
 		// Preserve the existing selector to avoid immutable field error during upgrades
 		deployment.Spec.Selector = found.Spec.Selector
 
-		// Use server-side apply to merge changes properly
-		// Ensure the deployment has proper TypeMeta for server-side apply
-		deployment.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
-		return cli.Patch(ctx, deployment, client.Apply, client.ForceOwnership, client.FieldOwner("ogx-operator"))
+		found.Spec = deployment.Spec
+		found.Labels = deployment.Labels
+		found.Annotations = deployment.Annotations
+		return cli.Update(ctx, found)
 	}
 	return nil
 }
