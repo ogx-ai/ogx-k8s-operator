@@ -62,7 +62,7 @@ get_provider_config() {
     local provider="${1}"
     case "${provider}" in
         "ollama")
-            echo "IMAGE=ollama/ollama:latest"
+            echo "IMAGE=docker.io/ollama/ollama:latest"
             echo "INFERENCE_SERVER=ollama"
             echo "COMMAND=[\"/bin/sh\", \"-c\"]"
             echo "DEFAULT_MODEL=llama3.2:1b"
@@ -71,7 +71,7 @@ get_provider_config() {
             echo "DEFAULT_ENV_VARS=OLLAMA_KEEP_ALIVE=60m"
             ;;
         "vllm")
-            echo "IMAGE=vllm/vllm-openai:latest"
+            echo "IMAGE=docker.io/vllm/vllm-openai:latest"
             echo "INFERENCE_SERVER=vllm"
             echo "COMMAND=[\"/bin/sh\", \"-c\"]"
             echo "DEFAULT_MODEL=meta-llama/Llama-3.2-1B"
