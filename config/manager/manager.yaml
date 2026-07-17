@@ -55,7 +55,7 @@ spec:
         - name: GOMEMLIMIT
           value: "800MiB"
         - name: OPERATOR_VERSION
-          value: "latest"
+          value: "0.12.0"
         - name: RELATED_IMAGE_STARTER
           value: ""
         - name: RELATED_IMAGE_REMOTE_VLLM
@@ -71,7 +71,7 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
-              - "ALL"
+            - "ALL"
         livenessProbe:
           httpGet:
             path: /healthz

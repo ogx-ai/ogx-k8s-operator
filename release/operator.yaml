@@ -7301,7 +7301,7 @@ spec:
         - name: GOMEMLIMIT
           value: 800MiB
         - name: OPERATOR_VERSION
-          value: latest
+          value: 0.12.0
         - name: RELATED_IMAGE_STARTER
           value: ""
         - name: RELATED_IMAGE_REMOTE_VLLM
@@ -7310,7 +7310,7 @@ spec:
           value: ""
         - name: RELATED_IMAGE_POSTGRES_DEMO
           value: ""
-        image: quay.io/ogx-ai/ogx-k8s-operator:latest
+        image: quay.io/ogx-ai/ogx-k8s-operator:v0.12.0
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
