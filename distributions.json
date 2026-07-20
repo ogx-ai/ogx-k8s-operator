@@ -1,6 +1,6 @@
 {
-  "starter": "docker.io/ogxai/distribution-starter:latest",
-  "remote-vllm": "docker.io/ogxai/distribution-remote-vllm:latest",
-  "meta-reference-gpu": "docker.io/ogxai/distribution-meta-reference-gpu:latest",
-  "postgres-demo": "docker.io/ogxai/distribution-postgres-demo:latest"
+  "starter": "docker.io/ogxai/distribution-starter:1.2.1",
+  "remote-vllm": "docker.io/ogxai/distribution-remote-vllm:1.2.1",
+  "meta-reference-gpu": "docker.io/ogxai/distribution-meta-reference-gpu:1.2.1",
+  "postgres-demo": "docker.io/ogxai/distribution-postgres-demo:1.2.1"
 }

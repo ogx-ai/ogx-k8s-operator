@@ -16,4 +16,4 @@ configMapGenerator:
 images:
 - name: controller
   newName: quay.io/ogx-ai/ogx-k8s-operator
-  newTag: latest
+  newTag: v0.13.0
