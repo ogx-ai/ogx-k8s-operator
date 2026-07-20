@@ -4,7 +4,7 @@ go 1.25.8
 
 require (
 	github.com/go-logr/logr v1.4.3
-	github.com/go-openapi/jsonpointer v0.24.0
+	github.com/go-openapi/jsonpointer v1.0.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.7
 	github.com/openshift/api v0.0.0-20260610192510-1b2a074e0bd6
