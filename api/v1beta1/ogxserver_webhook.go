@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -94,6 +95,8 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 	}
 
 	allErrs = append(allErrs, validateAdoptionAnnotations(r)...)
+	allErrs = append(allErrs, validateVolumeTypes(r)...)
+	allErrs = append(allErrs, validateExternalAccess(r)...)
 
 	return allErrs
 }
@@ -199,4 +202,56 @@ func sortedMapKeys(m map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func isAllowedVolumeType(vol corev1.Volume) bool {
+	vs := vol.VolumeSource
+	return vs.ConfigMap != nil ||
+		vs.Secret != nil ||
+		vs.EmptyDir != nil ||
+		vs.PersistentVolumeClaim != nil ||
+		vs.Projected != nil ||
+		vs.DownwardAPI != nil
+}
+
+func validateVolumeTypes(r *OGXServer) field.ErrorList {
+	var errs field.ErrorList
+	if r.Spec.Workload == nil || r.Spec.Workload.Overrides == nil {
+		return errs
+	}
+	volumesPath := field.NewPath("spec", "workload", "overrides", "volumes")
+	for i, vol := range r.Spec.Workload.Overrides.Volumes {
+		if !isAllowedVolumeType(vol) {
+			errs = append(errs, field.Forbidden(
+				volumesPath.Index(i),
+				fmt.Sprintf("volume %q uses a disallowed volume source type; "+
+					"allowed types: configMap, secret, emptyDir, persistentVolumeClaim, projected, downwardAPI",
+					vol.Name),
+			))
+		}
+	}
+	return errs
+}
+
+func validateExternalAccess(r *OGXServer) field.ErrorList {
+	var errs field.ErrorList
+	if r.Spec.Network == nil || r.Spec.Network.ExternalAccess == nil || !r.Spec.Network.ExternalAccess.Enabled {
+		return errs
+	}
+	ea := r.Spec.Network.ExternalAccess
+	eaPath := field.NewPath("spec", "network", "externalAccess")
+
+	if ea.Hostname == "" {
+		errs = append(errs, field.Required(
+			eaPath.Child("hostname"),
+			"hostname is required when external access is enabled for TLS SNI routing",
+		))
+	}
+	if ea.TLS == nil || ea.TLS.SecretName == "" {
+		errs = append(errs, field.Required(
+			eaPath.Child("tls", "secretName"),
+			"TLS secretName is required when external access is enabled to prevent plain-HTTP exposure",
+		))
+	}
+	return errs
 }

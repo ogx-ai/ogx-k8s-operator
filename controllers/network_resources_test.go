@@ -47,7 +47,11 @@ func TestBuildIngress(t *testing.T) {
 		Spec: ogxiov1beta1.OGXServerSpec{
 			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
 			Network: &ogxiov1beta1.NetworkSpec{
-				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{Enabled: true},
+				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{
+					Enabled:  true,
+					Hostname: "ogx.example.com",
+					TLS:      &ogxiov1beta1.TLSSpec{SecretName: "ogx-tls"},
+				},
 			},
 		},
 	}
@@ -60,11 +64,16 @@ func TestBuildIngress(t *testing.T) {
 	assert.Equal(t, "test-ns", ingress.Namespace)
 
 	require.Len(t, ingress.Spec.Rules, 1)
+	assert.Equal(t, "ogx.example.com", ingress.Spec.Rules[0].Host)
 	require.NotNil(t, ingress.Spec.Rules[0].HTTP)
 	require.Len(t, ingress.Spec.Rules[0].HTTP.Paths, 1)
 
 	assert.Equal(t, "test-ogx-service", ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Name)
 	assert.Equal(t, int32(8321), ingress.Spec.Rules[0].HTTP.Paths[0].Backend.Service.Port.Number)
+
+	require.Len(t, ingress.Spec.TLS, 1)
+	assert.Equal(t, "ogx-tls", ingress.Spec.TLS[0].SecretName)
+	assert.Equal(t, []string{"ogx.example.com"}, ingress.Spec.TLS[0].Hosts)
 }
 
 func TestBuildIngress_CustomPort(t *testing.T) {
@@ -86,8 +95,12 @@ func TestBuildIngress_CustomPort(t *testing.T) {
 		Spec: ogxiov1beta1.OGXServerSpec{
 			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
 			Network: &ogxiov1beta1.NetworkSpec{
-				Port:           9000,
-				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{Enabled: true},
+				Port: 9000,
+				ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{
+					Enabled:  true,
+					Hostname: "ogx.example.com",
+					TLS:      &ogxiov1beta1.TLSSpec{SecretName: "ogx-tls"},
+				},
 			},
 		},
 	}
