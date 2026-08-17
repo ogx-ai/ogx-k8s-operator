@@ -17,9 +17,12 @@ limitations under the License.
 package v1beta1
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -236,4 +239,39 @@ func TestValidateAdoptionAnnotation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkloadSpecResourceClaimsRoundTrip(t *testing.T) {
+	claimName := "gpu-claim"
+	templateName := "gpu-template"
+	spec := WorkloadSpec{
+		ResourceClaims: []corev1.PodResourceClaim{
+			{Name: "gpu", ResourceClaimName: &claimName},
+			{Name: "gpu-from-template", ResourceClaimTemplateName: &templateName},
+		},
+		Resources: &corev1.ResourceRequirements{
+			Claims: []corev1.ResourceClaim{
+				{Name: "gpu"},
+				{Name: "gpu-from-template"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(spec)
+	require.NoError(t, err)
+
+	var got WorkloadSpec
+	require.NoError(t, json.Unmarshal(data, &got))
+	require.Len(t, got.ResourceClaims, 2)
+	require.Equal(t, "gpu", got.ResourceClaims[0].Name)
+	require.NotNil(t, got.ResourceClaims[0].ResourceClaimName)
+	require.Equal(t, claimName, *got.ResourceClaims[0].ResourceClaimName)
+	require.Equal(t, "gpu-from-template", got.ResourceClaims[1].Name)
+	require.NotNil(t, got.ResourceClaims[1].ResourceClaimTemplateName)
+	require.Equal(t, templateName, *got.ResourceClaims[1].ResourceClaimTemplateName)
+	require.NotNil(t, got.Resources)
+	require.Equal(t, []corev1.ResourceClaim{
+		{Name: "gpu"},
+		{Name: "gpu-from-template"},
+	}, got.Resources.Claims)
 }

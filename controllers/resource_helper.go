@@ -157,7 +157,7 @@ func buildContainerSpec(
 func resolveContainerResources(instance *ogxiov1beta1.OGXServer, workers int32, workersSet bool) corev1.ResourceRequirements {
 	var resources corev1.ResourceRequirements
 	if instance.Spec.Workload != nil && instance.Spec.Workload.Resources != nil {
-		resources = *instance.Spec.Workload.Resources
+		resources = *instance.Spec.Workload.Resources.DeepCopy()
 	}
 	ensureRequests(&resources, workers)
 	if workersSet {
@@ -466,8 +466,24 @@ func configurePodStorage(
 	configurePodOverrides(instance, &podSpec)
 
 	configurePodScheduling(instance, &podSpec)
+	configureResourceClaims(instance, &podSpec)
 
 	return podSpec
+}
+
+func configureResourceClaims(instance *ogxiov1beta1.OGXServer, podSpec *corev1.PodSpec) {
+	if instance.Spec.Workload == nil || len(instance.Spec.Workload.ResourceClaims) == 0 {
+		return
+	}
+	podSpec.ResourceClaims = deepCopyPodResourceClaims(instance.Spec.Workload.ResourceClaims)
+}
+
+func deepCopyPodResourceClaims(claims []corev1.PodResourceClaim) []corev1.PodResourceClaim {
+	copied := make([]corev1.PodResourceClaim, len(claims))
+	for i := range claims {
+		copied[i] = *claims[i].DeepCopy()
+	}
+	return copied
 }
 
 // configureStorage handles storage volume configuration.

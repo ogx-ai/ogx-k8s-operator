@@ -418,9 +418,18 @@ type WorkloadSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	Workers *int32 `json:"workers,omitempty"`
-	// Resources defines CPU/memory requests and limits.
+	// Resources defines CPU/memory requests and limits, and optional DRA
+	// resource claim references consumed by the OGX container.
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+	// ResourceClaims defines which ResourceClaims must be allocated and reserved
+	// before the Pod is allowed to start. Containers consume allocated resources
+	// by name via spec.workload.resources.claims.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
+	ResourceClaims []corev1.PodResourceClaim `json:"resourceClaims,omitempty"`
 	// Autoscaling configures HPA for the server pods.
 	// +optional
 	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`

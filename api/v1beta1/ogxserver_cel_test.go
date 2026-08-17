@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -822,6 +823,61 @@ func TestCEL_ExternalAccessConfig(t *testing.T) {
 					ExternalAccess: &ExternalAccessConfig{
 						Enabled:  true,
 						Hostname: "example.com",
+					},
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			tt.mutate(obj)
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected success, got: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+			} else {
+				requireCELError(t, err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestCEL_ResourceClaims(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-dra")
+	claimName := "gpu-claim"
+	templateName := "gpu-template"
+
+	tests := []struct {
+		name      string
+		mutate    func(*OGXServer)
+		wantError string
+	}{
+		{
+			name: "resourceClaims with resourceClaimName is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Workload = &WorkloadSpec{
+					ResourceClaims: []corev1.PodResourceClaim{
+						{Name: "gpu", ResourceClaimName: &claimName},
+					},
+					Resources: &corev1.ResourceRequirements{
+						Claims: []corev1.ResourceClaim{{Name: "gpu"}},
+					},
+				}
+			},
+		},
+		{
+			name: "resourceClaims with resourceClaimTemplateName is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Workload = &WorkloadSpec{
+					ResourceClaims: []corev1.PodResourceClaim{
+						{Name: "gpu", ResourceClaimTemplateName: &templateName},
+					},
+					Resources: &corev1.ResourceRequirements{
+						Claims: []corev1.ResourceClaim{{Name: "gpu"}},
 					},
 				}
 			},

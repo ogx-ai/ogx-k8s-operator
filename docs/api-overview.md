@@ -1552,7 +1552,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `replicas` _integer_ | Replicas is the desired Pod replica count. | 1 | Minimum: 0 <br /> |
 | `workers` _integer_ | Workers configures the number of uvicorn worker processes. |  | Minimum: 1 <br /> |
-| `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ | Resources defines CPU/memory requests and limits. |  |  |
+| `resources` _[ResourceRequirements](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#resourcerequirements-v1-core)_ | Resources defines CPU/memory requests and limits, and optional DRA<br />resource claim references consumed by the OGX container. |  |  |
+| `resourceClaims` _[PodResourceClaim](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#podresourceclaim-v1-core) array_ | ResourceClaims defines which ResourceClaims must be allocated and reserved<br />before the Pod is allowed to start. Containers consume allocated resources<br />by name via spec.workload.resources.claims. |  | MinItems: 1 <br /> |
 | `autoscaling` _[AutoscalingSpec](#autoscalingspec)_ | Autoscaling configures HPA for the server pods. |  |  |
 | `storage` _[PVCStorageSpec](#pvcstoragespec)_ | Storage defines PVC configuration. |  |  |
 | `podDisruptionBudget` _[PodDisruptionBudgetSpec](#poddisruptionbudgetspec)_ | PodDisruptionBudget controls voluntary disruption tolerance. |  |  |

@@ -458,3 +458,94 @@ func TestBuildHPASpec(t *testing.T) {
 	assert.Equal(t, int32(5), spec.MaxReplicas)
 	require.Len(t, spec.Metrics, 2)
 }
+
+func TestConfigureResourceClaims(t *testing.T) {
+	claimName := "gpu-claim"
+	templateName := "gpu-template"
+
+	t.Run("copies pod resource claims onto the pod spec", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+				Workload: &ogxiov1beta1.WorkloadSpec{
+					ResourceClaims: []corev1.PodResourceClaim{
+						{Name: "gpu", ResourceClaimName: &claimName},
+						{Name: "gpu-from-template", ResourceClaimTemplateName: &templateName},
+					},
+				},
+			},
+		}
+		podSpec := &corev1.PodSpec{}
+		configureResourceClaims(instance, podSpec)
+
+		require.Len(t, podSpec.ResourceClaims, 2)
+		assert.Equal(t, "gpu", podSpec.ResourceClaims[0].Name)
+		require.NotNil(t, podSpec.ResourceClaims[0].ResourceClaimName)
+		assert.Equal(t, claimName, *podSpec.ResourceClaims[0].ResourceClaimName)
+		assert.Equal(t, "gpu-from-template", podSpec.ResourceClaims[1].Name)
+		require.NotNil(t, podSpec.ResourceClaims[1].ResourceClaimTemplateName)
+		assert.Equal(t, templateName, *podSpec.ResourceClaims[1].ResourceClaimTemplateName)
+	})
+
+	t.Run("does not set claims when workload is nil", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			},
+		}
+		podSpec := &corev1.PodSpec{}
+		configureResourceClaims(instance, podSpec)
+		assert.Nil(t, podSpec.ResourceClaims)
+	})
+
+	t.Run("does not set claims when resourceClaims is empty", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+				Workload:     &ogxiov1beta1.WorkloadSpec{},
+			},
+		}
+		podSpec := &corev1.PodSpec{}
+		configureResourceClaims(instance, podSpec)
+		assert.Nil(t, podSpec.ResourceClaims)
+	})
+
+	t.Run("deep-copies claims so later mutations do not affect the pod spec", func(t *testing.T) {
+		instance := &ogxiov1beta1.OGXServer{
+			Spec: ogxiov1beta1.OGXServerSpec{
+				Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+				Workload: &ogxiov1beta1.WorkloadSpec{
+					ResourceClaims: []corev1.PodResourceClaim{
+						{Name: "gpu", ResourceClaimName: &claimName},
+					},
+				},
+			},
+		}
+		podSpec := &corev1.PodSpec{}
+		configureResourceClaims(instance, podSpec)
+
+		instance.Spec.Workload.ResourceClaims[0].Name = "mutated"
+		mutatedClaim := "other-claim"
+		instance.Spec.Workload.ResourceClaims[0].ResourceClaimName = &mutatedClaim
+
+		assert.Equal(t, "gpu", podSpec.ResourceClaims[0].Name)
+		require.NotNil(t, podSpec.ResourceClaims[0].ResourceClaimName)
+		assert.Equal(t, claimName, *podSpec.ResourceClaims[0].ResourceClaimName)
+	})
+}
+
+func TestBuildContainerSpecPreservesResourceClaims(t *testing.T) {
+	instance := &ogxiov1beta1.OGXServer{
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Image: "x:latest"},
+			Workload: &ogxiov1beta1.WorkloadSpec{
+				Resources: &corev1.ResourceRequirements{
+					Claims: []corev1.ResourceClaim{{Name: "gpu"}},
+				},
+			},
+		},
+	}
+	c := buildContainerSpec(t.Context(), nil, instance, "test-image:latest", nil, nil)
+	require.Len(t, c.Resources.Claims, 1)
+	assert.Equal(t, "gpu", c.Resources.Claims[0].Name)
+}
