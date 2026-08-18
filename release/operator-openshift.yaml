@@ -7277,7 +7277,7 @@ spec:
           value: 800MiB
         - name: OPERATOR_VERSION
           value: 0.11.0
-        image: quay.io/ogx-ai/ogx-k8s-operator:v0.11.0
+        image: quay.io/ogx-ai/ogx-k8s-operator:latest
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
