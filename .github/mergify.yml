@@ -29,14 +29,11 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-        commit_message_template: |
-          {{ title }} (#{{ number }})
-
-          {{ body }}
-
-          {% for user in approved_reviews_by %}
-          Approved-by: {{ user }}
-          {% endfor %}
+        commit_message_format:
+          title: pr-title
+          body: pr-body
+          trailers:
+            - approved-by
 
   - name: auto-merge
     description: >
@@ -55,14 +52,11 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-        commit_message_template: |
-          {{ title }} (#{{ number }})
-
-          {{ body }}
-
-          {% for user in approved_reviews_by %}
-          Approved-by: {{ user }}
-          {% endfor %}
+        commit_message_format:
+          title: pr-title
+          body: pr-body
+          trailers:
+            - approved-by
 
   - name: ping author on conflicts and add 'needs-rebase' label
     conditions:
