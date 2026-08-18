@@ -281,15 +281,22 @@ type NetworkPolicySpec struct {
 
 // ExternalAccessConfig controls external service exposure.
 // +kubebuilder:validation:XValidation:rule="!has(self.hostname) || self.hostname.size() > 0",message="hostname must not be empty if specified"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.tls)",message="tls is required when external access is enabled"
+// +kubebuilder:validation:XValidation:rule="!self.enabled || has(self.hostname)",message="hostname is required when external access is enabled"
 type ExternalAccessConfig struct {
 	// Enabled controls whether external access is created.
 	// +optional
 	// +kubebuilder:default:=false
 	Enabled bool `json:"enabled,omitempty"`
-	// Hostname sets a custom hostname for the external endpoint.
-	// When omitted, an auto-generated hostname is used.
+	// Hostname sets the hostname for the external endpoint.
+	// Required when external access is enabled for TLS SNI routing.
 	// +optional
 	Hostname string `json:"hostname,omitempty"`
+	// TLS configures TLS for the external Ingress. Required when external access
+	// is enabled. The referenced Secret must contain a valid TLS certificate for
+	// the specified hostname.
+	// +optional
+	TLS *TLSSpec `json:"tls,omitempty"`
 }
 
 // NetworkSpec defines network access controls for the OGXServer.

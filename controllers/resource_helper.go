@@ -33,16 +33,14 @@ import (
 	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Constants for validation limits.
 const (
-	// FSGroup is the filesystem group ID for the pod.
-	// This is the default group ID for the ogx server.
-	FSGroup = int64(1001)
 	// instanceLabelKey is the label we apply to all resources for per-instance targeting.
 	instanceLabelKey = "app.kubernetes.io/instance"
 	// defaultMetricsPort is the default port for the OGX metrics endpoint.
 	defaultMetricsPort = int32(9464)
 )
+
+func boolPtr(v bool) *bool { return &v }
 
 var (
 	// defaultHPACPUUtilization defines the fallback HPA CPU target percentage.
@@ -145,6 +143,12 @@ func buildContainerSpec(
 		Resources:    resolveContainerResources(instance, workers, workersSet),
 		Ports:        ports,
 		StartupProbe: getStartupProbe(instance),
+		SecurityContext: &corev1.SecurityContext{
+			RunAsNonRoot:             boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
 	}
 	configureContainerEnvironment(ctx, r, instance, &container, runtimeConfig, secretEnvVars)
 	configureContainerMounts(ctx, r, instance, runtimeConfig, &container)
@@ -445,11 +449,11 @@ func configurePodStorage(
 	container corev1.Container,
 	effectivePVCName string,
 ) corev1.PodSpec {
-	fsGroup := FSGroup
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
 		SecurityContext: &corev1.PodSecurityContext{
-			FSGroup: &fsGroup,
+			RunAsNonRoot:   boolPtr(true),
+			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 

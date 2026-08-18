@@ -43,6 +43,7 @@ func (r *OGXServerReconciler) buildIngress(
 ) (*networkingv1.Ingress, error) {
 	servicePort := deploy.GetServicePort(instance)
 	serviceName := deploy.GetServiceName(instance)
+	ea := instance.Spec.Network.ExternalAccess
 
 	pathType := networkingv1.PathTypePrefix
 	ingress := &networkingv1.Ingress{
@@ -57,6 +58,7 @@ func (r *OGXServerReconciler) buildIngress(
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{
 				{
+					Host: ea.Hostname,
 					IngressRuleValue: networkingv1.IngressRuleValue{
 						HTTP: &networkingv1.HTTPIngressRuleValue{
 							Paths: []networkingv1.HTTPIngressPath{
@@ -78,6 +80,15 @@ func (r *OGXServerReconciler) buildIngress(
 				},
 			},
 		},
+	}
+
+	if ea.TLS != nil && ea.TLS.SecretName != "" {
+		ingress.Spec.TLS = []networkingv1.IngressTLS{
+			{
+				Hosts:      []string{ea.Hostname},
+				SecretName: ea.TLS.SecretName,
+			},
+		}
 	}
 
 	if err := ctrl.SetControllerReference(instance, ingress, r.Scheme); err != nil {
@@ -214,10 +225,10 @@ func (r *OGXServerReconciler) getIngressURL(
 	return &empty
 }
 
-// buildURLString constructs an HTTP URL from a host and returns a pointer to it.
+// buildURLString constructs an HTTPS URL from a host and returns a pointer to it.
 func buildURLString(host string) *string {
 	u := &url.URL{
-		Scheme: "http",
+		Scheme: "https",
 		Host:   host,
 	}
 	s := u.String()

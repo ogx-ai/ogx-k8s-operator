@@ -808,15 +808,27 @@ func TestCEL_ExternalAccessConfig(t *testing.T) {
 		wantError string
 	}{
 		{
-			name: "hostname absent is valid",
+			name: "disabled without TLS is valid",
 			mutate: func(o *OGXServer) {
 				o.Spec.Network = &NetworkSpec{
-					ExternalAccess: &ExternalAccessConfig{Enabled: true},
+					ExternalAccess: &ExternalAccessConfig{Enabled: false},
 				}
 			},
 		},
 		{
-			name: "hostname set is valid",
+			name: "enabled with hostname and TLS is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.Network = &NetworkSpec{
+					ExternalAccess: &ExternalAccessConfig{
+						Enabled:  true,
+						Hostname: "example.com",
+						TLS:      &TLSSpec{SecretName: "my-tls"},
+					},
+				}
+			},
+		},
+		{
+			name: "enabled without TLS is rejected",
 			mutate: func(o *OGXServer) {
 				o.Spec.Network = &NetworkSpec{
 					ExternalAccess: &ExternalAccessConfig{
@@ -825,6 +837,19 @@ func TestCEL_ExternalAccessConfig(t *testing.T) {
 					},
 				}
 			},
+			wantError: "tls is required when external access is enabled",
+		},
+		{
+			name: "enabled without hostname is rejected",
+			mutate: func(o *OGXServer) {
+				o.Spec.Network = &NetworkSpec{
+					ExternalAccess: &ExternalAccessConfig{
+						Enabled: true,
+						TLS:     &TLSSpec{SecretName: "my-tls"},
+					},
+				}
+			},
+			wantError: "hostname is required when external access is enabled",
 		},
 	}
 
