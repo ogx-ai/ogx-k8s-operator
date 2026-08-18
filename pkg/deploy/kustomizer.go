@@ -792,6 +792,10 @@ func deploymentNeedsFullReplacement(ctx context.Context, desired, existing *unst
 	if hasStaleUserConfigVolume(&desiredDep, &existingDep) {
 		return "stale user-config volume detected"
 	}
+	if desiredDep.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType &&
+		existingDep.Spec.Strategy.RollingUpdate != nil {
+		return "incompatible rollingUpdate strategy detected"
+	}
 	return ""
 }
 

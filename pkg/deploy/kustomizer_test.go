@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -930,6 +931,56 @@ func TestHasStaleUserConfigVolume(t *testing.T) {
 	})
 }
 
+func TestDeploymentNeedsFullReplacement_RecreateStrategy(t *testing.T) {
+	ctx := context.Background()
+	rollingUpdate := &appsv1.RollingUpdateDeployment{
+		MaxUnavailable: ptr(intstr.FromString("25%")),
+		MaxSurge:       ptr(intstr.FromString("25%")),
+	}
+
+	toUnstructured := func(t *testing.T, strategy appsv1.DeploymentStrategy) *unstructured.Unstructured {
+		t.Helper()
+		dep := &appsv1.Deployment{Spec: appsv1.DeploymentSpec{Strategy: strategy}}
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(dep)
+		require.NoError(t, err)
+		return &unstructured.Unstructured{Object: obj}
+	}
+
+	t.Run("replaces when desired is Recreate and existing has rollingUpdate", func(t *testing.T) {
+		desired := toUnstructured(t, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+		existing := toUnstructured(t, appsv1.DeploymentStrategy{
+			Type:          appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: rollingUpdate,
+		})
+		require.Equal(t, "incompatible rollingUpdate strategy detected",
+			deploymentNeedsFullReplacement(ctx, desired, existing))
+	})
+
+	t.Run("replaces when existing is already Recreate but still has rollingUpdate", func(t *testing.T) {
+		desired := toUnstructured(t, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+		existing := toUnstructured(t, appsv1.DeploymentStrategy{
+			Type:          appsv1.RecreateDeploymentStrategyType,
+			RollingUpdate: rollingUpdate,
+		})
+		require.Equal(t, "incompatible rollingUpdate strategy detected",
+			deploymentNeedsFullReplacement(ctx, desired, existing))
+	})
+
+	t.Run("does not replace when desired is Recreate and existing has no rollingUpdate", func(t *testing.T) {
+		desired := toUnstructured(t, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+		existing := toUnstructured(t, appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType})
+		require.Empty(t, deploymentNeedsFullReplacement(ctx, desired, existing))
+	})
+
+	t.Run("does not replace when desired is RollingUpdate", func(t *testing.T) {
+		strategy := appsv1.DeploymentStrategy{
+			Type:          appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: rollingUpdate,
+		}
+		require.Empty(t, deploymentNeedsFullReplacement(ctx, toUnstructured(t, strategy), toUnstructured(t, strategy)))
+	})
+}
+
 // TestUserConfigVolumeRemoval tests that removing spec.server.userConfig from the LLSD
 // causes the "user-config" volume to be removed from the Deployment.
 func TestUserConfigVolumeRemoval(t *testing.T) {
@@ -1031,6 +1082,80 @@ func TestUserConfigVolumeRemoval(t *testing.T) {
 		}
 	}
 	require.True(t, found, "lls-storage volume should still be present")
+}
+
+// TestRecreateStrategyClearsRollingUpdate verifies that switching a live Deployment
+// from RollingUpdate to Recreate uses full replacement so leftover rollingUpdate
+// fields are dropped. SSA cannot remove those fields because they were set by the
+// original cli.Create (Kubernetes default) rather than the operator field manager.
+func TestRecreateStrategyClearsRollingUpdate(t *testing.T) {
+	ctx, testNs, owner := setupApplyResourcesTest(t, "recreate-strategy")
+
+	existingDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-deployment",
+			Namespace: testNs,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, owner.GroupVersionKind()),
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: ptr(int32(1)),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "test"},
+			},
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RollingUpdateDeploymentStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateDeployment{
+					MaxUnavailable: ptr(intstr.FromString("25%")),
+					MaxSurge:       ptr(intstr.FromString("25%")),
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{"app": "test"},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "main", Image: "test:v1"},
+					},
+				},
+			},
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, existingDeployment))
+
+	desiredDeployment := newTestResource(t, "apps/v1", "Deployment", "test-deployment", testNs, map[string]any{
+		"replicas": int32(1),
+		"selector": map[string]any{
+			"matchLabels": map[string]any{"app": "test"},
+		},
+		"strategy": map[string]any{"type": "Recreate"},
+		"template": map[string]any{
+			"metadata": map[string]any{
+				"labels": map[string]any{"app": "test"},
+			},
+			"spec": map[string]any{
+				"containers": []any{
+					map[string]any{"name": "main", "image": "test:v2"},
+				},
+			},
+		},
+	})
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(desiredDeployment))
+
+	require.NoError(t, ApplyResources(ctx, k8sClient, scheme.Scheme, owner, &resMap))
+
+	updated := &appsv1.Deployment{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "test-deployment", Namespace: testNs}, updated))
+
+	require.Equal(t, appsv1.RecreateDeploymentStrategyType, updated.Spec.Strategy.Type,
+		"Deployment strategy should be Recreate after storage is configured")
+	require.Nil(t, updated.Spec.Strategy.RollingUpdate,
+		"rollingUpdate must be cleared when strategy type is Recreate")
+	require.Equal(t, "test:v2", updated.Spec.Template.Spec.Containers[0].Image)
 }
 
 // TestLegacyCABundleUpgrade tests that deployments with legacy CA bundle volumes
