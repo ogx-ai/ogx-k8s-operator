@@ -1,5 +1,1 @@
-# Each line is a file pattern followed by one or more owners.
-
-# These owners will be the default owners for everything in
-# the repo. Unless a later match takes precedence,
-* @cdoern @derekhiggins @Elbehery @leseb @mfleader @nathan-weinberg @rhdedgar @rhuss @skamenan7 @VaishnaviHire
+* @derekhiggins @leseb @franciscojavierarceo @Artemon-line @rhdedgar @VaishnaviHire @cdoern @skamenan7 @r-papso @mfleader @eoinfennessy @EleanorWho
