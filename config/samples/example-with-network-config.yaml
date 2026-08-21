@@ -1,4 +1,6 @@
-# Example with custom NetworkPolicy ingress rules (namespace-based access)
+# OGX is internal-only (Praxis-fronted). The operator ALWAYS restricts ingress on port 8321
+# to Praxis pods (label app: payload-processing) plus the operator namespace. The rules below
+# are ADDITIVE: they are appended on top of that mandatory lock-down and cannot remove it.
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:
@@ -15,18 +17,12 @@ spec:
           value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
   network:
     policy:
+      # These rules are added on top of the mandatory Praxis + operator ingress rules.
       ingress:
         - from:
             - namespaceSelector:
                 matchLabels:
                   kubernetes.io/metadata.name: nsA
-            - namespaceSelector:
-                matchLabels:
-                  kubernetes.io/metadata.name: nsB
-            - namespaceSelector:
-                matchExpressions:
-                  - key: myproject/ogx-allowed
-                    operator: Exists
             - namespaceSelector:
                 matchExpressions:
                   - key: team/authorized
@@ -35,11 +31,13 @@ spec:
             - protocol: TCP
               port: 8321
 ---
-# Example with external access enabled and NetworkPolicy disabled
+# NOTE: externalAccess.enabled is NOT honored — OGX is internal-only. Setting it to true
+# produces an admission warning and no external exposure (Ingress) is created. This example
+# is kept only to document that behavior.
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:
-  name: ogxserver-public
+  name: ogxserver-external-access-ignored
 spec:
   distribution:
     name: starter
@@ -52,16 +50,9 @@ spec:
           value: 'http://ollama-server-service.ollama-dist.svc.cluster.local:11434'
   network:
     externalAccess:
-      enabled: true
-    policy:
-      ingress:
-        - from:
-            - namespaceSelector: {}
-          ports:
-            - protocol: TCP
-              port: 8321
+      enabled: true # ignored: treated as false, no Ingress created
 ---
-# Example with NetworkPolicy explicitly disabled
+# Example with NetworkPolicy explicitly disabled (emergency escape hatch).
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:

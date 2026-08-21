@@ -1,0 +1,25 @@
+# Operator-wide configuration for the OGX K8s Operator.
+#
+# The praxis-peer key controls which pods the operator-managed NetworkPolicy treats as Praxis
+# (the only application workload allowed to reach OGX on port 8321). The value is a standard
+# Kubernetes NetworkPolicyPeer (namespace and/or pod selector).
+#
+# If this key is unset or invalid, the operator fails safe to pods labeled
+# app: payload-processing across all namespaces — it never emits an allow-all peer.
+#
+# Pin the namespace half of the selector once the Praxis/MaaS deployment namespace is agreed.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ogx-operator-config
+  namespace: ogx-k8s-operator-system
+  labels:
+    ogx.io/watch: 'true'
+data:
+  praxis-peer: |
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: praxis
+    podSelector:
+      matchLabels:
+        app: payload-processing

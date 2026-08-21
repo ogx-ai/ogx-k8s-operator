@@ -378,8 +378,9 @@ spec:
                         type: boolean
                       ingress:
                         description: |-
-                          Ingress defines additional ingress rules, merged with operator defaults
-                          (allow from same-namespace and operator-namespace on the service port).
+                          Ingress defines additional ingress rules, appended to the mandatory operator rules
+                          (allow from Praxis pods and the operator namespace on the service port). User rules
+                          are additive and cannot remove the mandatory Praxis lock-down.
                         items:
                           description: |-
                             NetworkPolicyIngressRule describes a particular set of traffic that is allowed to the pods

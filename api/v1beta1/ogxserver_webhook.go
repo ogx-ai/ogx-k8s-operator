@@ -71,11 +71,29 @@ func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ *OGXServer) (ad
 }
 
 func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) {
+	warnings := collectValidationWarnings(r)
+
 	allErrs := v.collectValidationErrors(r)
 	if len(allErrs) > 0 {
-		return nil, allErrs.ToAggregate()
+		return warnings, allErrs.ToAggregate()
 	}
-	return nil, nil
+	return warnings, nil
+}
+
+// collectValidationWarnings returns non-fatal admission warnings. OGX is internal-only in the
+// Praxis-fronted topology, so requesting external access is not honored: the operator does not
+// create any external exposure regardless of this field. It is surfaced as a warning rather
+// than a rejection so existing CRs and GitOps applies do not break on upgrade.
+func collectValidationWarnings(r *OGXServer) admission.Warnings {
+	var warnings admission.Warnings
+
+	if r.Spec.Network != nil && r.Spec.Network.ExternalAccess != nil && r.Spec.Network.ExternalAccess.Enabled {
+		warnings = append(warnings,
+			"spec.network.externalAccess.enabled is not honored: OGX is internal-only (Praxis-fronted) "+
+				"and the operator does not create external exposure. This value is treated as false.")
+	}
+
+	return warnings
 }
 
 func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorList {

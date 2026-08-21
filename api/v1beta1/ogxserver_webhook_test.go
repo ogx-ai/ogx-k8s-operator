@@ -648,3 +648,53 @@ func TestCollectValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_ExternalAccessWarning(t *testing.T) {
+	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
+
+	tests := []struct {
+		name        string
+		network     *NetworkSpec
+		wantWarning bool
+	}{
+		{
+			name:        "no network spec: no warning",
+			network:     nil,
+			wantWarning: false,
+		},
+		{
+			name:        "external access disabled: no warning",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: false}},
+			wantWarning: false,
+		},
+		{
+			name:        "external access enabled: warns but does not reject",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			wantWarning: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network:      tt.network,
+				},
+			}
+
+			warnings, err := v.ValidateCreate(t.Context(), server)
+			if err != nil {
+				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
+			}
+
+			got := len(warnings) > 0
+			if got != tt.wantWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantWarning %v", warnings, tt.wantWarning)
+			}
+			if tt.wantWarning && !strings.Contains(strings.Join(warnings, " "), "externalAccess") {
+				t.Errorf("expected warning to mention externalAccess, got %v", warnings)
+			}
+		})
+	}
+}

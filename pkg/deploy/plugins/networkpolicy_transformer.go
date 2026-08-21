@@ -23,6 +23,7 @@ import (
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/kustomize/api/resmap"
 	"sigs.k8s.io/kustomize/api/resource"
 	"sigs.k8s.io/yaml"
@@ -32,10 +33,9 @@ const (
 	networkPolicyKind = "NetworkPolicy"
 	// AllNamespacesSelector is the special value to allow all namespaces.
 	AllNamespacesSelector = "*"
-	// Allow traffic from OpenShift router namespaces.
-	openShiftIngressPolicyGroupLabelKey   = "network.openshift.io/policy-group"
-	openShiftIngressPolicyGroupLabelValue = "ingress"
-	openShiftMonitoringPolicyGroupValue   = "monitoring"
+	// Allow traffic from OpenShift monitoring namespaces (Prometheus scraping).
+	openShiftIngressPolicyGroupLabelKey = "network.openshift.io/policy-group"
+	openShiftMonitoringPolicyGroupValue = "monitoring"
 )
 
 // NetworkPolicyTransformerConfig holds the configuration for the NetworkPolicy transformer.
@@ -50,6 +50,10 @@ type NetworkPolicyTransformerConfig struct {
 	NetworkSpec *ogxiov1beta1.NetworkSpec
 	// MetricsPort is the port for Prometheus scraping. 0 means monitoring is disabled.
 	MetricsPort int32
+	// PraxisPeer is the ingress peer identifying Praxis pods, the only application
+	// workload allowed to reach OGX on the service port. When nil, a fail-safe default
+	// peer (pods labeled app: payload-processing in all namespaces) is used.
+	PraxisPeer *networkingv1.NetworkPolicyPeer
 }
 
 // CreateNetworkPolicyTransformer creates a transformer for NetworkPolicy resources.
@@ -103,30 +107,34 @@ func (t *networkPolicyTransformer) transformNetworkPolicy(res *resource.Resource
 	return updateResource(res, data)
 }
 
-// applyNetworkPolicySpec sets ingress/egress from the CR when explicitly provided; otherwise uses defaults.
+// applyNetworkPolicySpec sets the ingress rules to the mandatory Praxis + operator peers
+// (plus monitoring), then appends any user-provided ingress rules additively so a CR author
+// cannot remove the Praxis lock-down. Egress is applied from the CR when provided.
 func (t *networkPolicyTransformer) applyNetworkPolicySpec(spec map[string]any) error {
-	np := t.config.NetworkSpec
-	if np != nil && np.Policy != nil && len(np.Policy.Ingress) > 0 {
-		ingress, err := networkPolicyRulesToAnySlice(np.Policy.Ingress)
-		if err != nil {
-			return fmt.Errorf("failed to convert NetworkPolicy ingress rules: %w", err)
-		}
-		spec["ingress"] = ingress
-		policyTypes := []any{"Ingress"}
-		if len(np.Policy.Egress) > 0 {
-			egress, err := networkPolicyEgressRulesToAnySlice(np.Policy.Egress)
-			if err != nil {
-				return fmt.Errorf("failed to convert NetworkPolicy egress rules: %w", err)
-			}
-			spec["egress"] = egress
-			policyTypes = append(policyTypes, "Egress")
-		}
-		spec["policyTypes"] = policyTypes
-		return nil
+	ingressRules, err := t.buildIngressRules()
+	if err != nil {
+		return err
 	}
 
-	ingressRules := t.buildIngressRules()
+	np := t.config.NetworkSpec
+	if np != nil && np.Policy != nil && len(np.Policy.Ingress) > 0 {
+		userIngress, convErr := networkPolicyRulesToAnySlice(np.Policy.Ingress)
+		if convErr != nil {
+			return fmt.Errorf("failed to convert NetworkPolicy ingress rules: %w", convErr)
+		}
+		ingressRules = append(ingressRules, userIngress...)
+	}
 	spec["ingress"] = ingressRules
+
+	if np != nil && np.Policy != nil && len(np.Policy.Egress) > 0 {
+		egress, convErr := networkPolicyEgressRulesToAnySlice(np.Policy.Egress)
+		if convErr != nil {
+			return fmt.Errorf("failed to convert NetworkPolicy egress rules: %w", convErr)
+		}
+		spec["egress"] = egress
+		spec["policyTypes"] = []any{"Ingress", "Egress"}
+	}
+
 	return nil
 }
 
@@ -173,8 +181,11 @@ func (t *networkPolicyTransformer) updatePodSelector(spec map[string]any) error 
 	return nil
 }
 
-func (t *networkPolicyTransformer) buildIngressRules() []any {
-	peers := t.buildPeers()
+func (t *networkPolicyTransformer) buildIngressRules() ([]any, error) {
+	peers, err := t.buildPeers()
+	if err != nil {
+		return nil, err
+	}
 
 	portRule := []any{
 		map[string]any{
@@ -190,24 +201,24 @@ func (t *networkPolicyTransformer) buildIngressRules() []any {
 		"ports": portRule,
 	})
 	rules = append(rules, monitoringRules...)
-	return rules
+	return rules, nil
 }
 
-func (t *networkPolicyTransformer) buildPeers() []any {
-	peers := t.buildDefaultPeers()
-	peers = append(peers, t.buildRouterPeers()...)
-	return peers
-}
+// buildPeers builds the mandatory ingress peers for OGX:
+//  1. Praxis pods — the only application workload allowed to reach OGX on the service port.
+//  2. All pods from the operator namespace — control-plane traffic so the operator can poll
+//     OGX status (/v1/providers, /v1/version), not application traffic.
+//
+// The broad same-namespace peer and the OpenShift router peer are intentionally omitted so
+// OGX is reachable only from Praxis (internal-only, Praxis-fronted topology).
+func (t *networkPolicyTransformer) buildPeers() ([]any, error) {
+	praxisPeer, err := t.praxisPeerMap()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Praxis NetworkPolicy peer: %w", err)
+	}
 
-// buildDefaultPeers builds the default NetworkPolicy peers:
-// 1. All pods within the same namespace (no pod-level restriction).
-// 2. All pods from the operator namespace.
-func (t *networkPolicyTransformer) buildDefaultPeers() []any {
 	return []any{
-		// Allow from all pods in the same namespace
-		map[string]any{
-			"podSelector": map[string]any{},
-		},
+		praxisPeer,
 		// Allow from operator namespace (no podSelector to allow all pods in the namespace)
 		map[string]any{
 			"namespaceSelector": map[string]any{
@@ -216,25 +227,33 @@ func (t *networkPolicyTransformer) buildDefaultPeers() []any {
 				},
 			},
 		},
-	}
+	}, nil
 }
 
-// buildRouterPeers builds NetworkPolicy peers for ingress controller traffic.
-func (t *networkPolicyTransformer) buildRouterPeers() []any {
-	if t.config.NetworkSpec == nil {
-		return nil
-	}
-
-	// Allow traffic from OpenShift router namespaces using label selection.
-	return []any{
-		map[string]any{
-			"namespaceSelector": map[string]any{
-				"matchLabels": map[string]any{
-					openShiftIngressPolicyGroupLabelKey: openShiftIngressPolicyGroupLabelValue,
+// praxisPeerMap returns the configured Praxis peer as a generic map for the ingress rule,
+// falling back to the default peer (pods labeled app: payload-processing in all namespaces)
+// when none is configured.
+func (t *networkPolicyTransformer) praxisPeerMap() (map[string]any, error) {
+	peer := t.config.PraxisPeer
+	if peer == nil {
+		peer = &networkingv1.NetworkPolicyPeer{
+			PodSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
 				},
 			},
-		},
+		}
 	}
+
+	b, err := json.Marshal(peer)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // buildMonitoringIngressRules adds an ingress rule allowing Prometheus scraping on the metrics port.

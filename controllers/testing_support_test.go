@@ -368,12 +368,13 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 	require.NotEmpty(t, deployment.Spec.Template.Spec.Containers[0].Ports, "Container should have at least one port")
 	containerPort := deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 
-	sameNamespacePredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
-		return peer.PodSelector != nil && len(peer.PodSelector.MatchLabels) == 0 && peer.NamespaceSelector == nil
+	praxisPredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
+		return peer.PodSelector != nil &&
+			peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultLabelKey] == ogxiov1beta1.DefaultPraxisPodLabelValue
 	}
 	require.True(t,
-		hasMatchingIngressRule(t, networkPolicy, containerPort, sameNamespacePredicate),
-		"NetworkPolicy is missing a rule to allow traffic from all pods in the same namespace on port %d", containerPort)
+		hasMatchingIngressRule(t, networkPolicy, containerPort, praxisPredicate),
+		"NetworkPolicy is missing a rule to allow traffic from Praxis pods on port %d", containerPort)
 
 	operatorPredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
 		return peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == operatorNamespace
@@ -381,6 +382,14 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 	require.True(t,
 		hasMatchingIngressRule(t, networkPolicy, containerPort, operatorPredicate),
 		"NetworkPolicy is missing a rule to allow traffic from the operator in namespace '%s' on port %d", operatorNamespace, containerPort)
+
+	sameNamespacePredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
+		return peer.PodSelector != nil && len(peer.PodSelector.MatchLabels) == 0 &&
+			len(peer.PodSelector.MatchExpressions) == 0 && peer.NamespaceSelector == nil
+	}
+	require.False(t,
+		hasMatchingIngressRule(t, networkPolicy, containerPort, sameNamespacePredicate),
+		"NetworkPolicy must NOT allow traffic from all pods in the same namespace on port %d", containerPort)
 }
 
 func AssertNetworkPolicyIsIngressOnly(t *testing.T, networkPolicy *networkingv1.NetworkPolicy) {

@@ -968,6 +968,72 @@ onemore: registry.redhat.io/org/imagename@sha256:1234567890123456789012345678901
 	require.NotContains(t, result, "malformed", "Malformed entry should be skipped")
 }
 
+func praxisDefault() *networkingv1.NetworkPolicyPeer {
+	return controllers.DefaultPraxisPeer()
+}
+
+func TestParsePraxisPeer(t *testing.T) {
+	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+
+	tests := []struct {
+		name string
+		data map[string]string
+		want *networkingv1.NetworkPolicyPeer
+	}{
+		{
+			name: "missing key falls back to default",
+			data: map[string]string{},
+			want: praxisDefault(),
+		},
+		{
+			name: "empty value falls back to default",
+			data: map[string]string{"praxis-peer": "   "},
+			want: praxisDefault(),
+		},
+		{
+			name: "invalid YAML falls back to default",
+			data: map[string]string{"praxis-peer": "podSelector: [unterminated"},
+			want: praxisDefault(),
+		},
+		{
+			name: "allow-all peer (empty selectors) falls back to default",
+			data: map[string]string{"praxis-peer": "podSelector: {}\nnamespaceSelector: {}"},
+			want: praxisDefault(),
+		},
+		{
+			name: "nil selectors fall back to default",
+			data: map[string]string{"praxis-peer": "{}"},
+			want: praxisDefault(),
+		},
+		{
+			name: "valid namespace + pod selector is honored",
+			data: map[string]string{"praxis-peer": "podSelector:\n  matchLabels:\n    app: custom-praxis\nnamespaceSelector:\n  matchLabels:\n    kubernetes.io/metadata.name: praxis-ns"},
+			want: &networkingv1.NetworkPolicyPeer{
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "custom-praxis"},
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "praxis-ns"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := controllers.ParsePraxisPeer(t.Context(), tc.data)
+			require.NotNil(t, got, "ParsePraxisPeer must never return nil")
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDefaultPraxisPeer_NeverAllowAll(t *testing.T) {
+	peer := controllers.DefaultPraxisPeer()
+	require.NotNil(t, peer.PodSelector)
+	require.Equal(t, ogxiov1beta1.DefaultPraxisPodLabelValue, peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultLabelKey])
+}
+
 func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 

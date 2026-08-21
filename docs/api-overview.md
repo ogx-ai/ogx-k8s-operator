@@ -847,15 +847,12 @@ _Appears in:_
 
 NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
 
-Ingress is always enforced unless explicitly omitted from policyTypes.
-The operator always includes default ingress rules (allow from same-namespace
-and operator-namespace on the service port), merging them with any
-user-specified rules.
+The operator always enforces a mandatory ingress lock-down: OGX accepts traffic on the
+service port only from Praxis pods (the internal API front-end) plus the operator
+namespace (control-plane status polling). These mandatory rules cannot be removed via this
+spec; set Enabled=false to disable the NetworkPolicy entirely as an escape hatch.
 
-Egress is unrestricted by default. It is only enforced when egress rules
-are provided or "Egress" is explicitly included in policyTypes.
-When any egress rules are configured, or when "Egress" is explicitly included in
-policyTypes, a kube-dns egress rule is auto-injected to prevent DNS breakage.
+Egress is unrestricted by default. It is only enforced when egress rules are provided.
 
 _Appears in:_
 - [NetworkSpec](#networkspec)
@@ -864,7 +861,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled controls whether the operator manages a NetworkPolicy for this server.<br />Defaults to true. Set to false to disable NetworkPolicy creation entirely. | true |  |
 | `policyTypes` _[PolicyType](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#policytype-v1-networking) array_ | PolicyTypes specifies which policy directions are enforced.<br />Follows Kubernetes NetworkPolicy semantics: when omitted or empty,<br />Ingress is always included and Egress is included only if egress<br />rules are provided. |  | items:Enum: [Ingress Egress] <br /> |
-| `ingress` _[NetworkPolicyIngressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyingressrule-v1-networking) array_ | Ingress defines additional ingress rules, merged with operator defaults<br />(allow from same-namespace and operator-namespace on the service port). |  |  |
+| `ingress` _[NetworkPolicyIngressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyingressrule-v1-networking) array_ | Ingress defines additional ingress rules, appended to the mandatory operator rules<br />(allow from Praxis pods and the operator namespace on the service port). User rules<br />are additive and cannot remove the mandatory Praxis lock-down. |  |  |
 | `egress` _[NetworkPolicyEgressRule](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#networkpolicyegressrule-v1-networking) array_ | Egress rules. When non-empty, a kube-dns egress rule is auto-injected<br />to prevent DNS breakage. |  |  |
 
 #### NetworkSpec

@@ -64,6 +64,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 const (
@@ -101,6 +102,10 @@ type OGXServerReconciler struct {
 	Scheme *runtime.Scheme
 	// Image mapping overrides
 	ImageMappingOverrides map[string]string
+	// PraxisPeer is the NetworkPolicy ingress peer identifying Praxis pods, the only
+	// application workload allowed to reach OGX. Refreshed from the operator config
+	// ConfigMap each reconcile; never nil (falls back to DefaultPraxisPeer).
+	PraxisPeer *networkingv1.NetworkPolicyPeer
 	// Cluster info
 	ClusterInfo *cluster.ClusterInfo
 	httpClient  *http.Client
@@ -207,6 +212,7 @@ func (r *OGXServerReconciler) refreshOperatorConfig(ctx context.Context) {
 	}
 
 	r.ImageMappingOverrides = ParseImageMappingOverrides(ctx, configMap.Data)
+	r.PraxisPeer = ParsePraxisPeer(ctx, configMap.Data)
 }
 
 // fetchInstance retrieves the OGXServer instance.
@@ -573,6 +579,7 @@ func (r *OGXServerReconciler) buildManifestContext(
 		PodSpec:                 podSpecMap,
 		PodDisruptionBudgetSpec: buildPodDisruptionBudgetSpec(instance),
 		HPASpec:                 buildHPASpec(instance),
+		PraxisPeer:              r.PraxisPeer,
 	}, nil
 }
 
@@ -1297,12 +1304,14 @@ func (r *OGXServerReconciler) updateServiceStatus(ctx context.Context, instance 
 		return
 	}
 
-	// Set the service URL in the status
+	// Set the internal service URL in the status. This is the stable endpoint Praxis and
+	// the platform use to reach OGX.
 	serviceURL := r.getServerURL(instance, "")
 	instance.Status.ServiceURL = serviceURL.String()
 
-	// Set the external URL if external access is enabled
-	instance.Status.ExternalURL = r.getIngressURL(ctx, instance)
+	// OGX is internal-only (Praxis-fronted): no external exposure is created, so the
+	// external URL is always cleared.
+	instance.Status.ExternalURL = nil
 
 	SetServiceReadyCondition(&instance.Status, true, MessageServiceReady)
 }
@@ -1840,6 +1849,7 @@ func NewOGXServerReconciler(cachedClient client.Client, scheme *runtime.Scheme,
 		Client:                cachedClient,
 		Scheme:                scheme,
 		ImageMappingOverrides: imageMappingOverrides,
+		PraxisPeer:            DefaultPraxisPeer(),
 		ClusterInfo:           clusterInfo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
 		OCILabelFetcher:       ociLabelFetcher,
@@ -1925,6 +1935,62 @@ func ParseImageMappingOverrides(ctx context.Context, configMapData map[string]st
 	return imageMappingOverrides
 }
 
+// DefaultPraxisPeer returns the fail-safe Praxis NetworkPolicy ingress peer: pods labeled
+// app: payload-processing in all namespaces. It is used whenever the operator's praxis-peer
+// config is unset or invalid, and is never an allow-all peer.
+func DefaultPraxisPeer() *networkingv1.NetworkPolicyPeer {
+	return &networkingv1.NetworkPolicyPeer{
+		PodSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+			},
+		},
+	}
+}
+
+// ParsePraxisPeer parses the praxis-peer key from the operator config ConfigMap into a
+// Kubernetes NetworkPolicyPeer. The value is a YAML-encoded NetworkPolicyPeer (namespace
+// and/or pod selector). It fails safe: on a missing, empty, invalid, or allow-all value it
+// returns DefaultPraxisPeer. It never returns nil and never returns a peer that would admit
+// traffic from all pods.
+func ParsePraxisPeer(ctx context.Context, configMapData map[string]string) *networkingv1.NetworkPolicyPeer {
+	logger := log.FromContext(ctx)
+
+	peerYAML, exists := configMapData["praxis-peer"]
+	if !exists || strings.TrimSpace(peerYAML) == "" {
+		return DefaultPraxisPeer()
+	}
+
+	// Use sigs.k8s.io/yaml so the value maps onto the k8s type's JSON struct tags
+	// (podSelector/namespaceSelector), which gopkg.in/yaml.v3 would not resolve.
+	var peer networkingv1.NetworkPolicyPeer
+	if err := sigsyaml.Unmarshal([]byte(peerYAML), &peer); err != nil {
+		logger.V(1).Info("failed to parse praxis-peer YAML, using default", "error", err)
+		return DefaultPraxisPeer()
+	}
+
+	if isAllowAllPeer(&peer) {
+		logger.V(1).Info("praxis-peer would admit all traffic, using default instead")
+		return DefaultPraxisPeer()
+	}
+
+	return &peer
+}
+
+// isAllowAllPeer reports whether a NetworkPolicyPeer would admit traffic from all pods,
+// i.e. it has no IPBlock and both its pod and namespace selectors are nil or empty.
+func isAllowAllPeer(peer *networkingv1.NetworkPolicyPeer) bool {
+	if peer.IPBlock != nil {
+		return false
+	}
+	return labelSelectorIsEmpty(peer.PodSelector) && labelSelectorIsEmpty(peer.NamespaceSelector)
+}
+
+// labelSelectorIsEmpty reports whether a label selector is nil or matches everything.
+func labelSelectorIsEmpty(s *metav1.LabelSelector) bool {
+	return s == nil || (len(s.MatchLabels) == 0 && len(s.MatchExpressions) == 0)
+}
+
 // NewTestReconciler creates a reconciler for testing, allowing injection of a custom http client.
 func NewTestReconciler(client client.Client, scheme *runtime.Scheme, clusterInfo *cluster.ClusterInfo,
 	httpClient *http.Client) *OGXServerReconciler {
@@ -1934,6 +2000,7 @@ func NewTestReconciler(client client.Client, scheme *runtime.Scheme, clusterInfo
 		ClusterInfo:           clusterInfo,
 		httpClient:            httpClient,
 		ImageMappingOverrides: make(map[string]string),
+		PraxisPeer:            DefaultPraxisPeer(),
 	}
 }
 

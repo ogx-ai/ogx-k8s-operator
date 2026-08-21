@@ -112,7 +112,7 @@ spec:
 		}
 
 		// when we call RenderManifest
-		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner, nil)
 
 		// then we expect the resource to be rendered and transformed correctly
 		require.NoError(t, err)
@@ -161,7 +161,7 @@ metadata:
 		}
 
 		// when we call RenderManifest on the root path
-		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner, nil)
 
 		// then it should find and render the resources from the 'default' subdirectory
 		require.NoError(t, err)
@@ -211,7 +211,7 @@ spec:
 			},
 		}
 
-		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner, nil)
 		require.NoError(t, err)
 		require.Equal(t, 1, (*resMap).Size())
 
@@ -262,7 +262,7 @@ spec:
 			},
 		}
 
-		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner, nil)
 		require.NoError(t, err)
 		require.Equal(t, 1, (*resMap).Size())
 
@@ -303,7 +303,7 @@ resources:
 		}
 
 		// when we call RenderManifest
-		resMap, err := RenderManifest(fsys, manifestBasePath, owner)
+		resMap, err := RenderManifest(fsys, manifestBasePath, owner, nil)
 
 		// then it should propagate the error from the Kustomize engine
 		require.Error(t, err)
@@ -743,7 +743,7 @@ func TestRemoveDeploymentReplicas(t *testing.T) {
 	})))
 	require.NoError(t, resMap.Append(newTestResource(t, "apps/v1", "Deployment", "deployment-no-replicas", "llama", map[string]any{})))
 
-	require.NoError(t, applyPlugins(&resMap, instance))
+	require.NoError(t, applyPlugins(&resMap, instance, nil))
 
 	resources := resMap.Resources()
 	require.Len(t, resources, 2)

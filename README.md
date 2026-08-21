@@ -17,7 +17,7 @@ This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI S
     - [Installation](#installation)
     - [Deploying the OGX Server](#deploying-the-ogx-server)
     - [Runtime Config via CR](#runtime-config-via-cr)
-- [Enabling Network Policies](#enabling-network-policies)
+- [Network Policies (internal-only / Praxis-fronted)](#network-policies-internal-only--praxis-fronted)
 - [Monitoring](#monitoring)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
@@ -184,9 +184,30 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 `spec.overrideConfig` always takes precedence over declarative generation fields.
 
-## Enabling Network Policies
+## Network Policies (internal-only / Praxis-fronted)
 
-Network policies are enabled by default per-CR. Configure via `spec.network.policy`:
+OGX is an **internal-only backend**: in the target topology it is fronted by Praxis, which is
+the sole public entrypoint. The operator enforces this at the network layer.
+
+By default, for every OGXServer the operator creates a `NetworkPolicy` whose ingress on the
+service port (`8321`) admits traffic **only** from:
+
+1. **Praxis pods** — identified by the label `app: payload-processing` (the MaaS Gateway
+   contract). This is the only *application* traffic OGX accepts.
+2. **The operator namespace** — so the operator can poll OGX status (`/v1/providers`,
+   `/v1/version`). This is control-plane traffic, not application traffic.
+
+The broad "all pods in the same namespace" rule and the OpenShift router rule are **not**
+included, and the operator does **not** create any external exposure (Ingress) for OGX.
+Setting `spec.network.externalAccess.enabled: true` is **not honored** — it is treated as
+`false` and surfaced as an admission warning (rather than a hard rejection, so existing CRs and
+GitOps applies keep working). `status.serviceURL` is populated with the internal cluster DNS
+endpoint; `status.externalURL` is always empty.
+
+### Adding your own ingress rules (additive)
+
+`spec.network.policy.ingress` rules are **appended on top of** the mandatory Praxis + operator
+rules — they cannot remove the lock-down:
 
 ```yaml
 apiVersion: ogx.io/v1beta1
@@ -197,9 +218,6 @@ spec:
   distribution:
     name: starter
   network:
-    externalAccess:
-      enabled: true
-      hostname: my-ogx.example.com
     policy:
       enabled: true
       ingress:
@@ -212,12 +230,38 @@ spec:
               port: 8321
 ```
 
+To fully disable the NetworkPolicy (emergency escape hatch), set
+`spec.network.policy.enabled: false`.
+
+### Configuring the Praxis peer (operator-wide)
+
+Which pods count as "Praxis" is configured operator-wide via the `praxis-peer` key in the
+`ogx-operator-config` ConfigMap. The value is a standard Kubernetes `NetworkPolicyPeer`
+(namespace and/or pod selector). If unset or invalid, it fails safe to pods labeled
+`app: payload-processing` across all namespaces (never an allow-all peer):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ogx-operator-config
+  namespace: ogx-k8s-operator-system
+data:
+  praxis-peer: |
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: praxis
+    podSelector:
+      matchLabels:
+        app: payload-processing
+```
+
 | Field | Description |
 |-------|-------------|
-| `network.externalAccess.enabled` | When `true`, enables external access configuration for the server |
-| `network.externalAccess.hostname` | Hostname used for external access (for example, Ingress host) |
-| `network.policy.enabled` | When `true`, the operator creates a `NetworkPolicy` for the OGXServer workload |
-| `network.policy.ingress` | Ingress rules for the policy (for example, allowed sources and ports) |
+| `network.policy.enabled` | When `true` (default), the operator creates a `NetworkPolicy` for the OGXServer workload. Set to `false` to disable it entirely. |
+| `network.policy.ingress` | Additional ingress rules, appended to the mandatory Praxis + operator rules. |
+| `network.externalAccess.enabled` | Not honored — OGX is internal-only. Setting `true` produces an admission warning and no external exposure is created. |
+| `ogx-operator-config` ConfigMap `praxis-peer` | Operator-wide `NetworkPolicyPeer` identifying Praxis pods. Fails safe to `app: payload-processing` in all namespaces. |
 
 ## Monitoring
 

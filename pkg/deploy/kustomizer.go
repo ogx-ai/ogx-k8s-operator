@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -42,6 +43,7 @@ func RenderManifest(
 	fs filesys.FileSystem,
 	manifestPath string,
 	ownerInstance *ogxiov1beta1.OGXServer,
+	praxisPeer *networkingv1.NetworkPolicyPeer,
 ) (*resmap.ResMap, error) {
 	// fallback to the 'default' directory' if we cannot initially find
 	// the kustomization file
@@ -56,7 +58,7 @@ func RenderManifest(
 	if err != nil {
 		return nil, fmt.Errorf("failed to run kustomize: %w", err)
 	}
-	if err := applyPlugins(&resMapVal, ownerInstance); err != nil {
+	if err := applyPlugins(&resMapVal, ownerInstance, praxisPeer); err != nil {
 		return nil, err
 	}
 	return &resMapVal, nil
@@ -219,7 +221,8 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 }
 
 // applyPlugins runs all Go-based transformations on the resource map.
-func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
+func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer,
+	praxisPeer *networkingv1.NetworkPolicyPeer) error {
 	namePrefixPlugin := plugins.CreateNamePrefixPlugin(plugins.NamePrefixConfig{
 		Prefix: ownerInstance.GetName(),
 		// Exclude Deployment to maintain backward compatibility with existing deployment names
@@ -245,7 +248,7 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) 
 	}
 
 	// Apply NetworkPolicy transformer to configure ingress rules based on spec.network
-	if err := applyNetworkPolicyTransformer(resMap, ownerInstance); err != nil {
+	if err := applyNetworkPolicyTransformer(resMap, ownerInstance, praxisPeer); err != nil {
 		return fmt.Errorf("failed to apply NetworkPolicy transformer: %w", err)
 	}
 
@@ -263,7 +266,8 @@ func applyPlugins(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) 
 }
 
 // applyNetworkPolicyTransformer applies the NetworkPolicy transformer plugin.
-func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer) error {
+func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1beta1.OGXServer,
+	praxisPeer *networkingv1.NetworkPolicyPeer) error {
 	operatorNS, err := GetOperatorNamespace()
 	if err != nil {
 		operatorNS = "ogx-k8s-operator-system"
@@ -275,6 +279,7 @@ func applyNetworkPolicyTransformer(resMap *resmap.ResMap, ownerInstance *ogxiov1
 		OperatorNamespace: operatorNS,
 		NetworkSpec:       ownerInstance.Spec.Network,
 		MetricsPort:       getEffectiveMetricsPort(ownerInstance),
+		PraxisPeer:        praxisPeer,
 	})
 
 	return npTransformer.Transform(*resMap)
@@ -472,6 +477,18 @@ type ManifestContext struct {
 	PodSpec                 map[string]any
 	PodDisruptionBudgetSpec *policyv1.PodDisruptionBudgetSpec
 	HPASpec                 *autoscalingv2.HorizontalPodAutoscalerSpec
+	// PraxisPeer is the NetworkPolicy ingress peer identifying Praxis pods. When nil,
+	// the NetworkPolicy transformer falls back to the default Praxis peer.
+	PraxisPeer *networkingv1.NetworkPolicyPeer
+}
+
+// praxisPeerFromContext returns the Praxis NetworkPolicy peer from the manifest context, or
+// nil when no context is provided (the transformer then applies its fail-safe default).
+func praxisPeerFromContext(manifestCtx *ManifestContext) *networkingv1.NetworkPolicyPeer {
+	if manifestCtx == nil {
+		return nil
+	}
+	return manifestCtx.PraxisPeer
 }
 
 // RenderManifestWithContext renders manifests and enhances the Deployment with complex specs.
@@ -482,7 +499,7 @@ func RenderManifestWithContext(
 	manifestCtx *ManifestContext,
 ) (*resmap.ResMap, error) {
 	// First, render the base manifests
-	resMap, err := RenderManifest(fs, manifestsPath, ownerInstance)
+	resMap, err := RenderManifest(fs, manifestsPath, ownerInstance, praxisPeerFromContext(manifestCtx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to render base manifests: %w", err)
 	}

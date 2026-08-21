@@ -183,6 +183,35 @@ spec:
 
 To translate `enableNetworkPolicy: false` from the old ConfigMap, set `spec.network.policy.enabled: false` on the CR.
 
+#### Internal-only enforcement (Praxis-fronted)
+
+OGX is an **internal-only backend**: it is fronted by Praxis, which is the sole public
+entrypoint. The operator enforces this, which is a **breaking change** on clusters with a
+policy-enforcing CNI (OVN-Kubernetes / Calico):
+
+- The default NetworkPolicy ingress on port `8321` admits traffic **only** from Praxis pods
+  (label `app: payload-processing`) and the operator namespace. The previous "allow all pods
+  in the same namespace" and OpenShift-router rules are removed. Co-located workloads that
+  reached OGX directly will lose access.
+- `spec.network.policy.ingress` rules are now **additive** — appended on top of the mandatory
+  Praxis + operator rules — and can no longer replace/remove them.
+- `spec.network.externalAccess.enabled: true` is **not honored**: it is treated as `false`
+  (surfaced as an admission warning, not a rejection), and any operator-created Ingress is
+  removed. `status.externalURL` is cleared; `status.serviceURL` continues to hold the internal
+  cluster DNS endpoint.
+
+Escape hatches: configure a cluster-wide Praxis selector via the `praxis-peer` key in the
+`ogx-operator-config` ConfigMap (see the README and
+`config/samples/operator-config-praxis-peer-configmap.yaml`); add per-CR additive
+`spec.network.policy.ingress` rules; or disable the policy entirely with
+`spec.network.policy.enabled: false`.
+
+> **Validated assumption (RHAISTRAT-2277):** OGX can be restricted to internal-only access via
+> NetworkPolicy without changes to the OGX Distribution or a schema change to the OGXServer
+> CRD (the Praxis selector is configured via the operator ConfigMap). Enforcement is only
+> effective on a policy-enforcing CNI; on non-enforcing CNIs (e.g. kind's kindnet) the policy
+> object exists but traffic is not blocked.
+
 ### ConfigMap/Secret Watch Labels and Namespace Scope
 
 All referenced ConfigMaps and Secrets must have the `ogx.io/watch: "true"` label, and must be in the same namespace as the OGXServer CR:
