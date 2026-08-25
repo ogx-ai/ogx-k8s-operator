@@ -27,6 +27,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -643,7 +644,11 @@ type OGXServerList struct {
 }
 
 func init() { //nolint:gochecknoinits
-	SchemeBuilder.Register(&OGXServer{}, &OGXServerList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(GroupVersion, &OGXServer{}, &OGXServerList{})
+		metav1.AddToGroupVersion(s, GroupVersion)
+		return nil
+	})
 }
 
 // HasOverrideConfig returns true if the instance references an override ConfigMap.

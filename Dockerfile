@@ -1,5 +1,5 @@
 # Build the manager binary
-ARG GOLANG_VERSION=1.25
+ARG GOLANG_VERSION=1.26
 
 # Use BUILDPLATFORM to run the builder natively (avoid QEMU emulation for Go compilation)
 # This dramatically improves build reliability and speed for cross-platform builds
