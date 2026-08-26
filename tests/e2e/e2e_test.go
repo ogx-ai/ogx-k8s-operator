@@ -25,6 +25,9 @@ func TestE2E(t *testing.T) {
 	t.Run("tls", func(t *testing.T) {
 		TestTLSSuite(t)
 	})
+
+	// Run NetworkPolicy internal-only enforcement tests
+	t.Run("network-policy", TestNetworkPolicySuite)
 }
 
 // runCreationDeletionSuiteForDistribution runs creation tests followed by deletion tests for a specific distribution.
