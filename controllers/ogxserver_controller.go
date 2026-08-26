@@ -573,6 +573,8 @@ func (r *OGXServerReconciler) buildManifestContext(
 		PodSpec:                 podSpecMap,
 		PodDisruptionBudgetSpec: buildPodDisruptionBudgetSpec(instance),
 		HPASpec:                 buildHPASpec(instance),
+		PraxisPeer:              BuildPraxisPeer(instance),
+		PraxisMode:              r.resolvePraxisMode(instance),
 	}, nil
 }
 
@@ -1297,12 +1299,19 @@ func (r *OGXServerReconciler) updateServiceStatus(ctx context.Context, instance 
 		return
 	}
 
-	// Set the service URL in the status
+	// Set the internal service URL in the status. This is the stable endpoint Praxis and
+	// the platform use to reach OGX.
 	serviceURL := r.getServerURL(instance, "")
 	instance.Status.ServiceURL = serviceURL.String()
 
-	// Set the external URL if external access is enabled
-	instance.Status.ExternalURL = r.getIngressURL(ctx, instance)
+	if r.resolvePraxisMode(instance) {
+		// OGX is internal-only (Praxis-fronted): no external exposure is created, so the
+		// external URL is always cleared.
+		instance.Status.ExternalURL = nil
+	} else {
+		// Legacy mode: reflect any operator-created external exposure.
+		instance.Status.ExternalURL = r.getIngressURL(ctx, instance)
+	}
 
 	SetServiceReadyCondition(&instance.Status, true, MessageServiceReady)
 }
@@ -1923,6 +1932,47 @@ func ParseImageMappingOverrides(ctx context.Context, configMapData map[string]st
 	}
 
 	return imageMappingOverrides
+}
+
+// BuildPraxisPeer returns the NetworkPolicy ingress peer identifying the Praxis instance that
+// fronts this OGXServer. When spec.praxisMode.praxisSelector is set it is honored (the selector's
+// namespace is matched via the well-known kubernetes.io/metadata.name label); otherwise the
+// fail-safe default peer is returned. It never returns nil. The praxisSelector's pod selector is
+// CEL-validated non-empty (see api/v1beta1), so this never produces an allow-all peer.
+func BuildPraxisPeer(instance *ogxiov1beta1.OGXServer) *networkingv1.NetworkPolicyPeer {
+	if instance.Spec.PraxisMode == nil || instance.Spec.PraxisMode.PraxisSelector == nil {
+		return defaultPraxisPeer()
+	}
+
+	sel := instance.Spec.PraxisMode.PraxisSelector
+	podSelector := sel.PodSelector
+	return &networkingv1.NetworkPolicyPeer{
+		PodSelector: &podSelector,
+		NamespaceSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultNamespaceNameLabel: sel.Namespace,
+			},
+		},
+	}
+}
+
+// defaultPraxisPeer returns the fail-safe Praxis NetworkPolicy ingress peer: pods labeled
+// app: payload-processing in the openshift-ingress namespace. It is used when a CR does not set
+// spec.praxisMode.praxisSelector, and is never an allow-all peer. The namespace is provisional
+// (see ogxiov1beta1.DefaultPraxisNamespace) and can be overridden per-CR via praxisSelector.
+func defaultPraxisPeer() *networkingv1.NetworkPolicyPeer {
+	return &networkingv1.NetworkPolicyPeer{
+		PodSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+			},
+		},
+		NamespaceSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultNamespaceNameLabel: ogxiov1beta1.DefaultPraxisNamespace,
+			},
+		},
+	}
 }
 
 // NewTestReconciler creates a reconciler for testing, allowing injection of a custom http client.

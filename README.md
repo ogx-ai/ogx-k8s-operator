@@ -17,7 +17,7 @@ This repo hosts a Kubernetes operator that creates and manages OGX (Open GenAI S
     - [Installation](#installation)
     - [Deploying the OGX Server](#deploying-the-ogx-server)
     - [Runtime Config via CR](#runtime-config-via-cr)
-- [Enabling Network Policies](#enabling-network-policies)
+- [Network Policies (internal-only / Praxis-fronted)](#network-policies-internal-only--praxis-fronted)
 - [Monitoring](#monitoring)
 - [Developer Guide](#developer-guide)
     - [Prerequisites](#prerequisites)
@@ -184,9 +184,57 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 `spec.overrideConfig` always takes precedence over declarative generation fields.
 
-## Enabling Network Policies
+## Network Policies (internal-only / Praxis-fronted)
 
-Network policies are enabled by default per-CR. Configure via `spec.network.policy`:
+OGX is an **internal-only backend**: in the target topology it is fronted by Praxis, which is
+the sole public entrypoint. The operator can enforce this at the network layer via
+**Praxis-fronted mode**.
+
+### Praxis-fronted mode (`spec.praxisMode`)
+
+`spec.praxisMode.enabled` is a tri-state per-CR switch:
+
+- **`true`** — Praxis-fronted (internal-only): the locked-down NetworkPolicy below, and no
+  external exposure.
+- **`false`** — legacy behavior: the pre-Praxis NetworkPolicy peers (all pods in the same
+  namespace + the OpenShift router) and `network.externalAccess.enabled` is honored (an Ingress
+  is created when enabled).
+- **unset** — a brand-new (greenfield) install has `spec.praxisMode.enabled` defaulted to `true`
+  by the operator's **mutating admission webhook** on create, so it adopts Praxis-fronted mode. A
+  CR created before the webhook existed (i.e. across an operator upgrade) keeps an unset value,
+  which is treated as legacy so the upgrade does not silently cut off co-located workloads. Because
+  the default is applied per-CR at create time, different OGXServers can migrate independently.
+
+> The `spec.praxisMode` API (the `enabled`, `praxisSelector`, and `migrationJob` fields and the
+> mutating webhook defaulter) is introduced by [#355](https://github.com/ogx-ai/ogx-k8s-operator/pull/355)
+> (RHAIENG-7193); this operator wiring consumes it.
+
+The rest of this section describes **Praxis mode**. In Praxis mode, for every OGXServer the
+operator creates a `NetworkPolicy` whose ingress on the service port (`8321`) admits traffic
+**only** from:
+
+1. **Praxis pods** — identified per-CR by `spec.praxisMode.praxisSelector` (see below), defaulting
+   to pods labeled `app: payload-processing` (the MaaS Gateway contract). This is the only
+   *application* traffic OGX accepts.
+2. **The operator namespace** — so the operator can poll OGX status (`/v1/providers`,
+   `/v1/version`). This is control-plane traffic, not application traffic.
+
+The broad "all pods in the same namespace" rule and the OpenShift router rule are **not**
+included, and the operator does **not** create any external exposure (Ingress) for OGX.
+Setting `spec.network.externalAccess.enabled: true` is **not honored** in Praxis mode — it is
+treated as `false` and surfaced as an admission warning (rather than a hard rejection, so
+existing CRs and GitOps applies keep working). `status.serviceURL` is populated with the
+internal cluster DNS endpoint; `status.externalURL` is empty. (In legacy mode, external access
+is honored and `status.externalURL` reflects the created Ingress.)
+
+In Praxis mode the operator also disables the **Responses API** in OGX's generated config (it is
+served by Praxis instead). This is applied internally during config generation and does **not**
+mutate your CR's `spec.disabledAPIs`.
+
+### Adding your own ingress rules (additive)
+
+`spec.network.policy.ingress` rules are **appended on top of** the mandatory Praxis + operator
+rules — they cannot remove the lock-down:
 
 ```yaml
 apiVersion: ogx.io/v1beta1
@@ -197,9 +245,6 @@ spec:
   distribution:
     name: starter
   network:
-    externalAccess:
-      enabled: true
-      hostname: my-ogx.example.com
     policy:
       enabled: true
       ingress:
@@ -212,12 +257,46 @@ spec:
               port: 8321
 ```
 
+To fully disable the NetworkPolicy (emergency escape hatch), set
+`spec.network.policy.enabled: false`.
+
+### Configuring the Praxis peer (per-CR)
+
+Which pods count as "Praxis" is configured **per-CR** via `spec.praxisMode.praxisSelector` — a
+namespace plus a Pod label selector. It becomes the NetworkPolicy ingress peer, so different
+OGXServers can point at different Praxis instances independently. If omitted, the operator fails
+safe to pods labeled `app: payload-processing` in the `openshift-ingress` namespace (never an
+allow-all peer):
+
+```yaml
+apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: my-ogxserver
+spec:
+  distribution:
+    name: starter
+  praxisMode:
+    enabled: true
+    praxisSelector:
+      namespace: praxis
+      podSelector:
+        matchLabels:
+          app: payload-processing
+```
+
+> **Note (Praxis namespace):** the fail-safe default peer pins the `openshift-ingress` namespace,
+> matching where the PoC operator places the Praxis/extproc servers. This is **provisional and
+> pending confirmation with the MaaS team** — if Praxis runs elsewhere, set `praxisSelector` with
+> the correct `namespace`.
+
 | Field | Description |
 |-------|-------------|
-| `network.externalAccess.enabled` | When `true`, enables external access configuration for the server |
-| `network.externalAccess.hostname` | Hostname used for external access (for example, Ingress host) |
-| `network.policy.enabled` | When `true`, the operator creates a `NetworkPolicy` for the OGXServer workload |
-| `network.policy.ingress` | Ingress rules for the policy (for example, allowed sources and ports) |
+| `praxisMode.enabled` | Tri-state per-CR switch for Praxis-fronted (internal-only) mode: `true` (force on), `false` (force legacy), or unset (defaulted to `true` on create by the mutating webhook for new CRs; left unset — i.e. legacy — for CRs predating the webhook). |
+| `praxisMode.praxisSelector` | Per-CR `NetworkPolicyPeer` (namespace + pod selector) identifying the Praxis instance. Fails safe to `app: payload-processing` in the `openshift-ingress` namespace when omitted. |
+| `network.policy.enabled` | When `true` (default), the operator creates a `NetworkPolicy` for the OGXServer workload. Set to `false` to disable it entirely. |
+| `network.policy.ingress` | In Praxis mode, additional ingress rules appended to the mandatory Praxis + operator rules. In legacy mode, rules that replace the defaults. |
+| `network.externalAccess.enabled` | Honored only in legacy mode. In Praxis mode it is not honored (admission warning; no external exposure created). |
 
 ## Monitoring
 

@@ -348,6 +348,7 @@ func TestReconcile(t *testing.T) {
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
 		WithPort(instancePort).
+		WithPraxisMode(true). // greenfield posture; webhook does not run in envtest
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
@@ -966,6 +967,75 @@ onemore: registry.redhat.io/org/imagename@sha256:1234567890123456789012345678901
 		result["onemore"], "Valid onemore override should be present")
 	require.NotContains(t, result, "invalid", "Invalid entry should be skipped")
 	require.NotContains(t, result, "malformed", "Malformed entry should be skipped")
+}
+
+func praxisDefault() *networkingv1.NetworkPolicyPeer {
+	return &networkingv1.NetworkPolicyPeer{
+		PodSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+			},
+		},
+		NamespaceSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				ogxiov1beta1.DefaultNamespaceNameLabel: ogxiov1beta1.DefaultPraxisNamespace,
+			},
+		},
+	}
+}
+
+func TestBuildPraxisPeer(t *testing.T) {
+	tests := []struct {
+		name       string
+		praxisMode *ogxiov1beta1.PraxisModeSpec
+		want       *networkingv1.NetworkPolicyPeer
+	}{
+		{
+			name:       "unset praxisMode falls back to default peer",
+			praxisMode: nil,
+			want:       praxisDefault(),
+		},
+		{
+			name:       "praxisMode without praxisSelector falls back to default peer",
+			praxisMode: &ogxiov1beta1.PraxisModeSpec{},
+			want:       praxisDefault(),
+		},
+		{
+			name: "praxisSelector is honored (namespace matched by metadata.name label)",
+			praxisMode: &ogxiov1beta1.PraxisModeSpec{
+				PraxisSelector: &ogxiov1beta1.PraxisSelector{
+					Namespace:   "praxis-ns",
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "custom-praxis"}},
+				},
+			},
+			want: &networkingv1.NetworkPolicyPeer{
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "custom-praxis"},
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "praxis-ns"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			instance := &ogxiov1beta1.OGXServer{Spec: ogxiov1beta1.OGXServerSpec{PraxisMode: tc.praxisMode}}
+			got := controllers.BuildPraxisPeer(instance)
+			require.NotNil(t, got, "BuildPraxisPeer must never return nil")
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestBuildPraxisPeer_DefaultNeverAllowAll(t *testing.T) {
+	peer := controllers.BuildPraxisPeer(&ogxiov1beta1.OGXServer{})
+	require.NotNil(t, peer.PodSelector)
+	require.Equal(t, ogxiov1beta1.DefaultPraxisPodLabelValue, peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultLabelKey])
+	require.NotNil(t, peer.NamespaceSelector, "default peer should pin the Praxis namespace")
+	require.Equal(t, ogxiov1beta1.DefaultPraxisNamespace,
+		peer.NamespaceSelector.MatchLabels[ogxiov1beta1.DefaultNamespaceNameLabel])
 }
 
 func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {

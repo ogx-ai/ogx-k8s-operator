@@ -743,3 +743,69 @@ func TestMutatingWebhookOnlyFiresOnCreate(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_ExternalAccessWarning(t *testing.T) {
+	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
+
+	tests := []struct {
+		name        string
+		network     *NetworkSpec
+		praxisMode  *PraxisModeSpec
+		wantWarning bool
+	}{
+		{
+			name:        "no network spec: no warning",
+			network:     nil,
+			wantWarning: false,
+		},
+		{
+			name:        "external access disabled: no warning",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: false}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: false,
+		},
+		{
+			name:        "external access enabled + praxis mode enabled: warns but does not reject",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: true,
+		},
+		{
+			name:        "external access enabled + praxisMode unset: no warning (legacy)",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:  nil,
+			wantWarning: false,
+		},
+		{
+			name:        "external access enabled + praxis mode disabled: no warning (legacy honors it)",
+			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(false)},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network:      tt.network,
+					PraxisMode:   tt.praxisMode,
+				},
+			}
+
+			warnings, err := v.ValidateCreate(t.Context(), server)
+			if err != nil {
+				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
+			}
+
+			got := len(warnings) > 0
+			if got != tt.wantWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantWarning %v", warnings, tt.wantWarning)
+			}
+			if tt.wantWarning && !strings.Contains(strings.Join(warnings, " "), "externalAccess") {
+				t.Errorf("expected warning to mention externalAccess, got %v", warnings)
+			}
+		})
+	}
+}

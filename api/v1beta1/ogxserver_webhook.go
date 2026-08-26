@@ -57,9 +57,6 @@ func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
 }
 
 //nolint:lll // kubebuilder marker cannot be split across lines.
-//+kubebuilder:webhook:path=/validate-ogx-io-v1beta1-ogxserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create;update,versions=v1beta1,name=vogxserver.kb.io,admissionReviewVersions=v1
-
-//nolint:lll // kubebuilder marker cannot be split across lines.
 //+kubebuilder:webhook:path=/mutate-ogx-io-v1beta1-ogxserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create,versions=v1beta1,name=mogxserver.kb.io,admissionReviewVersions=v1
 
 // Default implements admission.Defaulter. It only runs on CREATE (per the
@@ -74,6 +71,9 @@ func (d *OGXServerDefaulter) Default(_ context.Context, r *OGXServer) error {
 	}
 	return nil
 }
+
+//nolint:lll // kubebuilder marker cannot be split across lines.
+//+kubebuilder:webhook:path=/validate-ogx-io-v1beta1-ogxserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create;update,versions=v1beta1,name=vogxserver.kb.io,admissionReviewVersions=v1
 
 // ValidateCreate implements admission.Validator.
 func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (admission.Warnings, error) {
@@ -93,11 +93,41 @@ func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ *OGXServer) (ad
 }
 
 func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) {
+	warnings := collectValidationWarnings(r)
+
 	allErrs := v.collectValidationErrors(r)
 	if len(allErrs) > 0 {
-		return nil, allErrs.ToAggregate()
+		return warnings, allErrs.ToAggregate()
 	}
-	return nil, nil
+	return warnings, nil
+}
+
+// collectValidationWarnings returns non-fatal admission warnings. When an OGXServer opts into
+// Praxis-fronted mode (spec.praxisMode.enabled: true), OGX is internal-only and requesting external
+// access is not honored: the operator does not create any external exposure. This is surfaced as a
+// warning rather than a rejection so existing CRs and GitOps applies do not break.
+//
+// The warning is emitted only when Praxis mode is enabled. On create the mutating webhook has
+// already defaulted an unset spec.praxisMode to enabled, so this reflects the effective mode; when
+// Praxis mode is disabled (or unset on an upgrade, meaning legacy), external access may be honored,
+// so a warning would be misleading.
+func collectValidationWarnings(r *OGXServer) admission.Warnings {
+	var warnings admission.Warnings
+
+	externalAccessRequested := r.Spec.Network != nil &&
+		r.Spec.Network.ExternalAccess != nil &&
+		r.Spec.Network.ExternalAccess.Enabled
+	praxisModeEnabled := r.Spec.PraxisMode != nil &&
+		r.Spec.PraxisMode.Enabled != nil && *r.Spec.PraxisMode.Enabled
+
+	if externalAccessRequested && praxisModeEnabled {
+		warnings = append(warnings,
+			"spec.network.externalAccess.enabled is not honored: OGX is internal-only (Praxis-fronted, "+
+				"spec.praxisMode.enabled: true) and the operator does not create external exposure. "+
+				"This value is treated as false.")
+	}
+
+	return warnings
 }
 
 func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorList {

@@ -42,6 +42,20 @@ const (
 	DefaultLabelKey = "app"
 	// DefaultLabelValue is the default value for labels.
 	DefaultLabelValue = "ogx"
+	// DefaultPraxisPodLabelValue is the value of the "app" label identifying Praxis
+	// (MaaS Gateway) pods. Praxis is the only application workload permitted to reach
+	// OGX; this value is used as the fail-safe NetworkPolicy ingress peer when a CR's
+	// spec.praxisMode.praxisSelector is not set.
+	DefaultPraxisPodLabelValue = "payload-processing"
+	// DefaultPraxisNamespace is the namespace Praxis (MaaS) pods run in by default. The PoC
+	// operator places the extproc/Praxis servers in openshift-ingress, so the fail-safe
+	// NetworkPolicy peer pins its namespaceSelector to this namespace. This is provisional and
+	// pending confirmation with the MaaS team; override it per-CR via
+	// spec.praxisMode.praxisSelector if Praxis runs elsewhere.
+	DefaultPraxisNamespace = "openshift-ingress"
+	// DefaultNamespaceNameLabel is the well-known Kubernetes label the API server sets on every
+	// namespace to its own name; it is used to select a namespace by name in a NetworkPolicy peer.
+	DefaultNamespaceNameLabel = "kubernetes.io/metadata.name"
 	// DefaultMountPath is the default mount path for storage.
 	DefaultMountPath = "/.ogx"
 	// OGXServerKind is the kind name for OGXServer resources.
@@ -248,15 +262,12 @@ type TLSClientConfig struct {
 
 // NetworkPolicySpec configures the operator-managed NetworkPolicy for this server.
 //
-// Ingress is always enforced unless explicitly omitted from policyTypes.
-// The operator always includes default ingress rules (allow from same-namespace
-// and operator-namespace on the service port), merging them with any
-// user-specified rules.
+// The operator always enforces a mandatory ingress lock-down: OGX accepts traffic on the
+// service port only from Praxis pods (the internal API front-end) plus the operator
+// namespace (control-plane status polling). These mandatory rules cannot be removed via this
+// spec; set Enabled=false to disable the NetworkPolicy entirely as an escape hatch.
 //
-// Egress is unrestricted by default. It is only enforced when egress rules
-// are provided or "Egress" is explicitly included in policyTypes.
-// When any egress rules are configured, or when "Egress" is explicitly included in
-// policyTypes, a kube-dns egress rule is auto-injected to prevent DNS breakage.
+// Egress is unrestricted by default. It is only enforced when egress rules are provided.
 type NetworkPolicySpec struct {
 	// Enabled controls whether the operator manages a NetworkPolicy for this server.
 	// Defaults to true. Set to false to disable NetworkPolicy creation entirely.
@@ -270,8 +281,9 @@ type NetworkPolicySpec struct {
 	// +optional
 	// +kubebuilder:validation:items:Enum=Ingress;Egress
 	PolicyTypes []networkingv1.PolicyType `json:"policyTypes,omitempty"`
-	// Ingress defines additional ingress rules, merged with operator defaults
-	// (allow from same-namespace and operator-namespace on the service port).
+	// Ingress defines additional ingress rules, appended to the mandatory operator rules
+	// (allow from Praxis pods and the operator namespace on the service port). User rules
+	// are additive and cannot remove the mandatory Praxis lock-down.
 	// +optional
 	Ingress []networkingv1.NetworkPolicyIngressRule `json:"ingress,omitempty"`
 	// Egress rules. When non-empty, a kube-dns egress rule is auto-injected
