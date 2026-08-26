@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.4.4
 	github.com/go-openapi/jsonpointer v1.0.0
 	github.com/google/go-cmp v0.7.0
-	github.com/google/go-containerregistry v0.21.9
+	github.com/google/go-containerregistry v0.22.0
 	github.com/openshift/api v0.0.0-20260610192510-1b2a074e0bd6
 	github.com/openshift/controller-runtime-common v0.0.0-20260428152732-64ee174f5e2e
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.82.0
