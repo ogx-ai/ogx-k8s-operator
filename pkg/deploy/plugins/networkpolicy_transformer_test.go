@@ -56,6 +56,7 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
 		NetworkSpec:       nil, // No network spec
 	})
 
@@ -72,15 +73,20 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 	// Should have pod selector with instance name
 	assert.Contains(t, yamlStr, "app.kubernetes.io/instance: test-instance")
 
-	// Should have ingress rules with default peers
-	assert.Contains(t, yamlStr, "podSelector: {}")
+	// Default ingress allows only Praxis pods (fail-safe label) plus the operator namespace.
+	assert.Contains(t, yamlStr, "app: payload-processing")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
+
+	// Must NOT allow all pods in the same namespace, nor the OpenShift router.
+	assert.NotContains(t, yamlStr, "podSelector: {}")
+	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: ingress")
 
 	// Should have port rule
 	assert.Contains(t, yamlStr, "port: 8321")
 }
 
-// TestNetworkPolicyTransformer_ExplicitIngressFromCR uses v1beta1 NetworkPolicySpec.Ingress verbatim.
+// TestNetworkPolicyTransformer_ExplicitIngressFromCR verifies user ingress rules are appended
+// additively on top of the mandatory Praxis + operator peers (rather than replacing them).
 func TestNetworkPolicyTransformer_ExplicitIngressFromCR(t *testing.T) {
 	rf := resource.NewFactory(nil)
 	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
@@ -108,6 +114,7 @@ func TestNetworkPolicyTransformer_ExplicitIngressFromCR(t *testing.T) {
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
 		NetworkSpec: &ogxiov1beta1.NetworkSpec{
 			Policy: &ogxiov1beta1.NetworkPolicySpec{
 				Ingress: ingress,
@@ -123,7 +130,11 @@ func TestNetworkPolicyTransformer_ExplicitIngressFromCR(t *testing.T) {
 	require.NoError(t, err)
 	yamlStr := string(yamlBytes)
 
+	// User rule is present...
 	assert.Contains(t, yamlStr, "namespaceSelector: {}")
+	// ...and the mandatory Praxis + operator peers are still present (additive, not replacing).
+	assert.Contains(t, yamlStr, "app: payload-processing")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 }
 
 func TestNetworkPolicyTransformer_CustomPort(t *testing.T) {
@@ -138,6 +149,7 @@ func TestNetworkPolicyTransformer_CustomPort(t *testing.T) {
 		InstanceName:      "test-instance",
 		ServicePort:       9000,
 		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
 		NetworkSpec:       nil,
 	})
 
@@ -154,35 +166,46 @@ func TestNetworkPolicyTransformer_CustomPort(t *testing.T) {
 	assert.Contains(t, yamlStr, "port: 9000")
 }
 
-func TestNetworkPolicyTransformer_RouterPeersWhenNetworkSpecProvided(t *testing.T) {
-	rf := resource.NewFactory(nil)
-	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
-	require.NoError(t, err)
+// TestNetworkPolicyTransformer_NoRouterPeers verifies the OpenShift router peer is never
+// emitted — OGX is internal-only, so no external ingress-controller traffic is admitted,
+// whether or not a NetworkSpec is provided.
+func TestNetworkPolicyTransformer_NoRouterPeers(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		network *ogxiov1beta1.NetworkSpec
+	}{
+		{name: "network spec provided", network: &ogxiov1beta1.NetworkSpec{}},
+		{name: "network spec nil", network: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rf := resource.NewFactory(nil)
+			res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+			require.NoError(t, err)
 
-	rm := resmap.New()
-	require.NoError(t, rm.Append(res))
+			rm := resmap.New()
+			require.NoError(t, rm.Append(res))
 
-	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
-		InstanceName:      "test-instance",
-		ServicePort:       8321,
-		OperatorNamespace: "operator-ns",
-		NetworkSpec:       &ogxiov1beta1.NetworkSpec{},
-	})
+			transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+				InstanceName:      "test-instance",
+				ServicePort:       8321,
+				OperatorNamespace: "operator-ns",
+				PraxisMode:        true,
+				NetworkSpec:       tc.network,
+			})
 
-	err = transformer.Transform(rm)
-	require.NoError(t, err)
+			require.NoError(t, transformer.Transform(rm))
 
-	transformedRes := rm.Resources()[0]
-	yamlBytes, err := transformedRes.AsYAML()
-	require.NoError(t, err)
+			yamlBytes, err := rm.Resources()[0].AsYAML()
+			require.NoError(t, err)
 
-	yamlStr := string(yamlBytes)
-
-	// Should have OpenShift router namespace selector when network spec is provided
-	assert.Contains(t, yamlStr, "network.openshift.io/policy-group: ingress")
+			assert.NotContains(t, string(yamlBytes), "network.openshift.io/policy-group: ingress")
+		})
+	}
 }
 
-func TestNetworkPolicyTransformer_NoRouterPeersWhenNetworkSpecNil(t *testing.T) {
+// TestNetworkPolicyTransformer_PraxisPeerFromConfig verifies a configured Praxis peer is used
+// verbatim in place of the fail-safe default.
+func TestNetworkPolicyTransformer_PraxisPeerFromConfig(t *testing.T) {
 	rf := resource.NewFactory(nil)
 	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
 	require.NoError(t, err)
@@ -194,20 +217,27 @@ func TestNetworkPolicyTransformer_NoRouterPeersWhenNetworkSpecNil(t *testing.T) 
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
-		NetworkSpec:       nil,
+		PraxisMode:        true,
+		PraxisPeer: &networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "praxis-ns"},
+			},
+			PodSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "custom-praxis"},
+			},
+		},
 	})
 
-	err = transformer.Transform(rm)
-	require.NoError(t, err)
+	require.NoError(t, transformer.Transform(rm))
 
-	transformedRes := rm.Resources()[0]
-	yamlBytes, err := transformedRes.AsYAML()
+	yamlBytes, err := rm.Resources()[0].AsYAML()
 	require.NoError(t, err)
-
 	yamlStr := string(yamlBytes)
 
-	// Should NOT have OpenShift router namespace selector when network spec is nil
-	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: ingress")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: praxis-ns")
+	assert.Contains(t, yamlStr, "app: custom-praxis")
+	// The fail-safe default must not appear when a peer is configured.
+	assert.NotContains(t, yamlStr, "app: payload-processing")
 }
 
 func TestNetworkPolicyTransformer_MonitoringIngressWhenMetricsPortSet(t *testing.T) {
@@ -222,6 +252,7 @@ func TestNetworkPolicyTransformer_MonitoringIngressWhenMetricsPortSet(t *testing
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
 		NetworkSpec:       nil,
 		MetricsPort:       9464,
 	})
@@ -251,6 +282,7 @@ func TestNetworkPolicyTransformer_NoMonitoringIngressWhenMetricsPortZero(t *test
 		InstanceName:      "test-instance",
 		ServicePort:       8321,
 		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
 		NetworkSpec:       nil,
 		MetricsPort:       0,
 	})
@@ -265,4 +297,79 @@ func TestNetworkPolicyTransformer_NoMonitoringIngressWhenMetricsPortZero(t *test
 	yamlStr := string(yamlBytes)
 
 	assert.NotContains(t, yamlStr, "network.openshift.io/policy-group: monitoring")
+}
+
+// TestNetworkPolicyTransformer_LegacyMode verifies that with PraxisMode disabled the transformer
+// preserves the pre-Praxis behavior: the same-namespace peer and the OpenShift router peer are
+// emitted, and the Praxis peer is not.
+func TestNetworkPolicyTransformer_LegacyMode(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		// NetworkSpec present so the legacy router peer is included.
+		NetworkSpec: &ogxiov1beta1.NetworkSpec{},
+		PraxisMode:  false,
+	})
+
+	require.NoError(t, transformer.Transform(rm))
+
+	yamlBytes, err := rm.Resources()[0].AsYAML()
+	require.NoError(t, err)
+	yamlStr := string(yamlBytes)
+
+	// Legacy peers: same-namespace and OpenShift router.
+	assert.Contains(t, yamlStr, "podSelector: {}")
+	assert.Contains(t, yamlStr, "network.openshift.io/policy-group: ingress")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
+
+	// The Praxis fail-safe peer must NOT appear in legacy mode.
+	assert.NotContains(t, yamlStr, "app: payload-processing")
+}
+
+// TestNetworkPolicyTransformer_LegacyModeUserIngressReplaces verifies that in legacy mode
+// user-provided ingress rules fully replace the defaults (pre-Praxis semantics).
+func TestNetworkPolicyTransformer_LegacyModeUserIngressReplaces(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	proto := corev1.ProtocolTCP
+	ingress := []networkingv1.NetworkPolicyIngressRule{
+		{
+			From:  []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{}}},
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &proto, Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 8321}}},
+		},
+	}
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		NetworkSpec: &ogxiov1beta1.NetworkSpec{
+			Policy: &ogxiov1beta1.NetworkPolicySpec{Ingress: ingress},
+		},
+		PraxisMode: false,
+	})
+
+	require.NoError(t, transformer.Transform(rm))
+
+	yamlBytes, err := rm.Resources()[0].AsYAML()
+	require.NoError(t, err)
+	yamlStr := string(yamlBytes)
+
+	// User rule present; defaults (operator namespace peer) replaced, not appended.
+	assert.Contains(t, yamlStr, "namespaceSelector: {}")
+	assert.NotContains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
+	assert.NotContains(t, yamlStr, "app: payload-processing")
 }

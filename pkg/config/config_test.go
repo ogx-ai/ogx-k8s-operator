@@ -724,7 +724,7 @@ vector_stores:
 		},
 	}
 
-	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	generated, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -772,7 +772,7 @@ providers:
 		DisabledAPIs: []string{"vector_io", "tool_runtime"},
 	}
 
-	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	generated, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -792,13 +792,82 @@ apis:
 		DisabledAPIs: []string{"inference"},
 	}
 
-	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	generated, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if strings.Contains(generated.ConfigYAML, "apis:") {
 		t.Errorf("expected apis section to be removed when all APIs are disabled, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestGenerateConfig_PraxisModeDisablesResponses(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+- vector_io
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(generated.ConfigYAML, "- responses") {
+		t.Errorf("expected Praxis mode to disable the responses API, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "- inference") {
+		t.Errorf("expected other APIs to be preserved in Praxis mode, got:\n%s", generated.ConfigYAML)
+	}
+	// The user's spec must not be mutated by the internal disable.
+	if len(spec.DisabledAPIs) != 0 {
+		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
+func TestGenerateConfig_LegacyModeKeepsResponses(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(generated.ConfigYAML, "- responses") {
+		t.Errorf("expected legacy mode to keep the responses API, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestGenerateConfig_PraxisModeResponsesAlreadyDisabled(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+`
+
+	// The user already disabled responses; Praxis mode must not duplicate it.
+	spec := &ogxiov1beta1.OGXServerSpec{DisabledAPIs: []string{"responses"}}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(generated.ConfigYAML, "- responses") {
+		t.Errorf("expected responses API to be disabled, got:\n%s", generated.ConfigYAML)
+	}
+	if len(spec.DisabledAPIs) != 1 {
+		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
 	}
 }
 
@@ -814,11 +883,11 @@ providers:
 		DisabledAPIs: []string{"vector_io"},
 	}
 
-	g1, err := GenerateConfig(spec, []byte(baseConfig))
+	g1, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	g2, err := GenerateConfig(spec, []byte(baseConfig))
+	g2, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1812,7 +1881,7 @@ providers:
 		},
 	}
 
-	generated, err := GenerateConfig(spec, []byte(baseConfig))
+	generated, err := GenerateConfig(spec, []byte(baseConfig), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

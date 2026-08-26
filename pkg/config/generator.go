@@ -26,10 +26,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// responsesAPI is the name of the Responses API in the config's apis list. In Praxis-fronted mode
+// the Responses API is served by Praxis, so the operator disables it in OGX's generated config.
+const responsesAPI = "responses"
+
 // GenerateConfig orchestrates the config generation pipeline.
-// It takes the OGXServer spec and resolved base config, producing a
-// complete config.yaml with all provider/resource/storage expansions applied.
-func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*GeneratedConfig, error) {
+// It takes the OGXServer spec, the resolved base config, and whether the instance runs in
+// Praxis-fronted mode, producing a complete config.yaml with all provider/resource/storage
+// expansions applied. When praxisMode is true the Responses API is disabled in the generated
+// config (Praxis serves it) without mutating the user's CR.
+func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, praxisMode bool) (*GeneratedConfig, error) {
 	// Parse base config
 	baseConfig, err := ParseBaseConfig(baseConfigData)
 	if err != nil {
@@ -55,8 +61,14 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*G
 	userStorage := ApplyStorage(spec.Storage)
 	mergedStorage := MergeStorage(baseConfig.Storage, userStorage)
 
-	// Determine APIs (filter disabled)
-	mergedAPIs := MergeAPIs(baseConfig.APIs, spec.DisabledAPIs)
+	// Determine APIs (filter disabled). In Praxis-fronted mode the Responses API is served by
+	// Praxis, so it is disabled here internally — this augments spec.DisabledAPIs rather than
+	// mutating the user's CR.
+	disabledAPIs := spec.DisabledAPIs
+	if praxisMode {
+		disabledAPIs = appendIfMissing(disabledAPIs, responsesAPI)
+	}
+	mergedAPIs := MergeAPIs(baseConfig.APIs, disabledAPIs)
 
 	// Build the final config.yaml structure
 	finalConfig := buildFinalConfig(baseConfig, mergedProviders, userModels, mergedStorage, mergedAPIs, spec)
@@ -90,6 +102,19 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*G
 		ConfigVersion:          configVersion,
 		ConfigVersionDefaulted: !configVersionParsed,
 	}, nil
+}
+
+// appendIfMissing returns items with value appended, unless it is already present. The input slice
+// is not mutated (a fresh slice is returned when appending) so the caller's spec is left untouched.
+func appendIfMissing(items []string, value string) []string {
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	out := make([]string, len(items), len(items)+1)
+	copy(out, items)
+	return append(out, value)
 }
 
 func buildFinalConfig(

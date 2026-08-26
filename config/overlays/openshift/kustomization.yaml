@@ -20,9 +20,8 @@ patches:
       path: /metadata/annotations
       value:
         service.beta.openshift.io/serving-cert-secret-name: ogx-k8s-operator-webhook-cert
-# Annotate the ValidatingWebhookConfiguration and MutatingWebhookConfiguration
-# so OpenShift injects the service-ca CA bundle into
-# webhooks[].clientConfig.caBundle.
+# Annotate the ValidatingWebhookConfiguration so OpenShift injects the
+# service-ca CA bundle into webhooks[].clientConfig.caBundle.
 - target:
     kind: ValidatingWebhookConfiguration
   patch: |-
@@ -30,6 +29,8 @@ patches:
       path: /metadata/annotations
       value:
         service.beta.openshift.io/inject-cabundle: "true"
+# Annotate the MutatingWebhookConfiguration so OpenShift injects the
+# service-ca CA bundle into webhooks[].clientConfig.caBundle.
 - target:
     kind: MutatingWebhookConfiguration
   patch: |-

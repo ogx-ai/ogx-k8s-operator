@@ -77,7 +77,7 @@ func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, inst
 		return nil, fmt.Errorf("failed to validate secret env var mapping: %w", validateErr)
 	}
 
-	generated, err := config.GenerateConfig(&instance.Spec, baseConfigData)
+	generated, err := config.GenerateConfig(&instance.Spec, baseConfigData, r.resolvePraxisMode(instance))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate config: %w", err)
 	}

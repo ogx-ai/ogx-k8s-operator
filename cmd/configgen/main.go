@@ -99,7 +99,12 @@ func run(opts options) (*config.GeneratedConfig, error) {
 		return nil, fmt.Errorf("failed to validate secret ref env var names: %w", err)
 	}
 
-	return config.GenerateConfig(&server.Spec, baseConfigData)
+	// Resolve Praxis-fronted mode directly from the spec. This offline tool does not run the
+	// mutating webhook that defaults spec.praxisMode.enabled on create, so an unset value is
+	// treated as legacy.
+	praxisMode := server.Spec.PraxisMode != nil &&
+		server.Spec.PraxisMode.Enabled != nil && *server.Spec.PraxisMode.Enabled
+	return config.GenerateConfig(&server.Spec, baseConfigData, praxisMode)
 }
 
 type options struct {
