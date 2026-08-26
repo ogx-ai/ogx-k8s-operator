@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -518,6 +519,70 @@ func TestCEL_PodDisruptionBudgetSpec(t *testing.T) {
 				}
 			},
 			wantError: "at least one of minAvailable or maxUnavailable must be specified",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			tt.mutate(obj)
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("expected success, got: %v", err)
+				}
+				t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+			} else {
+				requireCELError(t, err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestCEL_PraxisSelector(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-praxis")
+
+	tests := []struct {
+		name      string
+		mutate    func(*OGXServer)
+		wantError string
+	}{
+		{
+			name: "matchLabels only is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.PraxisMode = &PraxisModeSpec{
+					PraxisSelector: &PraxisSelector{
+						Namespace:   "praxis",
+						PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "praxis"}},
+					},
+				}
+			},
+		},
+		{
+			name: "matchExpressions only is valid",
+			mutate: func(o *OGXServer) {
+				o.Spec.PraxisMode = &PraxisModeSpec{
+					PraxisSelector: &PraxisSelector{
+						Namespace: "praxis",
+						PodSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      "app",
+							Operator: metav1.LabelSelectorOpExists,
+						}}},
+					},
+				}
+			},
+		},
+		{
+			name: "empty podSelector is invalid with the intended message",
+			mutate: func(o *OGXServer) {
+				o.Spec.PraxisMode = &PraxisModeSpec{
+					PraxisSelector: &PraxisSelector{
+						Namespace:   "praxis",
+						PodSelector: metav1.LabelSelector{},
+					},
+				}
+			},
+			wantError: "podSelector must not be empty",
 		},
 	}
 

@@ -17,10 +17,14 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
 
 func TestDeriveID(t *testing.T) {
@@ -646,5 +650,96 @@ func TestCollectValidationErrors(t *testing.T) {
 				t.Errorf("collectValidationErrors() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
 			}
 		})
+	}
+}
+
+func TestOGXServerDefaulter_Default(t *testing.T) {
+	t.Run("nil PraxisMode is defaulted to enabled", func(t *testing.T) {
+		server := &OGXServer{Spec: OGXServerSpec{Distribution: DistributionSpec{Name: "starter"}}}
+
+		if err := (&OGXServerDefaulter{}).Default(context.Background(), server); err != nil {
+			t.Fatalf("Default() returned error: %v", err)
+		}
+
+		if server.Spec.PraxisMode == nil || server.Spec.PraxisMode.Enabled == nil || !*server.Spec.PraxisMode.Enabled {
+			t.Fatalf("Default() = %+v, want PraxisMode.Enabled = true", server.Spec.PraxisMode)
+		}
+	})
+
+	t.Run("existing PraxisMode is left untouched", func(t *testing.T) {
+		existing := &PraxisModeSpec{Enabled: ptr(false)}
+		server := &OGXServer{Spec: OGXServerSpec{
+			Distribution: DistributionSpec{Name: "starter"},
+			PraxisMode:   existing,
+		}}
+
+		if err := (&OGXServerDefaulter{}).Default(context.Background(), server); err != nil {
+			t.Fatalf("Default() returned error: %v", err)
+		}
+
+		if server.Spec.PraxisMode != existing {
+			t.Fatal("Default() overwrote an already-set PraxisMode")
+		}
+	})
+}
+
+// TestMutatingWebhookOnlyFiresOnCreate guards the guarantee that existing
+// OGXServer CRs are never touched by the PraxisMode defaulter: the apiserver
+// only invokes the mutating webhook for operations listed in its rules, and
+// Default() itself has no way to distinguish create from update. If this
+// ever regresses to include UPDATE (e.g. a marker edit above gets
+// regenerated), CRs that predate the praxisMode field would start being
+// mutated on their next update.
+type webhookManifestDoc struct {
+	Kind     string `json:"kind"`
+	Webhooks []struct {
+		Name  string `json:"name"`
+		Rules []struct {
+			Operations []string `json:"operations"`
+		} `json:"rules"`
+	} `json:"webhooks"`
+}
+
+// findWebhookRules returns the rule operations for the named webhook across
+// all MutatingWebhookConfiguration/ValidatingWebhookConfiguration docs in a
+// multi-document YAML manifest.
+func findWebhookRules(t *testing.T, manifest, webhookName string) [][]string {
+	t.Helper()
+
+	var rules [][]string
+	for _, rawDoc := range strings.Split(manifest, "\n---\n") {
+		if strings.TrimSpace(rawDoc) == "" {
+			continue
+		}
+		var doc webhookManifestDoc
+		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
+			t.Fatalf("failed to parse webhook manifest doc: %v", err)
+		}
+		for _, wh := range doc.Webhooks {
+			if wh.Name != webhookName {
+				continue
+			}
+			for _, rule := range wh.Rules {
+				rules = append(rules, rule.Operations)
+			}
+		}
+	}
+	return rules
+}
+
+func TestMutatingWebhookOnlyFiresOnCreate(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "config", "webhook", "manifests.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read webhook manifests: %v", err)
+	}
+
+	rules := findWebhookRules(t, string(data), "mogxserver.kb.io")
+	if len(rules) == 0 {
+		t.Fatal("did not find mogxserver.kb.io in config/webhook/manifests.yaml")
+	}
+	for _, ops := range rules {
+		if len(ops) != 1 || ops[0] != "CREATE" {
+			t.Errorf("mogxserver.kb.io rule operations = %v, want [CREATE] only", ops)
+		}
 	}
 }

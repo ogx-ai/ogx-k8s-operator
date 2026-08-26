@@ -40,18 +40,40 @@ type OGXServerValidator struct {
 
 var _ admission.Validator[*OGXServer] = &OGXServerValidator{}
 
-// SetupWebhookWithManager registers the validating webhook.
+// OGXServerDefaulter defaults newly created OGXServer resources.
+type OGXServerDefaulter struct{}
+
+var _ admission.Defaulter[*OGXServer] = &OGXServerDefaulter{}
+
+// SetupWebhookWithManager registers the validating and mutating webhooks.
 // knownDistNames should be the keys from the operator's distribution registry.
 func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
 	return ctrl.NewWebhookManagedBy(mgr, &OGXServer{}).
 		WithValidator(&OGXServerValidator{
 			KnownDistributionNames: knownDistNames,
 		}).
+		WithDefaulter(&OGXServerDefaulter{}).
 		Complete()
 }
 
 //nolint:lll // kubebuilder marker cannot be split across lines.
 //+kubebuilder:webhook:path=/validate-ogx-io-v1beta1-ogxserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create;update,versions=v1beta1,name=vogxserver.kb.io,admissionReviewVersions=v1
+
+//nolint:lll // kubebuilder marker cannot be split across lines.
+//+kubebuilder:webhook:path=/mutate-ogx-io-v1beta1-ogxserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create,versions=v1beta1,name=mogxserver.kb.io,admissionReviewVersions=v1
+
+// Default implements admission.Defaulter. It only runs on CREATE (per the
+// webhook's verbs=create rule), so existing OGXServer CRs from before this
+// field existed are left untouched — PraxisMode is defaulted only for
+// brand-new CRs, not retroactively applied to CRs upgrading from an older
+// operator version.
+func (d *OGXServerDefaulter) Default(_ context.Context, r *OGXServer) error {
+	if r.Spec.PraxisMode == nil {
+		enabled := true
+		r.Spec.PraxisMode = &PraxisModeSpec{Enabled: &enabled}
+	}
+	return nil
+}
 
 // ValidateCreate implements admission.Validator.
 func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (admission.Warnings, error) {
