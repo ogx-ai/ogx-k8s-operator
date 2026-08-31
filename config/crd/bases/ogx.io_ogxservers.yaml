@@ -618,6 +618,119 @@ spec:
                 - key
                 - name
                 type: object
+              praxisMode:
+                description: |-
+                  PraxisMode configures integration with an existing Praxis instance
+                  that acts as gateway for this OGX server.
+                  Defaults to enabled on creation via the mutating webhook. Omitted
+                  (disabled) for OGXServer CRs that preexist the addition of this field.
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Enabled controls whether Praxis mode is enabled.
+                      Defaults to true.
+                    type: boolean
+                  migrationJob:
+                    description: |-
+                      MigrationJob configures the DB migration Job that migrates OGX data to Praxis.
+                      When omitted the Job is not created.
+                    properties:
+                      enabled:
+                        default: true
+                        description: |-
+                          Enabled controls whether the DB migration job is enabled.
+                          Defaults to true.
+                        type: boolean
+                      targetConnectionString:
+                        description: |-
+                          TargetConnectionString references a Secret containing the PostgreSQL
+                          connection string that the migration Job writes to. When omitted, the
+                          Job writes to the same PostgreSQL instance it reads from (the connection
+                          string configured in spec.storage.sql.connectionString).
+                          The Secret must be in the same namespace as the OGXServer
+                          and must have the label ogx.io/watch: "true".
+                        properties:
+                          key:
+                            description: Key is the key within the Secret.
+                            maxLength: 253
+                            minLength: 1
+                            pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                            type: string
+                          name:
+                            description: Name is the name of the Kubernetes Secret.
+                            minLength: 1
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                  praxisSelector:
+                    description: |-
+                      PraxisSelector identifies the Praxis instance that is the gateway to the OGX server.
+                      Defaults to the cluster's default Praxis instance if omitted.
+                    properties:
+                      namespace:
+                        description: Namespace is the namespace of the Praxis instance.
+                        minLength: 1
+                        type: string
+                      podSelector:
+                        description: PodSelector selects the Praxis Pods by label.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - namespace
+                    - podSelector
+                    type: object
+                    x-kubernetes-validations:
+                    - message: podSelector must not be empty
+                      rule: (has(self.podSelector.matchLabels) && size(self.podSelector.matchLabels)
+                        > 0) || (has(self.podSelector.matchExpressions) && size(self.podSelector.matchExpressions)
+                        > 0)
+                type: object
               providers:
                 description: |-
                   Providers configures providers by API type.

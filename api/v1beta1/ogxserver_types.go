@@ -449,6 +449,56 @@ type WorkloadSpec struct {
 	Overrides *WorkloadOverrides `json:"overrides,omitempty"`
 }
 
+// PraxisSelector identifies the target Praxis instance by namespace and Pod label selector.
+// +kubebuilder:validation:XValidation:rule="(has(self.podSelector.matchLabels) && size(self.podSelector.matchLabels) > 0) || (has(self.podSelector.matchExpressions) && size(self.podSelector.matchExpressions) > 0)",message="podSelector must not be empty"
+//
+//nolint:lll // kubebuilder markers cannot be split across lines.
+type PraxisSelector struct {
+	// Namespace is the namespace of the Praxis instance.
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+	// PodSelector selects the Praxis Pods by label.
+	PodSelector metav1.LabelSelector `json:"podSelector"`
+}
+
+// MigrationJobSpec configures the Job that migrates OGX data to Praxis.
+type MigrationJobSpec struct {
+	// Enabled controls whether the DB migration job is enabled.
+	// Defaults to true.
+	// +optional
+	// +kubebuilder:default:=true
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// TargetConnectionString references a Secret containing the PostgreSQL
+	// connection string that the migration Job writes to. When omitted, the
+	// Job writes to the same PostgreSQL instance it reads from (the connection
+	// string configured in spec.storage.sql.connectionString).
+	// The Secret must be in the same namespace as the OGXServer
+	// and must have the label ogx.io/watch: "true".
+	// +optional
+	TargetConnectionString *SecretKeyRef `json:"targetConnectionString,omitempty"`
+}
+
+// PraxisMode configures integration with an existing Praxis instance that
+// acts as gateway for this OGX server.
+type PraxisModeSpec struct {
+	// Enabled controls whether Praxis mode is enabled.
+	// Defaults to true.
+	// +optional
+	// +kubebuilder:default:=true
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// PraxisSelector identifies the Praxis instance that is the gateway to the OGX server.
+	// Defaults to the cluster's default Praxis instance if omitted.
+	// +optional
+	PraxisSelector *PraxisSelector `json:"praxisSelector,omitempty"`
+
+	// MigrationJob configures the DB migration Job that migrates OGX data to Praxis.
+	// When omitted the Job is not created.
+	// +optional
+	MigrationJob *MigrationJobSpec `json:"migrationJob,omitempty"`
+}
+
 // OGXServerSpec defines the desired state of OGXServer.
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.providers)",message="overrideConfig and providers are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="!has(self.overrideConfig) || !has(self.resources)",message="overrideConfig and resources are mutually exclusive"
@@ -520,6 +570,13 @@ type OGXServerSpec struct {
 	// and must have the label ogx.io/watch: "true".
 	// +optional
 	OverrideConfig *ConfigMapKeyRef `json:"overrideConfig,omitempty"`
+
+	// PraxisMode configures integration with an existing Praxis instance
+	// that acts as gateway for this OGX server.
+	// Defaults to enabled on creation via the mutating webhook. Omitted
+	// (disabled) for OGXServer CRs that preexist the addition of this field.
+	// +optional
+	PraxisMode *PraxisModeSpec `json:"praxisMode,omitempty"`
 }
 
 // OGXServerPhase represents the current phase of the OGXServer.

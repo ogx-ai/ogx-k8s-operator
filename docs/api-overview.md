@@ -791,6 +791,18 @@ _Appears in:_
 | `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
 | `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 
+#### MigrationJobSpec
+
+MigrationJobSpec configures the Job that migrates OGX data to Praxis.
+
+_Appears in:_
+- [PraxisModeSpec](#praxismodespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled controls whether the DB migration job is enabled.<br />Defaults to true. | true |  |
+| `targetConnectionString` _[SecretKeyRef](#secretkeyref)_ | TargetConnectionString references a Secret containing the PostgreSQL<br />connection string that the migration Job writes to. When omitted, the<br />Job writes to the same PostgreSQL instance it reads from (the connection<br />string configured in spec.storage.sql.connectionString).<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+
 #### MilvusProvider
 
 MilvusProvider configures a remote::milvus vector I/O provider instance.
@@ -952,6 +964,7 @@ _Appears in:_
 | `monitoring` _[MonitoringSpec](#monitoringspec)_ | Monitoring configures Prometheus monitoring and observability. |  |  |
 | `baseConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | BaseConfig references a ConfigMap key containing the base config.yaml used<br />as the starting point for declarative config generation.<br />When set, this takes precedence over OCI label resolution.<br />Mutually exclusive with overrideConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 | `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `praxisMode` _[PraxisModeSpec](#praxismodespec)_ | PraxisMode configures integration with an existing Praxis instance<br />that acts as gateway for this OGX server.<br />Defaults to enabled on creation via the mutating webhook. Omitted<br />(disabled) for OGXServer CRs that preexist the addition of this field. |  |  |
 
 #### OGXServerStatus
 
@@ -1029,6 +1042,32 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `minAvailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MinAvailable is the minimum number of pods that must remain available. |  |  |
 | `maxUnavailable` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MaxUnavailable is the maximum number of pods that can be disrupted simultaneously. |  |  |
+
+#### PraxisModeSpec
+
+PraxisMode configures integration with an existing Praxis instance that
+acts as gateway for this OGX server.
+
+_Appears in:_
+- [OGXServerSpec](#ogxserverspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `enabled` _boolean_ | Enabled controls whether Praxis mode is enabled.<br />Defaults to true. | true |  |
+| `praxisSelector` _[PraxisSelector](#praxisselector)_ | PraxisSelector identifies the Praxis instance that is the gateway to the OGX server.<br />Defaults to the cluster's default Praxis instance if omitted. |  |  |
+| `migrationJob` _[MigrationJobSpec](#migrationjobspec)_ | MigrationJob configures the DB migration Job that migrates OGX data to Praxis.<br />When omitted the Job is not created. |  |  |
+
+#### PraxisSelector
+
+PraxisSelector identifies the target Praxis instance by namespace and Pod label selector.
+
+_Appears in:_
+- [PraxisModeSpec](#praxismodespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `namespace` _string_ | Namespace is the namespace of the Praxis instance. |  | MinLength: 1 <br /> |
+| `podSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#labelselector-v1-meta)_ | PodSelector selects the Praxis Pods by label. |  |  |
 
 #### ProviderHealthStatus
 
@@ -1267,6 +1306,7 @@ _Appears in:_
 - [DoclingServeProvider](#doclingserveprovider)
 - [IdentityConfig](#identityconfig)
 - [KVStorageSpec](#kvstoragespec)
+- [MigrationJobSpec](#migrationjobspec)
 - [MilvusProvider](#milvusprovider)
 - [OpenAIProvider](#openaiprovider)
 - [PgvectorProvider](#pgvectorprovider)
