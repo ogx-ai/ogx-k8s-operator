@@ -829,11 +829,39 @@ apis:
 	}
 }
 
+func TestGenerateConfig_PraxisModeDisablesConversations(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- conversations
+- vector_io
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{}
+
+	generated, err := GenerateConfig(spec, []byte(baseConfig), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(generated.ConfigYAML, "- conversations") {
+		t.Errorf("expected Praxis mode to disable the conversations API, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "- inference") {
+		t.Errorf("expected other APIs to be preserved in Praxis mode, got:\n%s", generated.ConfigYAML)
+	}
+	// The user's spec must not be mutated by the internal disable.
+	if len(spec.DisabledAPIs) != 0 {
+		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
 func TestGenerateConfig_LegacyModeKeepsResponses(t *testing.T) {
 	baseConfig := `version: '2'
 apis:
 - inference
 - responses
+- conversations
 `
 
 	spec := &ogxiov1beta1.OGXServerSpec{}
@@ -845,6 +873,9 @@ apis:
 
 	if !strings.Contains(generated.ConfigYAML, "- responses") {
 		t.Errorf("expected legacy mode to keep the responses API, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "- conversations") {
+		t.Errorf("expected legacy mode to keep the conversations API, got:\n%s", generated.ConfigYAML)
 	}
 }
 

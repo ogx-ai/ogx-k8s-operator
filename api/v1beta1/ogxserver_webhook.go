@@ -103,31 +103,63 @@ func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) 
 }
 
 // collectValidationWarnings returns non-fatal admission warnings. When an OGXServer opts into
-// Praxis-fronted mode (spec.praxisMode.enabled: true), OGX is internal-only and requesting external
-// access is not honored: the operator does not create any external exposure. This is surfaced as a
-// warning rather than a rejection so existing CRs and GitOps applies do not break.
+// Praxis-fronted mode (spec.praxisMode.enabled: true), OGX is internal-only, so two settings that
+// would weaken that guarantee are surfaced as warnings rather than rejections (so existing CRs and
+// GitOps applies do not break): requesting external access (not honored — the operator creates no
+// external exposure) and disabling the operator-managed NetworkPolicy (which removes the mandatory
+// Praxis ingress lock-down).
 //
-// The warning is emitted only when Praxis mode is enabled. On create the mutating webhook has
+// Warnings are emitted only when Praxis mode is enabled. On create the mutating webhook has
 // already defaulted an unset spec.praxisMode to enabled, so this reflects the effective mode; when
-// Praxis mode is disabled (or unset on an upgrade, meaning legacy), external access may be honored,
+// Praxis mode is disabled (or unset on an upgrade, meaning legacy), these settings may be honored,
 // so a warning would be misleading.
 func collectValidationWarnings(r *OGXServer) admission.Warnings {
+	// Both warnings only apply in Praxis-fronted mode; in legacy mode these settings may be honored.
+	if !isPraxisModeEnabled(r) {
+		return nil
+	}
+
 	var warnings admission.Warnings
 
-	externalAccessRequested := r.Spec.Network != nil &&
-		r.Spec.Network.ExternalAccess != nil &&
-		r.Spec.Network.ExternalAccess.Enabled
-	praxisModeEnabled := r.Spec.PraxisMode != nil &&
-		r.Spec.PraxisMode.Enabled != nil && *r.Spec.PraxisMode.Enabled
-
-	if externalAccessRequested && praxisModeEnabled {
+	if isExternalAccessRequested(r) {
 		warnings = append(warnings,
 			"spec.network.externalAccess.enabled is not honored: OGX is internal-only (Praxis-fronted, "+
 				"spec.praxisMode.enabled: true) and the operator does not create external exposure. "+
 				"This value is treated as false.")
 	}
 
+	// In Praxis mode the NetworkPolicy enforces the mandatory ingress lock-down (Praxis pods plus
+	// the operator namespace). Setting spec.network.policy.enabled: false disables the policy
+	// entirely, removing that lock-down and leaving OGX reachable by any co-located workload.
+	if isNetworkPolicyDisabled(r) {
+		warnings = append(warnings,
+			"spec.network.policy.enabled: false disables the operator-managed NetworkPolicy entirely, "+
+				"removing the mandatory Praxis-fronted ingress lock-down (OGX is internal-only, "+
+				"spec.praxisMode.enabled: true). OGX may then be reachable directly by co-located "+
+				"workloads, bypassing Praxis. Prefer additive spec.network.policy.ingress rules instead.")
+	}
+
 	return warnings
+}
+
+// isPraxisModeEnabled reports whether spec.praxisMode.enabled is explicitly true.
+func isPraxisModeEnabled(r *OGXServer) bool {
+	return r.Spec.PraxisMode != nil &&
+		r.Spec.PraxisMode.Enabled != nil && *r.Spec.PraxisMode.Enabled
+}
+
+// isExternalAccessRequested reports whether spec.network.externalAccess.enabled is true.
+func isExternalAccessRequested(r *OGXServer) bool {
+	return r.Spec.Network != nil &&
+		r.Spec.Network.ExternalAccess != nil &&
+		r.Spec.Network.ExternalAccess.Enabled
+}
+
+// isNetworkPolicyDisabled reports whether spec.network.policy.enabled is explicitly false.
+func isNetworkPolicyDisabled(r *OGXServer) bool {
+	return r.Spec.Network != nil &&
+		r.Spec.Network.Policy != nil &&
+		r.Spec.Network.Policy.Enabled != nil && !*r.Spec.Network.Policy.Enabled
 }
 
 func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorList {

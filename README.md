@@ -227,9 +227,24 @@ existing CRs and GitOps applies keep working). `status.serviceURL` is populated 
 internal cluster DNS endpoint; `status.externalURL` is empty. (In legacy mode, external access
 is honored and `status.externalURL` reflects the created Ingress.)
 
-In Praxis mode the operator also disables the **Responses API** in OGX's generated config (it is
-served by Praxis instead). This is applied internally during config generation and does **not**
-mutate your CR's `spec.disabledAPIs`.
+In Praxis mode the operator also disables the **Responses API** and **Conversations API** in OGX's
+generated config (they are served by Praxis instead). This is applied internally during config
+generation and does **not** mutate your CR's `spec.disabledAPIs`.
+
+#### Praxis-mode readiness conditions
+
+Because OGX and Praxis are deployed independently, the operator surfaces two Praxis-mode
+preconditions as status conditions rather than admission rejections (the operator does not manage
+Praxis, and a Praxis instance or TLS Secret may legitimately appear after OGX):
+
+- **`PraxisReachable`** — `True` when the effective Praxis selector (`spec.praxisMode.praxisSelector`,
+  or the fail-safe default) resolves to at least one Ready Praxis pod. When `False`, internal-only
+  OGX has no valid path until Praxis is available.
+- **`TLSConfigured`** — `True` when `spec.network.tls.secretName` is set and the referenced Secret
+  exists (it must carry the `ogx.io/watch: "true"` label to be detected). When `False`, OGX is not
+  serving its internal endpoint over the expected mTLS.
+
+These conditions are only evaluated in Praxis mode.
 
 ### Adding your own ingress rules (additive)
 
@@ -258,7 +273,10 @@ spec:
 ```
 
 To fully disable the NetworkPolicy (emergency escape hatch), set
-`spec.network.policy.enabled: false`.
+`spec.network.policy.enabled: false`. In Praxis mode this removes the mandatory Praxis + operator
+lock-down entirely (OGX may then be reachable directly by co-located workloads, bypassing Praxis),
+so it is surfaced as an admission warning. Prefer additive `spec.network.policy.ingress` rules
+instead.
 
 ### Configuring the Praxis peer (per-CR)
 
