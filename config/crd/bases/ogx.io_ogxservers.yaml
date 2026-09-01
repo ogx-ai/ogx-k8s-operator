@@ -98,6 +98,7 @@ spec:
                 items:
                   enum:
                   - batches
+                  - conversations
                   - file_processors
                   - inference
                   - responses
@@ -105,7 +106,7 @@ spec:
                   - vector_io
                   - files
                   type: string
-                maxItems: 7
+                maxItems: 8
                 minItems: 1
                 type: array
               distribution:

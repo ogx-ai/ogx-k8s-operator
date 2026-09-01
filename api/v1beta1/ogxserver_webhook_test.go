@@ -809,3 +809,76 @@ func TestValidate_ExternalAccessWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_PolicyDisabledWarning(t *testing.T) {
+	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
+
+	tests := []struct {
+		name        string
+		network     *NetworkSpec
+		praxisMode  *PraxisModeSpec
+		wantWarning bool
+	}{
+		{
+			name:        "no network spec: no warning",
+			network:     nil,
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: false,
+		},
+		{
+			name:        "policy enabled + praxis mode enabled: no warning",
+			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(true)}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: false,
+		},
+		{
+			name:        "policy unset + praxis mode enabled: no warning",
+			network:     &NetworkSpec{Policy: &NetworkPolicySpec{}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: false,
+		},
+		{
+			name:        "policy disabled + praxis mode enabled: warns but does not reject",
+			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: true,
+		},
+		{
+			name:        "policy disabled + praxisMode unset: no warning (legacy)",
+			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:  nil,
+			wantWarning: false,
+		},
+		{
+			name:        "policy disabled + praxis mode disabled: no warning (legacy)",
+			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(false)},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network:      tt.network,
+					PraxisMode:   tt.praxisMode,
+				},
+			}
+
+			warnings, err := v.ValidateCreate(t.Context(), server)
+			if err != nil {
+				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
+			}
+
+			got := len(warnings) > 0
+			if got != tt.wantWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantWarning %v", warnings, tt.wantWarning)
+			}
+			if tt.wantWarning && !strings.Contains(strings.Join(warnings, " "), "spec.network.policy.enabled") {
+				t.Errorf("expected warning to mention spec.network.policy.enabled, got %v", warnings)
+			}
+		})
+	}
+}

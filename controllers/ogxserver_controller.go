@@ -98,7 +98,10 @@ const (
 // OGXServerReconciler reconciles an OGXServer object.
 type OGXServerReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	// APIReader is a non-cached reader used for direct API reads (e.g. listing Praxis pods,
+	// which are not cached by the operator). When nil, reads fall back to the cached Client.
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
 	// Image mapping overrides
 	ImageMappingOverrides map[string]string
 	// Cluster info
@@ -817,6 +820,10 @@ func (r *OGXServerReconciler) reconcileManagedCABundle(ctx context.Context, inst
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OGXServerReconciler) SetupWithManager(_ context.Context, mgr ctrl.Manager) error {
+	// Use the manager's non-cached reader for direct API reads (Praxis pods are not cached).
+	if r.APIReader == nil {
+		r.APIReader = mgr.GetAPIReader()
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ogxiov1beta1.OGXServer{}, builder.WithPredicates(predicate.Funcs{
 			UpdateFunc: r.ogxServerUpdatePredicate(mgr),
@@ -1185,6 +1192,13 @@ func (r *OGXServerReconciler) updateStatus(ctx context.Context, instance *ogxiov
 		r.updateStorageStatus(ctx, instance)
 		r.updateServiceStatus(ctx, instance)
 		r.updateDistributionConfig(instance)
+
+		// In Praxis-fronted mode, surface preflight readiness (Praxis reachability, TLS secret)
+		// as status conditions. OGX and Praxis deploy independently, so unmet preconditions are
+		// reported rather than rejected.
+		if r.resolvePraxisMode(instance) {
+			r.updatePraxisPreflightStatus(ctx, instance)
+		}
 
 		if deploymentReady {
 			instance.Status.Phase = ogxiov1beta1.OGXServerPhaseReady

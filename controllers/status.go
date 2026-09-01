@@ -23,6 +23,12 @@ const (
 	ConditionTypeNetworkingAdopted = "NetworkingAdopted"
 	// ConditionTypeAdoptionConfigInvalid indicates whether adoption annotation values are invalid.
 	ConditionTypeAdoptionConfigInvalid = "AdoptionConfigInvalid"
+	// ConditionTypePraxisReachable indicates whether the Praxis selector resolves to at least one
+	// Ready Praxis pod (Praxis-fronted mode only).
+	ConditionTypePraxisReachable = "PraxisReachable"
+	// ConditionTypeTLSConfigured indicates whether spec.network.tls.secretName is set and the
+	// referenced Secret exists (Praxis-fronted mode only).
+	ConditionTypeTLSConfigured = "TLSConfigured"
 )
 
 // Condition reasons.
@@ -51,6 +57,18 @@ const (
 	ReasonNetworkingAdopted = "NetworkingAdopted"
 	// ReasonAdoptionConfigInvalid indicates adoption annotation values are invalid.
 	ReasonAdoptionConfigInvalid = "AdoptionConfigInvalid"
+	// ReasonPraxisReachable indicates the Praxis selector resolves to at least one Ready pod.
+	ReasonPraxisReachable = "PraxisPodsReady"
+	// ReasonPraxisUnreachable indicates no Ready Praxis pod matches the selector.
+	ReasonPraxisUnreachable = "NoReadyPraxisPods"
+	// ReasonPraxisSelectorInvalid indicates the Praxis pod selector could not be parsed.
+	ReasonPraxisSelectorInvalid = "PraxisSelectorInvalid"
+	// ReasonTLSConfigured indicates the referenced TLS Secret exists.
+	ReasonTLSConfigured = "TLSSecretFound"
+	// ReasonTLSSecretMissing indicates the referenced TLS Secret is set but not found.
+	ReasonTLSSecretMissing = "TLSSecretMissing"
+	// ReasonTLSNotConfigured indicates spec.network.tls.secretName is not set.
+	ReasonTLSNotConfigured = "TLSSecretNotSet"
 )
 
 // Condition messages.
@@ -148,6 +166,36 @@ func SetServiceReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, 
 		condition.Message = message
 	}
 
+	SetCondition(status, condition)
+}
+
+// SetPraxisReachableCondition sets the Praxis reachability preflight condition.
+func SetPraxisReachableCondition(status *ogxiov1beta1.OGXServerStatus, reachable bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypePraxisReachable,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !reachable {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetTLSConfiguredCondition sets the TLS configuration preflight condition.
+func SetTLSConfiguredCondition(status *ogxiov1beta1.OGXServerStatus, configured bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeTLSConfigured,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !configured {
+		condition.Status = metav1.ConditionFalse
+	}
 	SetCondition(status, condition)
 }
 

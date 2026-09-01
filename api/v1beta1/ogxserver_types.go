@@ -546,8 +546,8 @@ type OGXServerSpec struct {
 	// Mutually exclusive with overrideConfig.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=7
-	// +kubebuilder:validation:items:Enum=batches;file_processors;inference;responses;tool_runtime;vector_io;files
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:Enum=batches;conversations;file_processors;inference;responses;tool_runtime;vector_io;files
 	DisabledAPIs []string `json:"disabledAPIs,omitempty"`
 	// RegistryRefreshIntervalSeconds configures how often the server refreshes
 	// its model registry, in seconds. When omitted, the server's built-in

@@ -26,15 +26,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// responsesAPI is the name of the Responses API in the config's apis list. In Praxis-fronted mode
-// the Responses API is served by Praxis, so the operator disables it in OGX's generated config.
-const responsesAPI = "responses"
+// praxisServedAPIs lists the APIs served by Praxis rather than OGX. In Praxis-fronted mode the
+// operator disables these in OGX's generated config (Praxis serves them), without mutating the
+// user's CR.
+var praxisServedAPIs = []string{"responses", "conversations"}
 
 // GenerateConfig orchestrates the config generation pipeline.
 // It takes the OGXServer spec, the resolved base config, and whether the instance runs in
 // Praxis-fronted mode, producing a complete config.yaml with all provider/resource/storage
-// expansions applied. When praxisMode is true the Responses API is disabled in the generated
-// config (Praxis serves it) without mutating the user's CR.
+// expansions applied. When praxisMode is true the Praxis-served APIs (Responses, Conversations)
+// are disabled in the generated config (Praxis serves them) without mutating the user's CR.
 func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, praxisMode bool) (*GeneratedConfig, error) {
 	// Parse base config
 	baseConfig, err := ParseBaseConfig(baseConfigData)
@@ -61,12 +62,14 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 	userStorage := ApplyStorage(spec.Storage)
 	mergedStorage := MergeStorage(baseConfig.Storage, userStorage)
 
-	// Determine APIs (filter disabled). In Praxis-fronted mode the Responses API is served by
-	// Praxis, so it is disabled here internally — this augments spec.DisabledAPIs rather than
-	// mutating the user's CR.
+	// Determine APIs (filter disabled). In Praxis-fronted mode the Responses and Conversations
+	// APIs are served by Praxis, so they are disabled here internally — this augments
+	// spec.DisabledAPIs rather than mutating the user's CR.
 	disabledAPIs := spec.DisabledAPIs
 	if praxisMode {
-		disabledAPIs = appendIfMissing(disabledAPIs, responsesAPI)
+		for _, api := range praxisServedAPIs {
+			disabledAPIs = appendIfMissing(disabledAPIs, api)
+		}
 	}
 	mergedAPIs := MergeAPIs(baseConfig.APIs, disabledAPIs)
 
