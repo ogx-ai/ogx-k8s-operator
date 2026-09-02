@@ -8,5 +8,5 @@ subjects:
   namespace: default
 roleRef:
   kind: ClusterRole
-  name: system:openshift:scc:anyuid
+  name: system:openshift:scc:nonroot-v2
   apiGroup: rbac.authorization.k8s.io

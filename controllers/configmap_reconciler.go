@@ -337,7 +337,3 @@ func (r *OGXServerReconciler) clearConfigGenerationStatus(instance *ogxiov1beta1
 	instance.Status.ConfigGeneration = nil
 	r.setConfigGeneratedCondition(instance, false, reason, message)
 }
-
-func boolPtr(b bool) *bool {
-	return &b
-}

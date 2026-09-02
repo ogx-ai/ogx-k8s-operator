@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -146,6 +147,206 @@ func assertSliceEqual(t *testing.T, got, want []string) {
 		if got[i] != want[i] {
 			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestValidateVolumeTypes(t *testing.T) {
+	tests := []struct {
+		name      string
+		server    *OGXServer
+		wantErrs  int
+		errSubstr string
+	}{
+		{
+			name: "nil workload is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{Distribution: DistributionSpec{Image: "x"}},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "nil overrides is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload:     &WorkloadSpec{},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "configMap volume is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "cfg",
+							VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "secret volume is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "sec",
+							VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "emptyDir volume is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "tmp",
+							VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "persistentVolumeClaim is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "data",
+							VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "c"}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "projected volume is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "proj",
+							VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "downwardAPI volume is allowed",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "dapi",
+							VolumeSource: corev1.VolumeSource{DownwardAPI: &corev1.DownwardAPIVolumeSource{}},
+						}},
+					}},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "hostPath volume is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "bad",
+							VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}},
+						}},
+					}},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "disallowed volume source type",
+		},
+		{
+			name: "nfs volume is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{{
+							Name:         "nfs",
+							VolumeSource: corev1.VolumeSource{NFS: &corev1.NFSVolumeSource{Server: "s", Path: "/"}},
+						}},
+					}},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "disallowed volume source type",
+		},
+		{
+			name: "mixed allowed and disallowed volumes",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{
+							{Name: "ok", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{}}},
+							{Name: "bad", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}},
+						},
+					}},
+				},
+			},
+			wantErrs: 1,
+		},
+		{
+			name: "multiple disallowed volumes",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Workload: &WorkloadSpec{Overrides: &WorkloadOverrides{
+						Volumes: []corev1.Volume{
+							{Name: "hp", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}},
+							{Name: "nfs", VolumeSource: corev1.VolumeSource{NFS: &corev1.NFSVolumeSource{Server: "s", Path: "/"}}},
+						},
+					}},
+				},
+			},
+			wantErrs: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateVolumeTypes(tt.server)
+			if len(errs) != tt.wantErrs {
+				t.Errorf("validateVolumeTypes() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+			if tt.errSubstr != "" && len(errs) > 0 {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e.Detail, tt.errSubstr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no error contains %q; errors: %v", tt.errSubstr, errs)
+				}
+			}
+		})
 	}
 }
 
@@ -636,6 +837,54 @@ func TestCollectValidationErrors(t *testing.T) {
 			},
 			wantErrs: 1,
 		},
+		{
+			name: "hostPath volume is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Workload: &WorkloadSpec{
+						Overrides: &WorkloadOverrides{
+							Volumes: []corev1.Volume{{
+								Name:         "bad",
+								VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}},
+							}},
+						},
+					},
+				},
+			},
+			wantErrs: 1,
+		},
+		{
+			name: "external access enabled without TLS is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+						},
+					},
+				},
+			},
+			wantErrs: 1,
+		},
+		{
+			name: "external access with TLS and hostname is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+							TLS:      &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -644,6 +893,116 @@ func TestCollectValidationErrors(t *testing.T) {
 			errs := v.collectValidationErrors(tt.server)
 			if len(errs) != tt.wantErrs {
 				t.Errorf("collectValidationErrors() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+		})
+	}
+}
+
+func TestValidateExternalAccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		server    *OGXServer
+		wantErrs  int
+		errSubstr string
+	}{
+		{
+			name: "nil network is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{Distribution: DistributionSpec{Image: "x"}},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "disabled external access without TLS is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{Enabled: false},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "enabled with TLS and hostname is valid",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+							TLS:      &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs: 0,
+		},
+		{
+			name: "enabled without TLS is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled:  true,
+							Hostname: "ogx.example.com",
+						},
+					},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "TLS secretName is required",
+		},
+		{
+			name: "enabled without hostname is rejected",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{
+							Enabled: true,
+							TLS:     &TLSSpec{SecretName: "ogx-tls"},
+						},
+					},
+				},
+			},
+			wantErrs:  1,
+			errSubstr: "hostname is required",
+		},
+		{
+			name: "enabled without hostname or TLS gives two errors",
+			server: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Image: "x"},
+					Network: &NetworkSpec{
+						ExternalAccess: &ExternalAccessConfig{Enabled: true},
+					},
+				},
+			},
+			wantErrs: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := validateExternalAccess(tt.server)
+			if len(errs) != tt.wantErrs {
+				t.Errorf("validateExternalAccess() returned %d errors, want %d: %v", len(errs), tt.wantErrs, errs)
+			}
+			if tt.errSubstr != "" && len(errs) > 0 {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e.Detail, tt.errSubstr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no error contains %q; errors: %v", tt.errSubstr, errs)
+				}
 			}
 		})
 	}
