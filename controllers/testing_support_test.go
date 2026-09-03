@@ -151,6 +151,12 @@ func AssertDeploymentHasPort(t *testing.T, deployment *appsv1.Deployment, expect
 		"container should expose port %d", expectedPort)
 }
 
+func AssertDeploymentHasRecreateStrategy(t *testing.T, deployment *appsv1.Deployment) {
+	t.Helper()
+	require.Equal(t, appsv1.RecreateDeploymentStrategyType, deployment.Spec.Strategy.Type,
+		"deployment should use Recreate deployment strategy")
+}
+
 func AssertDeploymentUsesEmptyDirStorage(t *testing.T, deployment *appsv1.Deployment) {
 	t.Helper()
 	volume := findVolumeByName(t, deployment, testStorageVolumeName)

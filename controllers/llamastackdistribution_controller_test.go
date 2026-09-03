@@ -124,6 +124,8 @@ func TestStorageConfiguration(t *testing.T) {
 			deployment := &appsv1.Deployment{}
 			waitForResource(t, k8sClient, instance.Namespace, instance.Name, deployment)
 
+			AssertDeploymentHasRecreateStrategy(t, deployment)
+
 			if tt.expectedVolume.EmptyDir != nil {
 				AssertDeploymentUsesEmptyDirStorage(t, deployment)
 			} else if tt.expectedVolume.PersistentVolumeClaim != nil {
