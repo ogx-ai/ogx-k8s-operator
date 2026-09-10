@@ -231,6 +231,12 @@ In Praxis mode the operator also disables the **Responses API** and **Conversati
 generated config (they are served by Praxis instead). This is applied internally during config
 generation and does **not** mutate your CR's `spec.disabledAPIs`.
 
+Every generated Praxis config replaces `server.auth` with upstream-header authentication using
+`x-user-id` and `x-tenant-id`, applies ownership-based access rules, and sets
+`server.tenancy.mode: multi`. When no declarative config fields are set, the operator preserves the
+distribution's default config and changes only auth, tenancy, and an explicit `spec.network.port`.
+`spec.overrideConfig` remains unchanged and takes precedence.
+
 #### Praxis-mode readiness conditions
 
 Because OGX and Praxis are deployed independently, the operator surfaces two Praxis-mode

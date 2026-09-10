@@ -802,6 +802,76 @@ apis:
 	}
 }
 
+func TestGenerateConfig_PraxisModeConfiguresUpstreamHeaderAuth(t *testing.T) {
+	baseConfig := `version: '2'
+server:
+  auth:
+    provider_config:
+      type: oauth2_token
+  port: 9000
+`
+
+	generated, err := GenerateConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertConfigContains(t, generated.ConfigYAML,
+		"type: upstream_header",
+		"principal_header: x-user-id",
+		"tenant_header: x-tenant-id",
+	)
+	if strings.Contains(generated.ConfigYAML, "type: oauth2_token") {
+		t.Errorf("expected base auth provider to be replaced, got:\n%s", generated.ConfigYAML)
+	}
+	assertConfigContains(t, generated.ConfigYAML,
+		"when: resource is unowned",
+		"when: user is owner",
+		"tenancy:",
+		"mode: multi",
+		"port: 9000",
+	)
+}
+
+func assertConfigContains(t *testing.T, configYAML string, expected ...string) {
+	t.Helper()
+	for _, value := range expected {
+		if !strings.Contains(configYAML, value) {
+			t.Errorf("expected config to contain %q, got:\n%s", value, configYAML)
+		}
+	}
+}
+
+func TestGeneratePraxisDefaultConfigPreservesDefaultConfig(t *testing.T) {
+	baseConfig := `version: '2'
+custom_section:
+  enabled: true
+server:
+  auth:
+    provider_config:
+      type: oauth2_token
+  port: 9000
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{
+		Network: &ogxiov1beta1.NetworkSpec{Port: 9443},
+	}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(generated.ConfigYAML, "type: upstream_header") ||
+		strings.Contains(generated.ConfigYAML, "type: oauth2_token") {
+		t.Errorf("expected default auth provider to be replaced, got:\n%s", generated.ConfigYAML)
+	}
+	if !strings.Contains(generated.ConfigYAML, "custom_section:") ||
+		!strings.Contains(generated.ConfigYAML, "enabled: true") ||
+		!strings.Contains(generated.ConfigYAML, "tenancy:") ||
+		!strings.Contains(generated.ConfigYAML, "mode: multi") ||
+		!strings.Contains(generated.ConfigYAML, "port: 9443") ||
+		strings.Contains(generated.ConfigYAML, "port: 9000") {
+		t.Errorf("expected multi-tenancy and non-auth default config to be preserved, got:\n%s", generated.ConfigYAML)
+	}
+}
+
 func TestGenerateConfig_PraxisModeDisablesResponses(t *testing.T) {
 	baseConfig := `version: '2'
 apis:

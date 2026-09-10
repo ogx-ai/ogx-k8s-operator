@@ -54,13 +54,15 @@ func generatedConfigMapName(crName, contentHash string) string {
 // reconcileGeneratedConfig handles the full config generation lifecycle:
 // 1. Generate config.yaml from spec + base config
 // 2. Create/verify the ConfigMap with content-hash name
-// Returns the generated config result, or nil if no config generation is needed.
+// Returns the generated config result, or nil if no config generation is needed. Praxis mode also
+// derives a config from the default image config so it can replace the auth provider.
 // Cleanup of old generated ConfigMaps happens after the Deployment reconcile
 // succeeds so in-flight rollouts keep their referenced inputs.
 func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*config.GeneratedConfig, error) {
 	logger := log.FromContext(ctx)
 
-	if instance.HasOverrideConfig() || !instance.HasDeclarativeConfig() {
+	praxisMode := r.resolvePraxisMode(instance)
+	if !shouldGenerateConfig(instance, praxisMode) {
 		return nil, nil
 	}
 
@@ -77,7 +79,12 @@ func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, inst
 		return nil, fmt.Errorf("failed to validate secret env var mapping: %w", validateErr)
 	}
 
-	generated, err := config.GenerateConfig(&instance.Spec, baseConfigData, r.resolvePraxisMode(instance))
+	var generated *config.GeneratedConfig
+	if instance.HasDeclarativeConfig() {
+		generated, err = config.GenerateConfig(&instance.Spec, baseConfigData, praxisMode)
+	} else {
+		generated, err = config.GeneratePraxisDefaultConfig(&instance.Spec, baseConfigData)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate config: %w", err)
 	}
@@ -92,6 +99,10 @@ func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, inst
 	}
 
 	return generated, nil
+}
+
+func shouldGenerateConfig(instance *ogxiov1beta1.OGXServer, praxisMode bool) bool {
+	return !instance.HasOverrideConfig() && (instance.HasDeclarativeConfig() || praxisMode)
 }
 
 // resolveBaseConfig resolves the base config.yaml from a referenced ConfigMap or

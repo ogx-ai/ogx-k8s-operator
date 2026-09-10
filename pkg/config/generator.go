@@ -19,6 +19,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -74,7 +75,7 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 	mergedAPIs := MergeAPIs(baseConfig.APIs, disabledAPIs)
 
 	// Build the final config.yaml structure
-	finalConfig := buildFinalConfig(baseConfig, mergedProviders, userModels, mergedStorage, mergedAPIs, spec)
+	finalConfig := buildFinalConfig(baseConfig, mergedProviders, userModels, mergedStorage, mergedAPIs, spec, praxisMode)
 
 	// Serialize to YAML
 	configYAML, err := yaml.Marshal(finalConfig)
@@ -107,6 +108,54 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 	}, nil
 }
 
+// GeneratePraxisDefaultConfig derives a runtime config from the distribution default, replacing
+// only server.auth for a Praxis-fronted instance. Unlike GenerateConfig, it preserves all
+// unrecognized sections from the default config.
+func GeneratePraxisDefaultConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*GeneratedConfig, error) {
+	baseConfig, err := ParseBaseConfig(baseConfigData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base config: %w", err)
+	}
+
+	var cfg map[string]interface{}
+	if unmarshalErr := yaml.Unmarshal(baseConfigData, &cfg); unmarshalErr != nil {
+		return nil, fmt.Errorf("failed to parse default config: %w", unmarshalErr)
+	}
+	if cfg == nil {
+		cfg = make(map[string]interface{})
+	}
+	server, err := serverSection(cfg)
+	if err != nil {
+		return nil, err
+	}
+	applyPraxisAuth(server)
+	if spec.Network != nil && spec.Network.Port != 0 {
+		server["port"] = spec.Network.Port
+	}
+	cfg["server"] = server
+
+	configYAML, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize config: %w", err)
+	}
+	hash := sha256.Sum256(configYAML)
+	configVersion, configVersionParsed := parseConfigVersion(baseConfig.Version)
+	resourceCount := 0
+	if baseConfig.RegisteredResources != nil {
+		resourceCount = len(baseConfig.RegisteredResources.Models)
+	}
+
+	return &GeneratedConfig{
+		ConfigYAML:             string(configYAML),
+		ContentHash:            hex.EncodeToString(hash[:8]),
+		EnvVars:                CollectSecretRefs(spec),
+		ProviderCount:          countProviders(baseConfig.Providers),
+		ResourceCount:          resourceCount,
+		ConfigVersion:          configVersion,
+		ConfigVersionDefaulted: !configVersionParsed,
+	}, nil
+}
+
 // appendIfMissing returns items with value appended, unless it is already present. The input slice
 // is not mutated (a fresh slice is returned when appending) so the caller's spec is left untouched.
 func appendIfMissing(items []string, value string) []string {
@@ -127,6 +176,7 @@ func buildFinalConfig(
 	storage map[string]interface{},
 	apis []string,
 	spec *ogxiov1beta1.OGXServerSpec,
+	praxisMode bool,
 ) map[string]interface{} {
 	cfg := make(map[string]interface{})
 
@@ -147,7 +197,7 @@ func buildFinalConfig(
 	if base.VectorStores != nil {
 		cfg["vector_stores"] = base.VectorStores
 	}
-	cfg["server"] = buildServerSection(base, spec)
+	cfg["server"] = buildServerSection(base, spec, praxisMode)
 	buildStorageSection(cfg, storage, base)
 
 	return cfg
@@ -207,10 +257,13 @@ func buildRegisteredResources(base *BaseConfig, userModels []ConfigModel) *Regis
 	return rr
 }
 
-func buildServerSection(base *BaseConfig, spec *ogxiov1beta1.OGXServerSpec) map[string]interface{} {
+func buildServerSection(base *BaseConfig, spec *ogxiov1beta1.OGXServerSpec, praxisMode bool) map[string]interface{} {
 	server := make(map[string]interface{})
 	for k, v := range base.Server {
 		server[k] = v
+	}
+	if praxisMode {
+		applyPraxisAuth(server)
 	}
 	if spec.Network != nil && spec.Network.Port != 0 {
 		server["port"] = spec.Network.Port
@@ -218,6 +271,45 @@ func buildServerSection(base *BaseConfig, spec *ogxiov1beta1.OGXServerSpec) map[
 		server["port"] = ogxiov1beta1.DefaultServerPort
 	}
 	return server
+}
+
+func serverSection(cfg map[string]interface{}) (map[string]interface{}, error) {
+	server, ok := cfg["server"]
+	if !ok || server == nil {
+		return make(map[string]interface{}), nil
+	}
+	section, ok := server.(map[string]interface{})
+	if !ok {
+		return nil, errors.New("failed to parse default config: server must be an object")
+	}
+	return section, nil
+}
+
+func applyPraxisAuth(server map[string]interface{}) {
+	server["auth"] = map[string]interface{}{
+		"provider_config": map[string]interface{}{
+			"type":             "upstream_header",
+			"principal_header": "x-user-id",
+			"tenant_header":    "x-tenant-id",
+		},
+		"access_policy": []interface{}{
+			map[string]interface{}{
+				"permit":      map[string]interface{}{"actions": []string{"read"}},
+				"when":        "resource is unowned",
+				"description": "All users can read system resources",
+			},
+			map[string]interface{}{
+				"permit":      map[string]interface{}{"actions": []string{"create"}},
+				"description": "Authenticated users can create resources",
+			},
+			map[string]interface{}{
+				"permit":      map[string]interface{}{"actions": []string{"read", "update", "delete"}},
+				"when":        "user is owner",
+				"description": "Owners can manage their own resources",
+			},
+		},
+	}
+	server["tenancy"] = map[string]interface{}{"mode": "multi"}
 }
 
 func buildStorageSection(cfg map[string]interface{}, storage map[string]interface{}, base *BaseConfig) {

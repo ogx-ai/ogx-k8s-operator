@@ -13,12 +13,16 @@ The operator can generate server `config.yaml` from declarative CR fields:
 
 When this mode is active, the operator resolves a base config from `spec.baseConfig` when provided, otherwise from OCI image labels, merges your CR values, writes an immutable generated ConfigMap, and mounts it into the server pod.
 
+With `spec.praxisMode.enabled: true`, the operator also generates a config when no declarative
+fields are set. It preserves the distribution default while replacing `server.auth`, enabling
+multi-tenancy, and applying an explicit `spec.network.port`.
+
 ## Precedence Rules
 
 The operator supports two config modes:
 
 1. **Override mode**: `spec.overrideConfig` points to a user-managed ConfigMap key.
-2. **Generated mode**: declarative CR fields generate `config.yaml`.
+2. **Generated mode**: declarative CR fields, or Praxis mode, generate `config.yaml`.
 
 If `spec.overrideConfig` is set, it takes precedence over generated mode.
 The mounted runtime config always comes from `spec.overrideConfig` or the
@@ -51,6 +55,7 @@ This label allows the operator to watch changes and trigger reconciliation.
    - models/resources: user values replace base models
    - storage: user value replaces base storage
    - APIs: base filtered by `disabledAPIs`
+   - Praxis mode: use upstream-header auth and `server.tenancy.mode: multi`
 5. Create immutable ConfigMap: `${ogxserver-name}-config-${contentHash}`.
 6. Mount generated `config.yaml` to `/etc/ogx/config.yaml`.
 7. Inject secret-backed environment variables for provider/storage credentials.
@@ -108,6 +113,7 @@ Notes:
 - If the CR uses `spec.baseConfig`, pass that file with `-base`.
 - If the CR only sets `spec.distribution.name`, pass `-base` as well; image
   resolution for named distributions happens in the operator.
+- The CLI does not run admission defaulting; set `spec.praxisMode.enabled: true` explicitly.
 - `-validate` uses `distributions.json` to validate `spec.distribution.name`.
 
 ## Storage Example (Postgres)

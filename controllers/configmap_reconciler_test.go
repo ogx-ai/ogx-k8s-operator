@@ -122,6 +122,39 @@ func TestReconcileGeneratedConfig_HappyPath(t *testing.T) {
 	assert.Equal(t, managedByLabelVal, cm.Labels[managedByLabelKey])
 }
 
+func TestReconcileGeneratedConfig_PraxisModeUsesDefaultConfig(t *testing.T) {
+	scheme := buildControllerTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	fetcher := func(string) (map[string]string, error) {
+		return map[string]string{
+			config.OCIDefaultConfigLabel: "config.yaml",
+			config.OCIConfigLabelPrefix + "config.yaml": base64.StdEncoding.EncodeToString([]byte(
+				"version: '2'\ncustom_section:\n  enabled: true\nserver:\n  auth:\n    provider_config:\n      type: oauth2_token\n")),
+		}, nil
+	}
+	r := &OGXServerReconciler{
+		Client:         k8sClient,
+		Scheme:         scheme,
+		configResolver: config.NewDefaultConfigResolver(fetcher),
+		ClusterInfo:    &cluster.ClusterInfo{DistributionImages: map[string]string{"starter": "docker.io/ogxai/distribution-starter:latest"}},
+	}
+	praxisEnabled := true
+	instance := &ogxiov1beta1.OGXServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-server", Namespace: "test-ns", UID: types.UID("test-uid-789")},
+		Spec: ogxiov1beta1.OGXServerSpec{
+			Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+			PraxisMode:   &ogxiov1beta1.PraxisModeSpec{Enabled: &praxisEnabled},
+		},
+	}
+
+	generated, err := r.reconcileGeneratedConfig(t.Context(), instance)
+	require.NoError(t, err)
+	require.NotNil(t, generated, "expected generated config for Praxis mode")
+	assert.Contains(t, generated.ConfigYAML, "type: upstream_header")
+	assert.NotContains(t, generated.ConfigYAML, "type: oauth2_token")
+	assert.Contains(t, generated.ConfigYAML, "custom_section:")
+}
+
 func TestReconcileGeneratedConfig_SkippedWhenOverrideSet(t *testing.T) {
 	scheme := buildControllerTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
