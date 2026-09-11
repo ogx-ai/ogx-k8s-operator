@@ -642,14 +642,14 @@ spec:
                         default: true
                         description: |-
                           Enabled controls whether the DB migration job is enabled.
-                          Defaults to true.
+                          Defaults to true when migrationJob is present.
                         type: boolean
                       targetConnectionString:
                         description: |-
                           TargetConnectionString references a Secret containing the PostgreSQL
-                          connection string that the migration Job writes to. When omitted, the
-                          Job writes to the same PostgreSQL instance it reads from (the connection
-                          string configured in spec.storage.sql.connectionString).
+                          connection string that the migration Job writes to (PRAXIS_DATABASE_URL).
+                          Required when migrationJob is set. Must point at the Praxis database, not
+                          the OGX source: both default schemas include openai_conversations.
                           The Secret must be in the same namespace as the OGXServer
                           and must have the label ogx.io/watch: "true".
                         properties:
@@ -667,6 +667,8 @@ spec:
                         - key
                         - name
                         type: object
+                    required:
+                    - targetConnectionString
                     type: object
                   praxisSelector:
                     description: |-
@@ -6954,6 +6956,41 @@ spec:
                 description: ExternalURL is the external URL when external access
                   is configured.
                 type: string
+              migration:
+                description: Migration tracks Praxis Responses/Conversations migration
+                  orchestration.
+                properties:
+                  attemptKey:
+                    description: AttemptKey identifies the current migration attempt
+                      (Secret/config/image fingerprint).
+                    type: string
+                  jobName:
+                    description: JobName is the Kubernetes Job created for this attempt.
+                    type: string
+                  message:
+                    description: Message is a human-readable summary of the current
+                      migration state.
+                    type: string
+                  observedGeneration:
+                    description: ObservedGeneration is the OGXServer generation last
+                      considered for migration.
+                    format: int64
+                    type: integer
+                  phase:
+                    description: Phase is the high-level migration orchestration phase.
+                    enum:
+                    - Pending
+                    - PreflightFailed
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - Validated
+                    type: string
+                  softRollbackWarning:
+                    description: SoftRollbackWarning warns that only soft rollback
+                      is supported.
+                    type: string
+                type: object
               phase:
                 description: Phase represents the current phase of the server.
                 enum:

@@ -82,9 +82,16 @@ func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (ad
 }
 
 // ValidateUpdate implements admission.Validator.
-func (v *OGXServerValidator) ValidateUpdate(_ context.Context, _ *OGXServer, r *OGXServer) (admission.Warnings, error) {
-	ogxserverlog.Info("validating update", "name", r.Name)
-	return v.validate(r)
+func (v *OGXServerValidator) ValidateUpdate(_ context.Context, oldObj, newObj *OGXServer) (admission.Warnings, error) {
+	ogxserverlog.Info("validating update", "name", newObj.Name)
+	warnings, err := v.validate(newObj)
+	if isMigrationRequested(oldObj) && !isMigrationRequested(newObj) {
+		warnings = append(warnings,
+			"disabling Praxis migration is a soft rollback only: it restores the pre-enablement OGX "+
+				"Responses/Conversations serving posture. Writes made through Praxis after cutover do not "+
+				"flow back to OGX, ABAC flattening is not restored, and data loss is possible.")
+	}
+	return warnings, err
 }
 
 // ValidateDelete implements admission.Validator.
@@ -146,6 +153,18 @@ func collectValidationWarnings(r *OGXServer) admission.Warnings {
 func isPraxisModeEnabled(r *OGXServer) bool {
 	return r.Spec.PraxisMode != nil &&
 		r.Spec.PraxisMode.Enabled != nil && *r.Spec.PraxisMode.Enabled
+}
+
+// isMigrationRequested reports whether the spec opts into the Praxis migration Job.
+func isMigrationRequested(r *OGXServer) bool {
+	if r == nil || !isPraxisModeEnabled(r) {
+		return false
+	}
+	mj := r.Spec.PraxisMode.MigrationJob
+	if mj == nil {
+		return false
+	}
+	return mj.Enabled == nil || *mj.Enabled
 }
 
 // isExternalAccessRequested reports whether spec.network.externalAccess.enabled is true.

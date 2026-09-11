@@ -882,3 +882,114 @@ func TestValidate_PolicyDisabledWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateUpdate_SoftRollbackWarning(t *testing.T) {
+	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
+
+	migrationJob := &MigrationJobSpec{
+		Enabled: ptr(true),
+		TargetConnectionString: &SecretKeyRef{
+			Name: "praxis-pg",
+			Key:  "url",
+		},
+	}
+	requested := &OGXServer{
+		Spec: OGXServerSpec{
+			Distribution: DistributionSpec{Name: "starter"},
+			PraxisMode: &PraxisModeSpec{
+				Enabled:      ptr(true),
+				MigrationJob: migrationJob,
+			},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		oldObj      *OGXServer
+		newObj      *OGXServer
+		wantWarning bool
+	}{
+		{
+			name:        "unchanged requested spec does not warn",
+			oldObj:      requested,
+			newObj:      requested,
+			wantWarning: false,
+		},
+		{
+			name:   "praxisMode.enabled true to false warns",
+			oldObj: requested,
+			newObj: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode: &PraxisModeSpec{
+						Enabled:      ptr(false),
+						MigrationJob: migrationJob,
+					},
+				},
+			},
+			wantWarning: true,
+		},
+		{
+			name:   "migrationJob.enabled true to false warns",
+			oldObj: requested,
+			newObj: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode: &PraxisModeSpec{
+						Enabled: ptr(true),
+						MigrationJob: &MigrationJobSpec{
+							Enabled:                ptr(false),
+							TargetConnectionString: migrationJob.TargetConnectionString,
+						},
+					},
+				},
+			},
+			wantWarning: true,
+		},
+		{
+			name:   "removing migrationJob warns",
+			oldObj: requested,
+			newObj: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode:   &PraxisModeSpec{Enabled: ptr(true)},
+				},
+			},
+			wantWarning: true,
+		},
+		{
+			name: "never requested does not warn",
+			oldObj: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode:   &PraxisModeSpec{Enabled: ptr(true)},
+				},
+			},
+			newObj: &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode:   &PraxisModeSpec{Enabled: ptr(false)},
+				},
+			},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings, err := v.ValidateUpdate(t.Context(), tt.oldObj, tt.newObj)
+			if err != nil {
+				t.Fatalf("ValidateUpdate returned unexpected error: %v", err)
+			}
+			got := false
+			for _, w := range warnings {
+				if strings.Contains(w, "soft rollback") {
+					got = true
+				}
+			}
+			if got != tt.wantWarning {
+				t.Errorf("ValidateUpdate rollback warning = %v, wantWarning %v; warnings=%v", got, tt.wantWarning, warnings)
+			}
+		})
+	}
+}

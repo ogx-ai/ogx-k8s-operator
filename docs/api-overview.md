@@ -794,14 +794,54 @@ _Appears in:_
 #### MigrationJobSpec
 
 MigrationJobSpec configures the Job that migrates OGX data to Praxis.
+Migration is opt-in: the Job is created only when praxisMode is enabled and
+this field is set. Only Responses and Conversations (plus conversation items)
+are migrated; Files/Vector Stores/ingestion remain OGX-owned.
 
 _Appears in:_
 - [PraxisModeSpec](#praxismodespec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enabled` _boolean_ | Enabled controls whether the DB migration job is enabled.<br />Defaults to true. | true |  |
-| `targetConnectionString` _[SecretKeyRef](#secretkeyref)_ | TargetConnectionString references a Secret containing the PostgreSQL<br />connection string that the migration Job writes to. When omitted, the<br />Job writes to the same PostgreSQL instance it reads from (the connection<br />string configured in spec.storage.sql.connectionString).<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `enabled` _boolean_ | Enabled controls whether the DB migration job is enabled.<br />Defaults to true when migrationJob is present. | true |  |
+| `targetConnectionString` _[SecretKeyRef](#secretkeyref)_ | TargetConnectionString references a Secret containing the PostgreSQL<br />connection string that the migration Job writes to (PRAXIS_DATABASE_URL).<br />Required when migrationJob is set. Must point at the Praxis database, not<br />the OGX source: both default schemas include openai_conversations.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+
+#### MigrationPhase
+
+_Underlying type:_ _string_
+
+MigrationPhase is the operator-observed phase of Praxis migration orchestration.
+
+_Validation:_
+- Enum: [Pending PreflightFailed Running Succeeded Failed Validated]
+
+_Appears in:_
+- [MigrationStatus](#migrationstatus)
+
+| Field | Description |
+| --- | --- |
+| `Pending` | MigrationPhasePending indicates migration has not started or is not opted in.<br /> |
+| `PreflightFailed` | MigrationPhasePreflightFailed indicates preflight checks failed.<br /> |
+| `Running` | MigrationPhaseRunning indicates the migration Job is active.<br /> |
+| `Succeeded` | MigrationPhaseSucceeded is unused; Job completion is recorded as Validated.<br /> |
+| `Failed` | MigrationPhaseFailed indicates the migration Job failed.<br /> |
+| `Validated` | MigrationPhaseValidated indicates the migration Job completed.<br /> |
+
+#### MigrationStatus
+
+MigrationStatus tracks operator-managed Praxis migration progress.
+
+_Appears in:_
+- [OGXServerStatus](#ogxserverstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `phase` _[MigrationPhase](#migrationphase)_ | Phase is the high-level migration orchestration phase. |  | Enum: [Pending PreflightFailed Running Succeeded Failed Validated] <br /> |
+| `observedGeneration` _integer_ | ObservedGeneration is the OGXServer generation last considered for migration. |  |  |
+| `attemptKey` _string_ | AttemptKey identifies the current migration attempt (Secret/config/image fingerprint). |  |  |
+| `jobName` _string_ | JobName is the Kubernetes Job created for this attempt. |  |  |
+| `message` _string_ | Message is a human-readable summary of the current migration state. |  |  |
+| `softRollbackWarning` _string_ | SoftRollbackWarning warns that only soft rollback is supported. |  |  |
 
 #### MilvusProvider
 
@@ -977,6 +1017,7 @@ _Appears in:_
 | `distributionConfig` _[DistributionConfig](#distributionconfig)_ | DistributionConfig contains provider information from the running server. |  |  |
 | `resolvedDistribution` _[ResolvedDistributionStatus](#resolveddistributionstatus)_ | ResolvedDistribution tracks the resolved image and config source. |  |  |
 | `configGeneration` _[ConfigGenerationStatus](#configgenerationstatus)_ | ConfigGeneration tracks config generation details. |  |  |
+| `migration` _[MigrationStatus](#migrationstatus)_ | Migration tracks Praxis Responses/Conversations migration orchestration. |  |  |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#condition-v1-meta) array_ | Conditions represent the latest available observations of the server's state. |  |  |
 | `availableReplicas` _integer_ | AvailableReplicas is the number of available replicas. |  |  |
 | `serviceURL` _string_ | ServiceURL is the internal Kubernetes service URL. |  |  |

@@ -46,6 +46,13 @@ package controllers
 // PodDisruptionBudget permissions - controller creates and manages voluntary disruption controls
 //+kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
+// Job permissions - controller creates and tracks Praxis migration Jobs
+//+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=batch,resources=jobs/status,verbs=get
+
+// Event permissions - controller emits migration progress/failure events
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
 // HorizontalPodAutoscaler permissions - controller creates and manages HPAs for server pods
 //+kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 

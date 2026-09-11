@@ -474,21 +474,24 @@ type PraxisSelector struct {
 }
 
 // MigrationJobSpec configures the Job that migrates OGX data to Praxis.
+// Migration is opt-in: the Job is created only when praxisMode is enabled and
+// this field is set. Only Responses and Conversations (plus conversation items)
+// are migrated; Files/Vector Stores/ingestion remain OGX-owned.
 type MigrationJobSpec struct {
 	// Enabled controls whether the DB migration job is enabled.
-	// Defaults to true.
+	// Defaults to true when migrationJob is present.
 	// +optional
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// TargetConnectionString references a Secret containing the PostgreSQL
-	// connection string that the migration Job writes to. When omitted, the
-	// Job writes to the same PostgreSQL instance it reads from (the connection
-	// string configured in spec.storage.sql.connectionString).
+	// connection string that the migration Job writes to (PRAXIS_DATABASE_URL).
+	// Required when migrationJob is set. Must point at the Praxis database, not
+	// the OGX source: both default schemas include openai_conversations.
 	// The Secret must be in the same namespace as the OGXServer
 	// and must have the label ogx.io/watch: "true".
-	// +optional
-	TargetConnectionString *SecretKeyRef `json:"targetConnectionString,omitempty"`
+	// +kubebuilder:validation:Required
+	TargetConnectionString *SecretKeyRef `json:"targetConnectionString"`
 }
 
 // PraxisMode configures integration with an existing Praxis instance that
@@ -658,6 +661,47 @@ type ConfigGenerationStatus struct {
 	ConfigVersion int `json:"configVersion,omitempty"`
 }
 
+// MigrationPhase is the operator-observed phase of Praxis migration orchestration.
+// +kubebuilder:validation:Enum=Pending;PreflightFailed;Running;Succeeded;Failed;Validated
+type MigrationPhase string
+
+const (
+	// MigrationPhasePending indicates migration has not started or is not opted in.
+	MigrationPhasePending MigrationPhase = "Pending"
+	// MigrationPhasePreflightFailed indicates preflight checks failed.
+	MigrationPhasePreflightFailed MigrationPhase = "PreflightFailed"
+	// MigrationPhaseRunning indicates the migration Job is active.
+	MigrationPhaseRunning MigrationPhase = "Running"
+	// MigrationPhaseSucceeded is unused; Job completion is recorded as Validated.
+	MigrationPhaseSucceeded MigrationPhase = "Succeeded"
+	// MigrationPhaseFailed indicates the migration Job failed.
+	MigrationPhaseFailed MigrationPhase = "Failed"
+	// MigrationPhaseValidated indicates the migration Job completed.
+	MigrationPhaseValidated MigrationPhase = "Validated"
+)
+
+// MigrationStatus tracks operator-managed Praxis migration progress.
+type MigrationStatus struct {
+	// Phase is the high-level migration orchestration phase.
+	// +optional
+	Phase MigrationPhase `json:"phase,omitempty"`
+	// ObservedGeneration is the OGXServer generation last considered for migration.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// AttemptKey identifies the current migration attempt (Secret/config/image fingerprint).
+	// +optional
+	AttemptKey string `json:"attemptKey,omitempty"`
+	// JobName is the Kubernetes Job created for this attempt.
+	// +optional
+	JobName string `json:"jobName,omitempty"`
+	// Message is a human-readable summary of the current migration state.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// SoftRollbackWarning warns that only soft rollback is supported.
+	// +optional
+	SoftRollbackWarning string `json:"softRollbackWarning,omitempty"`
+}
+
 // OGXServerStatus defines the observed state of OGXServer.
 type OGXServerStatus struct {
 	// Phase represents the current phase of the server.
@@ -672,6 +716,9 @@ type OGXServerStatus struct {
 	// ConfigGeneration tracks config generation details.
 	// +optional
 	ConfigGeneration *ConfigGenerationStatus `json:"configGeneration,omitempty"`
+	// Migration tracks Praxis Responses/Conversations migration orchestration.
+	// +optional
+	Migration *MigrationStatus `json:"migration,omitempty"`
 	// Conditions represent the latest available observations of the server's state.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// AvailableReplicas is the number of available replicas.

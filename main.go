@@ -35,6 +35,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -128,6 +129,7 @@ func newCacheOptions() cache.Options {
 			&policyv1.PodDisruptionBudget{}:          managedByFilter,
 			&autoscalingv2.HorizontalPodAutoscaler{}: managedByFilter,
 			&corev1.Service{}:                        managedByFilter,
+			&batchv1.Job{}:                           managedByFilter,
 			&networkingv1.NetworkPolicy{}:            managedByFilter,
 			&networkingv1.Ingress{}:                  managedByFilter,
 			&corev1.PersistentVolumeClaim{}:          managedByFilter,
