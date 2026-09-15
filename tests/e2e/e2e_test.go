@@ -25,6 +25,11 @@ func TestE2E(t *testing.T) {
 	t.Run("tls", func(t *testing.T) {
 		TestTLSSuite(t)
 	})
+
+	// Run Praxis Tenant Isolation tests
+	t.Run("praxis-tenant-isolation", func(t *testing.T) {
+		TestPraxisTenantIsolationSuite(t)
+	})
 }
 
 // runCreationDeletionSuiteForDistribution runs creation tests followed by deletion tests for a specific distribution.
