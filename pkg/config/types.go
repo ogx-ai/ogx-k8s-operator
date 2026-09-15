@@ -35,6 +35,11 @@ type GeneratedConfig struct {
 	// ConfigVersionDefaulted is true when the version string was non-numeric
 	// and ConfigVersion was defaulted to 2. Callers should log a warning.
 	ConfigVersionDefaulted bool
+	// PraxisAPIsFiltered is true when the Praxis-served APIs were provably removed from an
+	// explicit apis: list. It is false when the base config declares no apis: list at all, in
+	// which case OGX derives its API surface from the configured providers and the operator
+	// cannot disable Responses/Conversations through config alone.
+	PraxisAPIsFiltered bool
 }
 
 // ConfigProvider represents a provider in config.yaml format.

@@ -66,12 +66,7 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 	// Determine APIs (filter disabled). In Praxis-fronted mode the Responses and Conversations
 	// APIs are served by Praxis, so they are disabled here internally — this augments
 	// spec.DisabledAPIs rather than mutating the user's CR.
-	disabledAPIs := spec.DisabledAPIs
-	if praxisMode {
-		for _, api := range praxisServedAPIs {
-			disabledAPIs = appendIfMissing(disabledAPIs, api)
-		}
-	}
+	disabledAPIs := effectiveDisabledAPIs(spec.DisabledAPIs, praxisMode)
 	mergedAPIs := MergeAPIs(baseConfig.APIs, disabledAPIs)
 
 	// Build the final config.yaml structure
@@ -105,12 +100,17 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 		ResourceCount:          resourceCount,
 		ConfigVersion:          configVersion,
 		ConfigVersionDefaulted: !configVersionParsed,
+		PraxisAPIsFiltered:     praxisMode && len(baseConfig.APIs) > 0,
 	}, nil
 }
 
 // GeneratePraxisDefaultConfig derives a runtime config from the distribution default, replacing
-// only server.auth for a Praxis-fronted instance. Unlike GenerateConfig, it preserves all
-// unrecognized sections from the default config.
+// only server.auth and the Praxis-served entries of apis: for a Praxis-fronted instance. Unlike
+// GenerateConfig, it preserves all unrecognized sections from the default config.
+//
+// This path is only reachable in Praxis-fronted mode: shouldGenerateConfig requires
+// !HasOverrideConfig() && (HasDeclarativeConfig() || praxisMode), and the caller selects this
+// function precisely when HasDeclarativeConfig() is false — so praxisMode must be true.
 func GeneratePraxisDefaultConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte) (*GeneratedConfig, error) {
 	baseConfig, err := ParseBaseConfig(baseConfigData)
 	if err != nil {
@@ -134,6 +134,10 @@ func GeneratePraxisDefaultConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigDat
 	}
 	cfg["server"] = server
 
+	// Disable the Praxis-served APIs. Without this, a greenfield CR carrying only
+	// spec.distribution would keep serving /v1/responses behind the NetworkPolicy.
+	apisFiltered := filterAPIList(cfg, effectiveDisabledAPIs(spec.DisabledAPIs, true))
+
 	configYAML, err := yaml.Marshal(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize config: %w", err)
@@ -153,7 +157,48 @@ func GeneratePraxisDefaultConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigDat
 		ResourceCount:          resourceCount,
 		ConfigVersion:          configVersion,
 		ConfigVersionDefaulted: !configVersionParsed,
+		PraxisAPIsFiltered:     apisFiltered,
 	}, nil
+}
+
+// effectiveDisabledAPIs returns the APIs to omit from the generated config. In Praxis-fronted
+// mode the Praxis-served APIs are added to whatever the user disabled explicitly. The caller's
+// slice is never mutated.
+func effectiveDisabledAPIs(specDisabled []string, praxisMode bool) []string {
+	if !praxisMode {
+		return specDisabled
+	}
+	disabled := specDisabled
+	for _, api := range praxisServedAPIs {
+		disabled = appendIfMissing(disabled, api)
+	}
+	return disabled
+}
+
+// filterAPIList removes the disabled APIs from cfg["apis"] in place, reporting whether an
+// explicit apis: list was present to filter. The key is rewritten even when the result is empty:
+// an absent apis: means "serve everything", so deleting it would undo the disabling.
+func filterAPIList(cfg map[string]interface{}, disabled []string) bool {
+	raw, ok := cfg["apis"].([]interface{})
+	if !ok {
+		return false
+	}
+
+	omit := make(map[string]bool, len(disabled))
+	for _, api := range disabled {
+		omit[api] = true
+	}
+
+	kept := make([]interface{}, 0, len(raw))
+	for _, item := range raw {
+		if name, isString := item.(string); isString && omit[name] {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	cfg["apis"] = kept
+
+	return true
 }
 
 // appendIfMissing returns items with value appended, unless it is already present. The input slice
