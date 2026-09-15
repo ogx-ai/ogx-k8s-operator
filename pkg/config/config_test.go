@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"gopkg.in/yaml.v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
@@ -969,6 +970,247 @@ apis:
 	}
 	if len(spec.DisabledAPIs) != 1 {
 		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
+// parseAPIList extracts the top-level apis: list from a generated config, reporting whether the
+// key was present at all. An absent apis: key is materially different from an empty one: OGX
+// reads it as "serve everything", which would silently undo the Praxis disabling.
+func parseAPIList(t *testing.T, configYAML string) (apis []string, present bool) {
+	t.Helper()
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		t.Fatalf("failed to parse generated config: %v", err)
+	}
+	raw, ok := cfg["apis"]
+	if !ok {
+		return nil, false
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		t.Fatalf("expected apis to be a list, got %T in:\n%s", raw, configYAML)
+	}
+	for _, item := range items {
+		name, isString := item.(string)
+		if !isString {
+			t.Fatalf("expected apis entries to be strings, got %T in:\n%s", item, configYAML)
+		}
+		apis = append(apis, name)
+	}
+	return apis, true
+}
+
+func assertAPIListOmits(t *testing.T, apis []string, configYAML string, omitted ...string) {
+	t.Helper()
+	for _, name := range omitted {
+		for _, api := range apis {
+			if api == name {
+				t.Errorf("expected apis to omit %q, got %v in:\n%s", name, apis, configYAML)
+			}
+		}
+	}
+}
+
+func assertAPIListContains(t *testing.T, apis []string, configYAML string, expected ...string) {
+	t.Helper()
+	for _, name := range expected {
+		found := false
+		for _, api := range apis {
+			if api == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected apis to contain %q, got %v in:\n%s", name, apis, configYAML)
+		}
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_DisablesResponsesAndConversations covers the greenfield CR that
+// carries only spec.distribution. That CR has no declarative config, so it takes the
+// GeneratePraxisDefaultConfig path rather than GenerateConfig — and must still stop serving the
+// APIs Praxis owns.
+func TestGeneratePraxisDefaultConfig_DisablesResponsesAndConversations(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+- conversations
+- vector_io
+server:
+  port: 8321
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{}
+
+	generated, err := GeneratePraxisDefaultConfig(spec, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, present := parseAPIList(t, generated.ConfigYAML)
+	if !present {
+		t.Fatalf("expected an apis list in the generated config, got:\n%s", generated.ConfigYAML)
+	}
+	assertAPIListOmits(t, apis, generated.ConfigYAML, "responses", "conversations")
+	assertAPIListContains(t, apis, generated.ConfigYAML, "inference", "vector_io")
+
+	if !generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be true when an explicit apis list was filtered")
+	}
+	if len(spec.DisabledAPIs) != 0 {
+		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_PreservesNonAPISections guards the reason this code path exists
+// separately from GenerateConfig: it must pass unrecognized sections through verbatim.
+func TestGeneratePraxisDefaultConfig_PreservesNonAPISections(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+custom_section:
+  enabled: true
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+registered_resources:
+  models:
+  - model_id: llama3
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, _ := parseAPIList(t, generated.ConfigYAML)
+	assertAPIListOmits(t, apis, generated.ConfigYAML, "responses")
+	assertConfigContains(t, generated.ConfigYAML,
+		"custom_section:",
+		"enabled: true",
+		"provider_id: ollama",
+		"kv_sqlite",
+		"model_id: llama3",
+	)
+}
+
+// TestGeneratePraxisDefaultConfig_RefusesToEmitEmptyAPIList pins the one outcome that must never
+// happen: OGX gates its API surface on `if run_config.apis:`, a Python truthiness test, so an
+// empty list and an absent key both mean "serve everything" (ogx-ai/ogx#6558). Filtering a base
+// config down to zero entries and writing that back would answer the maximally-restrictive
+// request with the maximally-permissive config. The generator leaves the list alone and reports
+// that it could not filter, so the caller sees a failure rather than a silent inversion.
+func TestGeneratePraxisDefaultConfig_RefusesToEmitEmptyAPIList(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- responses
+- conversations
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, present := parseAPIList(t, generated.ConfigYAML)
+	if !present {
+		t.Fatalf("expected the apis key to survive, got:\n%s", generated.ConfigYAML)
+	}
+	if len(apis) == 0 {
+		t.Fatalf("emitted an empty apis list, which makes OGX serve every API; config:\n%s", generated.ConfigYAML)
+	}
+	assertAPIListContains(t, apis, generated.ConfigYAML, "responses", "conversations")
+
+	if generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be false when the filter could not be applied safely")
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_ReportsUnfilterableWhenNoAPIList covers the case the operator
+// cannot fix through config: with no apis: list, OGX derives its API surface from the providers
+// and keeps serving Responses. The generator reports this rather than claiming success.
+func TestGeneratePraxisDefaultConfig_ReportsUnfilterableWhenNoAPIList(t *testing.T) {
+	baseConfig := `version: '2'
+server:
+  port: 8321
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be false when the base config declares no apis list")
+	}
+	if _, present := parseAPIList(t, generated.ConfigYAML); present {
+		t.Errorf("expected no apis key to be invented, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestEffectiveDisabledAPIs(t *testing.T) {
+	tests := []struct {
+		name         string
+		specDisabled []string
+		praxisMode   bool
+		want         []string
+	}{
+		{
+			name:       "praxis mode disables the Praxis-served APIs",
+			praxisMode: true,
+			want:       []string{"responses", "conversations"},
+		},
+		{
+			name:         "praxis mode augments the user's list without duplicating",
+			specDisabled: []string{"batches", "responses"},
+			praxisMode:   true,
+			want:         []string{"batches", "responses", "conversations"},
+		},
+		{
+			name:         "legacy mode returns the user's list unchanged",
+			specDisabled: []string{"batches"},
+			praxisMode:   false,
+			want:         []string{"batches"},
+		},
+		{
+			name:       "legacy mode with no user list disables nothing",
+			praxisMode: false,
+			want:       nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := append([]string(nil), tt.specDisabled...)
+
+			got := effectiveDisabledAPIs(tt.specDisabled, tt.praxisMode)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("expected %v, got %v", tt.want, got)
+				}
+			}
+			// The CR's spec.disabledAPIs must never be mutated by the internal disable.
+			if len(tt.specDisabled) != len(original) {
+				t.Errorf("expected the input slice to be left untouched, got %v want %v", tt.specDisabled, original)
+			}
+			for i := range original {
+				if tt.specDisabled[i] != original[i] {
+					t.Errorf("expected the input slice to be left untouched, got %v want %v", tt.specDisabled, original)
+				}
+			}
+		})
 	}
 }
 
@@ -1989,5 +2231,328 @@ providers:
 
 	if !strings.Contains(generated.ConfigYAML, "quantization: int4") {
 		t.Errorf("expected quantization in generated YAML, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+// --- Praxis vector-store metadata ------------------------------------------------------------
+//
+// Praxis mode turns on multi-tenancy and an access policy (applyPraxisAuth). OGX then refuses to
+// start a vector_io provider unless storage.stores.vector_stores names a SQL store to use as the
+// provider's metadata_store. No shipped distribution config declares one, so without the
+// operator declaring it the greenfield pod CrashLoopBackOffs before serving anything — which is
+// how the e2e greenfield suite found this.
+
+// praxisStorageBase mirrors the shape of the real starter distribution's default config: a faiss
+// vector_io provider, sqlite backends named kv_default/sql_default, and a stores section that
+// declares everything except vector_stores.
+const praxisStorageBase = `version: '2'
+apis:
+- inference
+- vector_io
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+    config: {}
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config:
+      persistence:
+        namespace: vector_io::faiss
+        backend: kv_default
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+      db_path: /tmp/kvstore.db
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+    inference:
+      table_name: inference_store
+      backend: sql_default
+server:
+  port: 8321
+`
+
+// parseVectorStoresStore extracts storage.stores.vector_stores from a generated config, reporting
+// whether it was declared at all.
+func parseVectorStoresStore(t *testing.T, configYAML string) (store map[string]interface{}, declared bool) {
+	t.Helper()
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		t.Fatalf("failed to parse generated config: %v", err)
+	}
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	stores, ok := storage["stores"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	raw, ok := stores["vector_stores"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	store, ok = raw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected storage.stores.vector_stores to be an object, got %T in:\n%s", raw, configYAML)
+	}
+	return store, true
+}
+
+func assertVectorStoresStore(t *testing.T, configYAML, wantBackend string) {
+	t.Helper()
+	store, declared := parseVectorStoresStore(t, configYAML)
+	if !declared {
+		t.Fatalf("expected storage.stores.vector_stores to be declared, got:\n%s", configYAML)
+	}
+	if got := store["backend"]; got != wantBackend {
+		t.Errorf("expected vector_stores backend %q, got %v in:\n%s", wantBackend, got, configYAML)
+	}
+	if got := store["table_name"]; got != praxisVectorStoreTable {
+		t.Errorf("expected vector_stores table_name %q, got %v in:\n%s", praxisVectorStoreTable, got, configYAML)
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_DeclaresVectorStoreMetadata covers the greenfield CR that
+// carries only spec.distribution — the common case, and the one that crashlooped.
+func TestGeneratePraxisDefaultConfig_DeclaresVectorStoreMetadata(t *testing.T) {
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(praxisStorageBase))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertVectorStoresStore(t, generated.ConfigYAML, "sql_default")
+}
+
+// TestGenerateConfig_PraxisDeclaresVectorStoreMetadata covers the declarative path, which reaches
+// applyPraxisAuth through a different function and so needs its own guard.
+func TestGenerateConfig_PraxisDeclaresVectorStoreMetadata(t *testing.T) {
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			Inference: &ogxiov1beta1.InferenceProvidersSpec{
+				Remote: &ogxiov1beta1.InferenceRemoteProviders{
+					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://vllm:8000"}},
+				},
+			},
+		},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(praxisStorageBase), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertVectorStoresStore(t, generated.ConfigYAML, "sql_default")
+}
+
+// TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone is the negative control. Outside
+// Praxis mode nothing forces multi-tenancy, so the operator must not add stores the distribution
+// did not ask for. If this ever passes vacuously the assertions above prove nothing.
+func TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone(t *testing.T) {
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			Inference: &ogxiov1beta1.InferenceProvidersSpec{
+				Remote: &ogxiov1beta1.InferenceRemoteProviders{
+					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://vllm:8000"}},
+				},
+			},
+		},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(praxisStorageBase), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, declared := parseVectorStoresStore(t, generated.ConfigYAML); declared {
+		t.Errorf("expected legacy mode to leave storage.stores.vector_stores undeclared, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestApplyPraxisVectorStoreMetadata(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseConfig   string
+		wantDeclared bool
+		wantBackend  string
+		wantTable    string
+	}{
+		{
+			name:         "adds the store when a vector_io provider needs one",
+			baseConfig:   praxisStorageBase,
+			wantDeclared: true,
+			wantBackend:  "sql_default",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "leaves an explicitly declared store untouched",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    vector_stores:
+      table_name: my_vector_stores
+      backend: sql_archive
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "sql_archive",
+			wantTable:    "my_vector_stores",
+		},
+		{
+			name: "adds nothing when no vector_io provider is configured",
+			baseConfig: `version: '2'
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+		{
+			name: "invents no backend when the distribution offers no SQL one",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+      db_path: /tmp/kvstore.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+		{
+			name: "falls back to a non-default SQL backend, chosen deterministically",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    zz_sql_archive:
+      type: sql_postgres
+      host: archive
+    aa_sql_primary:
+      type: sql_postgres
+      host: primary
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "aa_sql_primary",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "creates the stores section when the distribution omits it",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "sql_default",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "adds nothing when the config has no storage section at all",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(tt.baseConfig))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			store, declared := parseVectorStoresStore(t, generated.ConfigYAML)
+			if declared != tt.wantDeclared {
+				t.Fatalf("expected vector_stores declared=%v, got %v in:\n%s", tt.wantDeclared, declared, generated.ConfigYAML)
+			}
+			if !tt.wantDeclared {
+				return
+			}
+			if got := store["backend"]; got != tt.wantBackend {
+				t.Errorf("expected backend %q, got %v in:\n%s", tt.wantBackend, got, generated.ConfigYAML)
+			}
+			if got := store["table_name"]; got != tt.wantTable {
+				t.Errorf("expected table_name %q, got %v in:\n%s", tt.wantTable, got, generated.ConfigYAML)
+			}
+		})
 	}
 }

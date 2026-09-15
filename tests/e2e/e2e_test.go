@@ -8,7 +8,7 @@ import (
 )
 
 func TestE2E(t *testing.T) {
-	registerSchemes()
+	// Schemes are registered in TestMain.
 	// Run validation tests
 	t.Run("validation", TestValidationSuite)
 
@@ -28,6 +28,9 @@ func TestE2E(t *testing.T) {
 
 	// Run NetworkPolicy internal-only enforcement tests
 	t.Run("network-policy", TestNetworkPolicySuite)
+
+	// Run the greenfield negative tests: OGX Responses is not publicly reachable (RHAIENG-6602)
+	t.Run("greenfield-negative", TestGreenfieldNegativeSuite)
 }
 
 // runCreationDeletionSuiteForDistribution runs creation tests followed by deletion tests for a specific distribution.
