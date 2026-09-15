@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
+	"gopkg.in/yaml.v3"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
@@ -969,6 +970,241 @@ apis:
 	}
 	if len(spec.DisabledAPIs) != 1 {
 		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
+// parseAPIList extracts the top-level apis: list from a generated config, reporting whether the
+// key was present at all. An absent apis: key is materially different from an empty one: OGX
+// reads it as "serve everything", which would silently undo the Praxis disabling.
+func parseAPIList(t *testing.T, configYAML string) (apis []string, present bool) {
+	t.Helper()
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		t.Fatalf("failed to parse generated config: %v", err)
+	}
+	raw, ok := cfg["apis"]
+	if !ok {
+		return nil, false
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		t.Fatalf("expected apis to be a list, got %T in:\n%s", raw, configYAML)
+	}
+	for _, item := range items {
+		name, isString := item.(string)
+		if !isString {
+			t.Fatalf("expected apis entries to be strings, got %T in:\n%s", item, configYAML)
+		}
+		apis = append(apis, name)
+	}
+	return apis, true
+}
+
+func assertAPIListOmits(t *testing.T, apis []string, configYAML string, omitted ...string) {
+	t.Helper()
+	for _, name := range omitted {
+		for _, api := range apis {
+			if api == name {
+				t.Errorf("expected apis to omit %q, got %v in:\n%s", name, apis, configYAML)
+			}
+		}
+	}
+}
+
+func assertAPIListContains(t *testing.T, apis []string, configYAML string, expected ...string) {
+	t.Helper()
+	for _, name := range expected {
+		found := false
+		for _, api := range apis {
+			if api == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected apis to contain %q, got %v in:\n%s", name, apis, configYAML)
+		}
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_DisablesResponsesAndConversations covers the greenfield CR that
+// carries only spec.distribution. That CR has no declarative config, so it takes the
+// GeneratePraxisDefaultConfig path rather than GenerateConfig — and must still stop serving the
+// APIs Praxis owns.
+func TestGeneratePraxisDefaultConfig_DisablesResponsesAndConversations(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+- conversations
+- vector_io
+server:
+  port: 8321
+`
+
+	spec := &ogxiov1beta1.OGXServerSpec{}
+
+	generated, err := GeneratePraxisDefaultConfig(spec, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, present := parseAPIList(t, generated.ConfigYAML)
+	if !present {
+		t.Fatalf("expected an apis list in the generated config, got:\n%s", generated.ConfigYAML)
+	}
+	assertAPIListOmits(t, apis, generated.ConfigYAML, "responses", "conversations")
+	assertAPIListContains(t, apis, generated.ConfigYAML, "inference", "vector_io")
+
+	if !generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be true when an explicit apis list was filtered")
+	}
+	if len(spec.DisabledAPIs) != 0 {
+		t.Errorf("expected spec.DisabledAPIs to be left untouched, got %v", spec.DisabledAPIs)
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_PreservesNonAPISections guards the reason this code path exists
+// separately from GenerateConfig: it must pass unrecognized sections through verbatim.
+func TestGeneratePraxisDefaultConfig_PreservesNonAPISections(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- inference
+- responses
+custom_section:
+  enabled: true
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+registered_resources:
+  models:
+  - model_id: llama3
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, _ := parseAPIList(t, generated.ConfigYAML)
+	assertAPIListOmits(t, apis, generated.ConfigYAML, "responses")
+	assertConfigContains(t, generated.ConfigYAML,
+		"custom_section:",
+		"enabled: true",
+		"provider_id: ollama",
+		"kv_sqlite",
+		"model_id: llama3",
+	)
+}
+
+// TestGeneratePraxisDefaultConfig_EmptyAPIListIsPreservedNotDeleted pins the distinction between
+// an empty apis list and an absent one. Deleting the key would restore the full API surface.
+func TestGeneratePraxisDefaultConfig_EmptyAPIListIsPreservedNotDeleted(t *testing.T) {
+	baseConfig := `version: '2'
+apis:
+- responses
+- conversations
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	apis, present := parseAPIList(t, generated.ConfigYAML)
+	if !present {
+		t.Fatalf("expected the apis key to survive as an empty list, got:\n%s", generated.ConfigYAML)
+	}
+	if len(apis) != 0 {
+		t.Errorf("expected an empty apis list, got %v", apis)
+	}
+	if !generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be true")
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_ReportsUnfilterableWhenNoAPIList covers the case the operator
+// cannot fix through config: with no apis: list, OGX derives its API surface from the providers
+// and keeps serving Responses. The generator reports this rather than claiming success.
+func TestGeneratePraxisDefaultConfig_ReportsUnfilterableWhenNoAPIList(t *testing.T) {
+	baseConfig := `version: '2'
+server:
+  port: 8321
+`
+
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(baseConfig))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be false when the base config declares no apis list")
+	}
+	if _, present := parseAPIList(t, generated.ConfigYAML); present {
+		t.Errorf("expected no apis key to be invented, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestEffectiveDisabledAPIs(t *testing.T) {
+	tests := []struct {
+		name         string
+		specDisabled []string
+		praxisMode   bool
+		want         []string
+	}{
+		{
+			name:       "praxis mode disables the Praxis-served APIs",
+			praxisMode: true,
+			want:       []string{"responses", "conversations"},
+		},
+		{
+			name:         "praxis mode augments the user's list without duplicating",
+			specDisabled: []string{"batches", "responses"},
+			praxisMode:   true,
+			want:         []string{"batches", "responses", "conversations"},
+		},
+		{
+			name:         "legacy mode returns the user's list unchanged",
+			specDisabled: []string{"batches"},
+			praxisMode:   false,
+			want:         []string{"batches"},
+		},
+		{
+			name:       "legacy mode with no user list disables nothing",
+			praxisMode: false,
+			want:       nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := append([]string(nil), tt.specDisabled...)
+
+			got := effectiveDisabledAPIs(tt.specDisabled, tt.praxisMode)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("expected %v, got %v", tt.want, got)
+				}
+			}
+			// The CR's spec.disabledAPIs must never be mutated by the internal disable.
+			if len(tt.specDisabled) != len(original) {
+				t.Errorf("expected the input slice to be left untouched, got %v want %v", tt.specDisabled, original)
+			}
+			for i := range original {
+				if tt.specDisabled[i] != original[i] {
+					t.Errorf("expected the input slice to be left untouched, got %v want %v", tt.specDisabled, original)
+				}
+			}
+		})
 	}
 }
 
