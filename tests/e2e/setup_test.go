@@ -11,6 +11,10 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// Register schemes before building the clients so individual suites can be run standalone
+	// with -run, not only through TestE2E.
+	registerSchemes()
+
 	// Set up test environment
 	var err error
 	TestEnv, err = SetupTestEnv()

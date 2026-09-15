@@ -4,6 +4,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -44,7 +46,9 @@ var (
 // TestEnvironment holds the test environment configuration.
 type TestEnvironment struct {
 	Client client.Client
-	Ctx    context.Context //nolint:containedctx // Context is used for test environment
+	// Clientset backs the subresource calls the typed client cannot make, notably pod logs.
+	Clientset kubernetes.Interface
+	Ctx       context.Context //nolint:containedctx // Context is used for test environment
 }
 
 // SetupTestEnv sets up the test environment.
@@ -59,10 +63,37 @@ func SetupTestEnv() (*TestEnvironment, error) {
 		return nil, err
 	}
 
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	return &TestEnvironment{
-		Client: cl,
-		Ctx:    context.TODO(),
+		Client:    cl,
+		Clientset: clientset,
+		Ctx:       context.TODO(),
 	}, nil
+}
+
+// GetPodLogs returns the logs of a pod's only (or first) container. Probe pods write their result
+// to stdout, so the log is the result — an exit code alone cannot carry an HTTP status and body.
+func GetPodLogs(t *testing.T, testenv *TestEnvironment, namespace, podName string) (string, error) {
+	t.Helper()
+
+	stream, err := testenv.Clientset.CoreV1().
+		Pods(namespace).
+		GetLogs(podName, &corev1.PodLogOptions{}).
+		Stream(testenv.Ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to stream logs for pod %s/%s: %w", namespace, podName, err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	data, err := io.ReadAll(stream)
+	if err != nil {
+		return "", fmt.Errorf("failed to read logs for pod %s/%s: %w", namespace, podName, err)
+	}
+	return string(data), nil
 }
 
 // validateCRD checks if a CustomResourceDefinition is established.
@@ -274,6 +305,39 @@ func EnsureOverrideConfigMap(t *testing.T, c client.Client, ctx context.Context,
 	if server.Spec.OverrideConfig == nil || server.Spec.OverrideConfig.Name == "" {
 		return
 	}
+	createStarterConfigMap(t, c, ctx, server.Spec.OverrideConfig.Name, server.Namespace)
+}
+
+// EnsureBaseConfigMap creates the ConfigMap referenced by the CR's baseConfig if one is
+// configured. Unlike overrideConfig, baseConfig keeps the operator's config-generation pipeline
+// in play — the generated result is what the pod actually mounts.
+func EnsureBaseConfigMap(t *testing.T, c client.Client, ctx context.Context, server *ogxiov1beta1.OGXServer) {
+	t.Helper()
+
+	if server.Spec.BaseConfig == nil || server.Spec.BaseConfig.Name == "" {
+		return
+	}
+	createStarterConfigMap(t, c, ctx, server.Spec.BaseConfig.Name, server.Namespace)
+}
+
+// createStarterConfigMap applies config/samples/starter-config-configmap.yaml under the given
+// name and namespace, tolerating a pre-existing ConfigMap.
+func createStarterConfigMap(t *testing.T, c client.Client, ctx context.Context, name, namespace string) {
+	t.Helper()
+
+	cm := loadStarterConfigMap(t)
+	cm.Name = name
+	cm.Namespace = namespace
+
+	err := c.Create(ctx, cm)
+	if err != nil && !errors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
+}
+
+// loadStarterConfigMap reads the sample starter config ConfigMap from the repo.
+func loadStarterConfigMap(t *testing.T) *corev1.ConfigMap {
+	t.Helper()
 
 	projectRoot, err := filepath.Abs("../..")
 	require.NoError(t, err)
@@ -283,14 +347,8 @@ func EnsureOverrideConfigMap(t *testing.T, c client.Client, ctx context.Context,
 	require.NoError(t, err)
 
 	cm := &corev1.ConfigMap{}
-	err = yaml.Unmarshal(yamlFile, cm)
-	require.NoError(t, err)
-
-	cm.Namespace = server.Namespace
-	err = c.Create(ctx, cm)
-	if err != nil && !errors.IsAlreadyExists(err) {
-		require.NoError(t, err)
-	}
+	require.NoError(t, yaml.Unmarshal(yamlFile, cm))
+	return cm
 }
 
 // GetSampleCRForDistribution returns an OGXServer configured for the specified distribution type.
@@ -423,7 +481,12 @@ func logPodDetails(t *testing.T, testenv *TestEnvironment, namespace string) {
 			}
 		}
 
-		t.Logf("  (Pod logs require direct kubectl access)")
+		logs, logErr := GetPodLogs(t, testenv, namespace, pod.Name)
+		if logErr != nil {
+			t.Logf("  Could not read pod logs: %v", logErr)
+			continue
+		}
+		t.Logf("  Logs:\n%s", logs)
 	}
 }
 
