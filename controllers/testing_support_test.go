@@ -133,6 +133,16 @@ func (b *OGXServerBuilder) WithOverrideConfig(configMapName, key string) *OGXSer
 	return b
 }
 
+// WithBaseConfig points spec.baseConfig at a ConfigMap. Unlike WithOverrideConfig this keeps the
+// config-generation pipeline in play, while avoiding the OCI-label fetch that envtest cannot do.
+func (b *OGXServerBuilder) WithBaseConfig(configMapName, key string) *OGXServerBuilder {
+	b.instance.Spec.BaseConfig = &ogxiov1beta1.ConfigMapKeyRef{
+		Name: configMapName,
+		Key:  key,
+	}
+	return b
+}
+
 func (b *OGXServerBuilder) WithCACertificates(refs ...ogxiov1beta1.ConfigMapKeyRef) *OGXServerBuilder {
 	if b.instance.Spec.TLS == nil {
 		b.instance.Spec.TLS = &ogxiov1beta1.TLSClientConfig{}
