@@ -650,6 +650,13 @@ func runDecoyIngressControl(t *testing.T, target targetService) {
 
 // runAdoptedIngressDeletion exercises enforceInternalOnlyIngress against a real API server: an
 // Ingress owned by the CR must be removed, not merely left uncreated.
+//
+// The fixture must carry app.kubernetes.io/managed-by=ogx-operator. The operator's manager cache
+// filters Ingress by exactly that label (newCacheOptions in main.go), and enforceInternalOnlyIngress
+// reads through the cached client — an unlabelled Ingress is simply invisible to it and would never
+// be deleted. Labelling matches what buildIngress stamps on every Ingress the operator creates, so
+// this reproduces a real legacy-mode leftover rather than a synthetic object the operator has no
+// contract to remove.
 func runAdoptedIngressDeletion(t *testing.T, server *ogxiov1beta1.OGXServer, target targetService) {
 	t.Helper()
 
@@ -663,6 +670,10 @@ func runAdoptedIngressDeletion(t *testing.T, server *ogxiov1beta1.OGXServer, tar
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      server.Name + "-ingress",
 			Namespace: server.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "ogx-operator",
+				"app.kubernetes.io/instance":   server.Name,
+			},
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: ogxiov1beta1.GroupVersion.String(),
 				Kind:       "OGXServer",
