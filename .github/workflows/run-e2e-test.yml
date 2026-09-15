@@ -3,7 +3,7 @@ name: Run E2E Tests
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [ main ]
+    branches: [ main, feature/praxis ]
   workflow_call:
     outputs:
       success:
