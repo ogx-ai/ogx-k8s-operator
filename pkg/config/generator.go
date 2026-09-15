@@ -175,9 +175,17 @@ func effectiveDisabledAPIs(specDisabled []string, praxisMode bool) []string {
 	return disabled
 }
 
-// filterAPIList removes the disabled APIs from cfg["apis"] in place, reporting whether an
-// explicit apis: list was present to filter. The key is rewritten even when the result is empty:
-// an absent apis: means "serve everything", so deleting it would undo the disabling.
+// filterAPIList removes the disabled APIs from cfg["apis"] in place, reporting whether the list
+// was present and could be filtered.
+//
+// OGX gates its served API surface on `if run_config.apis:` (ogx-ai/ogx server.py), which is a
+// Python truthiness test. Both an absent key and an empty list take the else branch and serve
+// every API the configured providers support. So neither deleting the key nor writing an empty
+// list disables anything — both do the opposite. If every entry would be filtered out we
+// therefore leave the list untouched and report false, which surfaces through
+// GeneratedConfig.PraxisAPIsFiltered as "the operator could not disable these through config".
+// Emitting the maximally-permissive config in response to the maximally-restrictive request is
+// the one outcome worth ruling out. See ogx-ai/ogx#6558.
 func filterAPIList(cfg map[string]interface{}, disabled []string) bool {
 	raw, ok := cfg["apis"].([]interface{})
 	if !ok {
@@ -195,6 +203,9 @@ func filterAPIList(cfg map[string]interface{}, disabled []string) bool {
 			continue
 		}
 		kept = append(kept, item)
+	}
+	if len(kept) == 0 {
+		return false
 	}
 	cfg["apis"] = kept
 
