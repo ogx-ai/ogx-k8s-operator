@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -16,6 +17,7 @@ import (
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	controllers "github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
+	"github.com/ogx-ai/ogx-k8s-operator/pkg/config"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -452,7 +454,31 @@ func createTestReconciler() *controllers.OGXServerReconciler {
 			"starter": testImage,
 		},
 	}
-	return controllers.NewTestReconciler(k8sClient, scheme.Scheme, clusterInfo, &http.Client{})
+	reconciler := controllers.NewTestReconciler(k8sClient, scheme.Scheme, clusterInfo, &http.Client{})
+	reconciler.OCILabelFetcher = stubOCILabelFetcher
+	return reconciler
+}
+
+// testDistributionBaseConfig is the distribution default that stubOCILabelFetcher serves. It
+// declares responses so the Praxis API filter has something to remove, and inference so a filtered
+// list is distinguishable from an emptied one.
+const testDistributionBaseConfig = `version: '2'
+apis:
+- inference
+- responses
+server:
+  port: 8321
+`
+
+// stubOCILabelFetcher stands in for a container registry: a greenfield CR carries only
+// spec.distribution, so the config generator resolves its base config from the distribution
+// image's OCI labels, which envtest has no registry to serve. Everything downstream of the fetch —
+// resolver, generator, ConfigMap plumbing — still runs for real.
+func stubOCILabelFetcher(string) (map[string]string, error) {
+	return map[string]string{
+		config.OCIDefaultConfigLabel:                "config.yaml",
+		config.OCIConfigLabelPrefix + "config.yaml": base64.StdEncoding.EncodeToString([]byte(testDistributionBaseConfig)),
+	}, nil
 }
 
 func findVolumeByName(t *testing.T, deployment *appsv1.Deployment, volumeName string) *corev1.Volume {
