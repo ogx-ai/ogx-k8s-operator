@@ -21,7 +21,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"gopkg.in/yaml.v3"
@@ -133,6 +135,7 @@ func GeneratePraxisDefaultConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigDat
 		server["port"] = spec.Network.Port
 	}
 	cfg["server"] = server
+	applyPraxisVectorStoreMetadata(storageSection(cfg), hasVectorIOProvider(cfg))
 
 	// Disable the Praxis-served APIs. Without this, a greenfield CR carrying only
 	// spec.distribution would keep serving /v1/responses behind the NetworkPolicy.
@@ -255,6 +258,9 @@ func buildFinalConfig(
 	}
 	cfg["server"] = buildServerSection(base, spec, praxisMode)
 	buildStorageSection(cfg, storage, base)
+	if praxisMode {
+		applyPraxisVectorStoreMetadata(storageSection(cfg), len(providers["vector_io"]) > 0)
+	}
 
 	return cfg
 }
@@ -374,6 +380,109 @@ func buildStorageSection(cfg map[string]interface{}, storage map[string]interfac
 	} else if base.Storage != nil {
 		cfg["storage"] = base.Storage
 	}
+}
+
+// praxisVectorStoreTable names the SQL table holding per-tenant vector-store metadata when the
+// operator has to declare the store itself. See applyPraxisVectorStoreMetadata.
+const praxisVectorStoreTable = "openai_vector_stores"
+
+// applyPraxisVectorStoreMetadata makes the storage section satisfy what Praxis mode's own auth
+// settings demand of OGX.
+//
+// applyPraxisAuth turns on multi-tenancy and an access policy. OGX then refuses to start any
+// vector_io provider unless storage.stores.vector_stores names a SQL store to hold per-tenant
+// vector-store metadata — it is injected as the provider's metadata_store, and its absence is a
+// hard startup error ("metadata_store is required when tenancy mode is 'multi'"). No shipped
+// distribution config declares that store, so without this the greenfield path emits a config
+// whose pod CrashLoopBackOffs before serving anything.
+//
+// It is deliberately conservative and leaves the config alone when there is nothing to fix or no
+// grounded way to fix it: no vector_io provider is configured, the config already declares the
+// store, or the distribution offers no SQL backend to point at (the operator cannot invent a
+// database). In that last case OGX still fails to start, but it fails on the distribution's own
+// incomplete storage config rather than on a backend reference the operator made up.
+func applyPraxisVectorStoreMetadata(storage map[string]interface{}, hasVectorIOProvider bool) {
+	if !hasVectorIOProvider || storage == nil {
+		return
+	}
+
+	backend := sqlBackendName(storage)
+	if backend == "" {
+		return
+	}
+
+	stores, ok := storage["stores"].(map[string]interface{})
+	if !ok {
+		if _, present := storage["stores"]; present {
+			// Present but not an object — malformed; refuse to guess.
+			return
+		}
+		stores = make(map[string]interface{})
+		storage["stores"] = stores
+	}
+	if existing, declared := stores["vector_stores"]; declared && existing != nil {
+		return
+	}
+
+	stores["vector_stores"] = map[string]interface{}{
+		"table_name": praxisVectorStoreTable,
+		"backend":    backend,
+	}
+}
+
+// sqlBackendName picks a SQL backend from storage.backends to attach a new store to, preferring
+// the conventional sql_default. Selection is deterministic — the generated config's hash names its
+// ConfigMap, so map iteration order must not change the result.
+func sqlBackendName(storage map[string]interface{}) string {
+	backends, ok := storage["backends"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	const preferred = "sql_default"
+	if isSQLBackend(backends[preferred]) {
+		return preferred
+	}
+
+	candidates := make([]string, 0, len(backends))
+	for name, backend := range backends {
+		if isSQLBackend(backend) {
+			candidates = append(candidates, name)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Strings(candidates)
+	return candidates[0]
+}
+
+func isSQLBackend(backend interface{}) bool {
+	cfg, ok := backend.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	backendType, ok := cfg["type"].(string)
+	return ok && strings.HasPrefix(backendType, "sql_")
+}
+
+// storageSection returns the storage map already installed in cfg, or nil when there is none.
+func storageSection(cfg map[string]interface{}) map[string]interface{} {
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return storage
+}
+
+// hasVectorIOProvider reports whether a raw (unparsed) config declares any vector_io provider.
+func hasVectorIOProvider(cfg map[string]interface{}) bool {
+	providers, ok := cfg["providers"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	vectorIO, ok := providers["vector_io"].([]interface{})
+	return ok && len(vectorIO) > 0
 }
 
 func countProviders(providers map[string][]ConfigProvider) int {

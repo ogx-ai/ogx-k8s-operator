@@ -2233,3 +2233,326 @@ providers:
 		t.Errorf("expected quantization in generated YAML, got:\n%s", generated.ConfigYAML)
 	}
 }
+
+// --- Praxis vector-store metadata ------------------------------------------------------------
+//
+// Praxis mode turns on multi-tenancy and an access policy (applyPraxisAuth). OGX then refuses to
+// start a vector_io provider unless storage.stores.vector_stores names a SQL store to use as the
+// provider's metadata_store. No shipped distribution config declares one, so without the
+// operator declaring it the greenfield pod CrashLoopBackOffs before serving anything — which is
+// how the e2e greenfield suite found this.
+
+// praxisStorageBase mirrors the shape of the real starter distribution's default config: a faiss
+// vector_io provider, sqlite backends named kv_default/sql_default, and a stores section that
+// declares everything except vector_stores.
+const praxisStorageBase = `version: '2'
+apis:
+- inference
+- vector_io
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+    config: {}
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config:
+      persistence:
+        namespace: vector_io::faiss
+        backend: kv_default
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+      db_path: /tmp/kvstore.db
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+    inference:
+      table_name: inference_store
+      backend: sql_default
+server:
+  port: 8321
+`
+
+// parseVectorStoresStore extracts storage.stores.vector_stores from a generated config, reporting
+// whether it was declared at all.
+func parseVectorStoresStore(t *testing.T, configYAML string) (store map[string]interface{}, declared bool) {
+	t.Helper()
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		t.Fatalf("failed to parse generated config: %v", err)
+	}
+	storage, ok := cfg["storage"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	stores, ok := storage["stores"].(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+	raw, ok := stores["vector_stores"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	store, ok = raw.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected storage.stores.vector_stores to be an object, got %T in:\n%s", raw, configYAML)
+	}
+	return store, true
+}
+
+func assertVectorStoresStore(t *testing.T, configYAML, wantBackend string) {
+	t.Helper()
+	store, declared := parseVectorStoresStore(t, configYAML)
+	if !declared {
+		t.Fatalf("expected storage.stores.vector_stores to be declared, got:\n%s", configYAML)
+	}
+	if got := store["backend"]; got != wantBackend {
+		t.Errorf("expected vector_stores backend %q, got %v in:\n%s", wantBackend, got, configYAML)
+	}
+	if got := store["table_name"]; got != praxisVectorStoreTable {
+		t.Errorf("expected vector_stores table_name %q, got %v in:\n%s", praxisVectorStoreTable, got, configYAML)
+	}
+}
+
+// TestGeneratePraxisDefaultConfig_DeclaresVectorStoreMetadata covers the greenfield CR that
+// carries only spec.distribution — the common case, and the one that crashlooped.
+func TestGeneratePraxisDefaultConfig_DeclaresVectorStoreMetadata(t *testing.T) {
+	generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(praxisStorageBase))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertVectorStoresStore(t, generated.ConfigYAML, "sql_default")
+}
+
+// TestGenerateConfig_PraxisDeclaresVectorStoreMetadata covers the declarative path, which reaches
+// applyPraxisAuth through a different function and so needs its own guard.
+func TestGenerateConfig_PraxisDeclaresVectorStoreMetadata(t *testing.T) {
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			Inference: &ogxiov1beta1.InferenceProvidersSpec{
+				Remote: &ogxiov1beta1.InferenceRemoteProviders{
+					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://vllm:8000"}},
+				},
+			},
+		},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(praxisStorageBase), true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertVectorStoresStore(t, generated.ConfigYAML, "sql_default")
+}
+
+// TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone is the negative control. Outside
+// Praxis mode nothing forces multi-tenancy, so the operator must not add stores the distribution
+// did not ask for. If this ever passes vacuously the assertions above prove nothing.
+func TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone(t *testing.T) {
+	spec := &ogxiov1beta1.OGXServerSpec{
+		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},
+		Providers: &ogxiov1beta1.ProvidersSpec{
+			Inference: &ogxiov1beta1.InferenceProvidersSpec{
+				Remote: &ogxiov1beta1.InferenceRemoteProviders{
+					VLLM: []ogxiov1beta1.VLLMProvider{{Endpoint: "https://vllm:8000"}},
+				},
+			},
+		},
+	}
+
+	generated, err := GenerateConfig(spec, []byte(praxisStorageBase), false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, declared := parseVectorStoresStore(t, generated.ConfigYAML); declared {
+		t.Errorf("expected legacy mode to leave storage.stores.vector_stores undeclared, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func TestApplyPraxisVectorStoreMetadata(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseConfig   string
+		wantDeclared bool
+		wantBackend  string
+		wantTable    string
+	}{
+		{
+			name:         "adds the store when a vector_io provider needs one",
+			baseConfig:   praxisStorageBase,
+			wantDeclared: true,
+			wantBackend:  "sql_default",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "leaves an explicitly declared store untouched",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    vector_stores:
+      table_name: my_vector_stores
+      backend: sql_archive
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "sql_archive",
+			wantTable:    "my_vector_stores",
+		},
+		{
+			name: "adds nothing when no vector_io provider is configured",
+			baseConfig: `version: '2'
+apis:
+- inference
+providers:
+  inference:
+  - provider_id: ollama
+    provider_type: remote::ollama
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+		{
+			name: "invents no backend when the distribution offers no SQL one",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    kv_default:
+      type: kv_sqlite
+      db_path: /tmp/kvstore.db
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+		{
+			name: "falls back to a non-default SQL backend, chosen deterministically",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    zz_sql_archive:
+      type: sql_postgres
+      host: archive
+    aa_sql_primary:
+      type: sql_postgres
+      host: primary
+  stores:
+    metadata:
+      namespace: registry
+      backend: kv_default
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "aa_sql_primary",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "creates the stores section when the distribution omits it",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+storage:
+  backends:
+    sql_default:
+      type: sql_sqlite
+      db_path: /tmp/sql_store.db
+server:
+  port: 8321
+`,
+			wantDeclared: true,
+			wantBackend:  "sql_default",
+			wantTable:    praxisVectorStoreTable,
+		},
+		{
+			name: "adds nothing when the config has no storage section at all",
+			baseConfig: `version: '2'
+apis:
+- vector_io
+providers:
+  vector_io:
+  - provider_id: faiss
+    provider_type: inline::faiss
+    config: {}
+server:
+  port: 8321
+`,
+			wantDeclared: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			generated, err := GeneratePraxisDefaultConfig(&ogxiov1beta1.OGXServerSpec{}, []byte(tt.baseConfig))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			store, declared := parseVectorStoresStore(t, generated.ConfigYAML)
+			if declared != tt.wantDeclared {
+				t.Fatalf("expected vector_stores declared=%v, got %v in:\n%s", tt.wantDeclared, declared, generated.ConfigYAML)
+			}
+			if !tt.wantDeclared {
+				return
+			}
+			if got := store["backend"]; got != tt.wantBackend {
+				t.Errorf("expected backend %q, got %v in:\n%s", tt.wantBackend, got, generated.ConfigYAML)
+			}
+			if got := store["table_name"]; got != tt.wantTable {
+				t.Errorf("expected table_name %q, got %v in:\n%s", tt.wantTable, got, generated.ConfigYAML)
+			}
+		})
+	}
+}
