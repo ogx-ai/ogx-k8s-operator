@@ -1102,9 +1102,13 @@ registered_resources:
 	)
 }
 
-// TestGeneratePraxisDefaultConfig_EmptyAPIListIsPreservedNotDeleted pins the distinction between
-// an empty apis list and an absent one. Deleting the key would restore the full API surface.
-func TestGeneratePraxisDefaultConfig_EmptyAPIListIsPreservedNotDeleted(t *testing.T) {
+// TestGeneratePraxisDefaultConfig_RefusesToEmitEmptyAPIList pins the one outcome that must never
+// happen: OGX gates its API surface on `if run_config.apis:`, a Python truthiness test, so an
+// empty list and an absent key both mean "serve everything" (ogx-ai/ogx#6558). Filtering a base
+// config down to zero entries and writing that back would answer the maximally-restrictive
+// request with the maximally-permissive config. The generator leaves the list alone and reports
+// that it could not filter, so the caller sees a failure rather than a silent inversion.
+func TestGeneratePraxisDefaultConfig_RefusesToEmitEmptyAPIList(t *testing.T) {
 	baseConfig := `version: '2'
 apis:
 - responses
@@ -1118,13 +1122,15 @@ apis:
 
 	apis, present := parseAPIList(t, generated.ConfigYAML)
 	if !present {
-		t.Fatalf("expected the apis key to survive as an empty list, got:\n%s", generated.ConfigYAML)
+		t.Fatalf("expected the apis key to survive, got:\n%s", generated.ConfigYAML)
 	}
-	if len(apis) != 0 {
-		t.Errorf("expected an empty apis list, got %v", apis)
+	if len(apis) == 0 {
+		t.Fatalf("emitted an empty apis list, which makes OGX serve every API; config:\n%s", generated.ConfigYAML)
 	}
-	if !generated.PraxisAPIsFiltered {
-		t.Error("expected PraxisAPIsFiltered to be true")
+	assertAPIListContains(t, apis, generated.ConfigYAML, "responses", "conversations")
+
+	if generated.PraxisAPIsFiltered {
+		t.Error("expected PraxisAPIsFiltered to be false when the filter could not be applied safely")
 	}
 }
 

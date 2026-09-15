@@ -36,8 +36,15 @@ import (
 //   - the OGX Service is ClusterIP with no node-port / load-balancer / external-IP exposure
 //   - status advertises only the internal cluster-DNS endpoint
 //   - the generated config omits the APIs Praxis serves, so OGX does not answer them at all
-//   - a live OGX pod does not serve /v1/responses or /v1/conversations, while it does serve an
-//     API that is meant to be enabled
+//   - a live OGX pod does not serve /v1/responses, while it does serve an API meant to be enabled
+//
+// Observed behaviour of the disable mechanism. The operator disables an API by omitting it from
+// the config's apis: list, so OGX registers no FastAPI route for it. OGX registers no handler for
+// StarletteHTTPException (ogx-ai/ogx server.py), so an unrouted path falls through to Starlette's
+// default and returns 404 {"detail": "Not Found"} — a 404, but not an OpenAI-shaped body. That is
+// why the not-served assertion takes an allow-set of {404, 405, 410, 501} rather than pinning one
+// code, and why the OpenAI-error-shape assertion is conditional on a 410/501 guard that does not
+// exist today.
 //
 // What this suite deliberately does NOT claim:
 //
@@ -48,8 +55,11 @@ import (
 //     OGX_E2E_TEST_NP_ENFORCEMENT.
 //   - OpenShift Route and Gateway API HTTPRoute checks are vacuous where the CRDs are absent.
 //     The suite logs this loudly rather than reporting a silent pass.
+//   - It does not currently prove anything about /v1/conversations over HTTP. OGX serves that API
+//     regardless of the apis: list (ogx-ai/ogx#6558), so the probe is skipped pending the upstream
+//     fix. The operator-side half — that the generated config omits it — is still asserted.
 //
-// Those three gaps need a downstream OCP/QE counterpart.
+// The first three gaps need a downstream OCP/QE counterpart.
 
 const (
 	greenfieldNamespace = "ogx-greenfield-test"
@@ -165,6 +175,14 @@ func TestGreenfieldNegativeSuite(t *testing.T) {
 	})
 
 	t.Run("OGX does not serve /v1/conversations", func(t *testing.T) {
+		// Known upstream bug, ogx-ai/ogx#6558: server.py force-adds "conversations" to
+		// apis_to_serve after building the set from the config, so the router is registered
+		// however the operator writes the apis: list. The operator side is correct and is
+		// asserted by the generated-config subtest above; only OGX's handling is wrong, so
+		// this probe would fail for a reason no change in this repo can fix. Remove the skip
+		// once the upstream fix ships — it is the regression test for it.
+		t.Skip("blocked on ogx-ai/ogx#6558: OGX serves /v1/conversations regardless of the apis: list")
+
 		requireControlPassed(t, enabledAPIServed)
 		assertAPINotServed(t, target, "gf-probe-conversations", "/v1/conversations", `{}`)
 	})
@@ -757,6 +775,9 @@ func assertGeneratedConfigOmitsPraxisAPIs(t *testing.T, server *ogxiov1beta1.OGX
 		"config.yaml declares no apis: list, which means OGX serves every API it has providers "+
 			"for — the Praxis disabling would be silently undone. Config:\n%s", raw)
 	assert.NotContains(t, cfg.APIs, "responses", "OGX must not serve /v1/responses in Praxis mode")
+	// The operator's half of the Conversations story. OGX ignores this today and serves the API
+	// anyway (ogx-ai/ogx#6558), which is why the matching HTTP probe is skipped — but the config
+	// it is handed must still be correct, so this assertion stays live.
 	assert.NotContains(t, cfg.APIs, "conversations", "OGX must not serve /v1/conversations in Praxis mode")
 	assert.Contains(t, cfg.APIs, "inference", "the filter must not empty the apis list wholesale")
 }
