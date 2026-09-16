@@ -29,8 +29,14 @@ func TestE2E(t *testing.T) {
 	// Run NetworkPolicy internal-only enforcement tests
 	t.Run("network-policy", TestNetworkPolicySuite)
 
-	// Run the greenfield negative tests: OGX Responses is not publicly reachable (RHAIENG-6602)
-	t.Run("greenfield-negative", TestGreenfieldNegativeSuite)
+	// RHAIENG-6602, the 3.6 default: Praxis mode is off unless opted into, and OGX serves
+	// /v1/responses. Runs before the opt-in suite so a regression in the default — the topology
+	// every install gets — is reported first.
+	t.Run("greenfield-default", TestGreenfieldDefaultSuite)
+
+	// RHAIENG-6602, the opt-in topology: once a CR sets spec.praxisMode.enabled, OGX goes
+	// internal-only and stops serving the APIs Praxis owns.
+	t.Run("praxis-optin", TestPraxisOptInSuite)
 }
 
 // runCreationDeletionSuiteForDistribution runs creation tests followed by deletion tests for a specific distribution.

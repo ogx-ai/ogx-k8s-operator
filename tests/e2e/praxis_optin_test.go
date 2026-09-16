@@ -26,11 +26,20 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// RHAIENG-6602 — greenfield negative tests: OGX Responses is not publicly reachable.
+// RHAIENG-6602 — what an explicit opt-in to Praxis mode buys: OGX goes internal-only and stops
+// answering the APIs Praxis owns.
 //
-// RHAISTRAT-2277 requires that in the greenfield topology only Praxis exposes /v1/responses
-// externally, and that OGX's own port 8321 is not reachable from outside the cluster. This suite
-// proves the declarative half of that on a kind cluster:
+// This suite used to be the greenfield suite. RHAIENG-7517 flipped the operator default, so Praxis
+// mode is now opt-in and a greenfield install gets the opposite topology — /v1/responses served and
+// externally routable. That default is covered by TestGreenfieldDefaultSuite; everything below
+// applies only once a CR author has written spec.praxisMode.enabled: true.
+//
+// RHAISTRAT-2277's acceptance criterion (a single external /v1/responses route, port 8321
+// unreachable) describes this opt-in topology, not 3.6's default. That criterion is flagged on
+// RHAIENG-6602 as needing to be revisited or deferred past 3.6; this suite is what will prove it
+// once it applies by default.
+//
+// On a kind cluster this proves the declarative half:
 //
 //   - no Kubernetes object in the namespace routes external traffic to the OGX Service
 //   - the OGX Service is ClusterIP with no node-port / load-balancer / external-IP exposure
@@ -62,9 +71,9 @@ import (
 // The first three gaps need a downstream OCP/QE counterpart.
 
 const (
-	greenfieldNamespace = "ogx-greenfield-test"
-	greenfieldCRName    = "ogx-greenfield"
-	greenfieldPort      = 8321
+	praxisOptInNamespace = "ogx-praxis-optin-test"
+	praxisOptInCRName    = "ogx-praxis-optin"
+	ogxServicePort       = 8321
 
 	// curlProbeImage is pinned: an unpinned probe image is a silent-drift risk in a test whose
 	// whole value is detecting drift.
@@ -102,17 +111,17 @@ type targetService struct {
 	PodLabels map[string]string
 }
 
-// TestGreenfieldNegativeSuite is registered in TestE2E as "greenfield-negative".
-func TestGreenfieldNegativeSuite(t *testing.T) {
+// TestPraxisOptInSuite is registered in TestE2E as "praxis-optin".
+func TestPraxisOptInSuite(t *testing.T) {
 	if TestOpts.SkipCreation {
-		t.Skip("Skipping greenfield negative suite (SkipCreation=true)")
+		t.Skip("Skipping Praxis opt-in suite (SkipCreation=true)")
 	}
 
-	server := setupGreenfieldCR(t)
+	server := setupPraxisOptInCR(t)
 	target := targetService{
 		Namespace: server.Namespace,
 		Name:      server.Name + "-service",
-		Port:      greenfieldPort,
+		Port:      ogxServicePort,
 		FQDN:      server.Name + "-service." + server.Namespace + ".svc.cluster.local",
 		PodLabels: map[string]string{
 			"app":                        "ogx",
@@ -159,7 +168,7 @@ func TestGreenfieldNegativeSuite(t *testing.T) {
 	// Anti-no-op control: if OGX answers nothing at all, the negative results below prove nothing.
 	enabledAPIServed := false
 	t.Run("OGX serves an enabled API", func(t *testing.T) {
-		result := httpProbe(t, "gf-probe-models", target, "GET", "/v1/models", "")
+		result := httpProbe(t, "optin-probe-models", target, "GET", "/v1/models", "")
 		require.NotEqualf(t, probeTransportFailure, result.Status,
 			"probe never reached OGX (curl error: %s); the negative probes below would be vacuous", result.Err)
 		require.Equalf(t, "200", result.Status,
@@ -170,7 +179,7 @@ func TestGreenfieldNegativeSuite(t *testing.T) {
 	responsesStatus := ""
 	t.Run("OGX does not serve /v1/responses", func(t *testing.T) {
 		requireControlPassed(t, enabledAPIServed)
-		responsesStatus = assertAPINotServed(t, target, "gf-probe-responses", "/v1/responses",
+		responsesStatus = assertAPINotServed(t, target, "optin-probe-responses", "/v1/responses",
 			`{"model":"none","input":"hello"}`)
 	})
 
@@ -184,7 +193,7 @@ func TestGreenfieldNegativeSuite(t *testing.T) {
 		t.Skip("blocked on ogx-ai/ogx#6558: OGX serves /v1/conversations regardless of the apis: list")
 
 		requireControlPassed(t, enabledAPIServed)
-		assertAPINotServed(t, target, "gf-probe-conversations", "/v1/conversations", `{}`)
+		assertAPINotServed(t, target, "optin-probe-conversations", "/v1/conversations", `{}`)
 	})
 
 	t.Run("a 410/501 guard returns an OpenAI-compatible error", func(t *testing.T) {
@@ -201,24 +210,24 @@ func requireControlPassed(t *testing.T, enabledAPIServed bool) {
 			"prove nothing about the disable mechanism")
 }
 
-// setupGreenfieldCR creates the namespace, the base ConfigMap, and the Praxis-fronted CR, and
+// setupPraxisOptInCR creates the namespace, the base ConfigMap, and the Praxis-fronted CR, and
 // registers cleanup. The CR uses spec.baseConfig rather than spec.overrideConfig: overrideConfig
 // short-circuits config generation entirely, so the API-disabling path would never run.
-func setupGreenfieldCR(t *testing.T) *ogxiov1beta1.OGXServer {
+func setupPraxisOptInCR(t *testing.T) *ogxiov1beta1.OGXServer {
 	t.Helper()
 
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: greenfieldNamespace}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: praxisOptInNamespace}}
 	if err := TestEnv.Client.Create(TestEnv.Ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
 		require.NoError(t, err)
 	}
 
 	server := GetSampleCRForDistribution(t, starterDistType)
-	server.Name = greenfieldCRName
-	server.Namespace = greenfieldNamespace
+	server.Name = praxisOptInCRName
+	server.Namespace = praxisOptInNamespace
 
 	// Swap the sample's overrideConfig for a baseConfig so the operator generates the runtime
 	// config, which is where the Praxis-served APIs are removed.
-	server.Spec.BaseConfig = &ogxiov1beta1.ConfigMapKeyRef{Name: "greenfield-base-config", Key: "config.yaml"}
+	server.Spec.BaseConfig = &ogxiov1beta1.ConfigMapKeyRef{Name: "praxis-optin-base-config", Key: "config.yaml"}
 	server.Spec.OverrideConfig = nil
 
 	// Force the Praxis-fronted posture. The deployed webhook defaults this on create, but being
@@ -229,7 +238,7 @@ func setupGreenfieldCR(t *testing.T) *ogxiov1beta1.OGXServer {
 	server.Spec.PraxisMode = &ogxiov1beta1.PraxisModeSpec{
 		Enabled: &praxisOn,
 		PraxisSelector: &ogxiov1beta1.PraxisSelector{
-			Namespace:   greenfieldNamespace,
+			Namespace:   praxisOptInNamespace,
 			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{praxisLabelKey: praxisLabelValue}},
 		},
 	}
@@ -250,7 +259,7 @@ func setupGreenfieldCR(t *testing.T) *ogxiov1beta1.OGXServer {
 		// single kind node's memory.
 		_ = EnsureResourceDeleted(t, TestEnv,
 			schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
-			server.Name, greenfieldNamespace, ResourceReadyTimeout)
+			server.Name, praxisOptInNamespace, ResourceReadyTimeout)
 		_ = TestEnv.Client.Delete(ctx, ns)
 	})
 
@@ -615,7 +624,7 @@ func runDecoyIngressControl(t *testing.T, target targetService) {
 
 	pathType := networkingv1.PathTypePrefix
 	decoy := &networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{Name: "gf-decoy-ingress", Namespace: target.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: "optin-decoy-ingress", Namespace: target.Namespace},
 		Spec: networkingv1.IngressSpec{
 			Rules: []networkingv1.IngressRule{{
 				IngressRuleValue: networkingv1.IngressRuleValue{
@@ -707,7 +716,7 @@ func runAdoptedIngressDeletion(t *testing.T, server *ogxiov1beta1.OGXServer, tar
 	if fetched.Annotations == nil {
 		fetched.Annotations = map[string]string{}
 	}
-	fetched.Annotations["ogx.io/e2e-reconcile-nudge"] = "greenfield-negative"
+	fetched.Annotations["ogx.io/e2e-reconcile-nudge"] = "praxis-optin"
 	require.NoError(t, TestEnv.Client.Update(TestEnv.Ctx, fetched))
 
 	require.NoError(t, EnsureResourceDeleted(t, TestEnv,
@@ -878,7 +887,7 @@ func assertGuardShapeIfPresent(t *testing.T, target targetService, responsesStat
 		return
 	}
 
-	result := httpProbe(t, "gf-probe-guard", target, "POST", "/v1/responses", `{"model":"none","input":"hello"}`)
+	result := httpProbe(t, "optin-probe-guard", target, "POST", "/v1/responses", `{"model":"none","input":"hello"}`)
 
 	var payload struct {
 		Error struct {
@@ -906,7 +915,7 @@ func httpProbe(t *testing.T, name string, target targetService, method, path, bo
 		"-s", "-S", "--max-time", "20",
 		"-o", "/tmp/body", "-w", "%{http_code}",
 		"-X", method,
-		"-H", "x-user-id: e2e-greenfield",
+		"-H", "x-user-id: e2e-praxis-optin",
 		"-H", "x-tenant-id: e2e-tenant",
 	}
 	if body != "" {
