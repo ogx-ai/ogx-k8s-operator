@@ -40,36 +40,14 @@ type OGXServerValidator struct {
 
 var _ admission.Validator[*OGXServer] = &OGXServerValidator{}
 
-// OGXServerDefaulter defaults newly created OGXServer resources.
-type OGXServerDefaulter struct{}
-
-var _ admission.Defaulter[*OGXServer] = &OGXServerDefaulter{}
-
-// SetupWebhookWithManager registers the validating and mutating webhooks.
+// SetupWebhookWithManager registers the validating webhook.
 // knownDistNames should be the keys from the operator's distribution registry.
 func SetupWebhookWithManager(mgr ctrl.Manager, knownDistNames []string) error {
 	return ctrl.NewWebhookManagedBy(mgr, &OGXServer{}).
 		WithValidator(&OGXServerValidator{
 			KnownDistributionNames: knownDistNames,
 		}).
-		WithDefaulter(&OGXServerDefaulter{}).
 		Complete()
-}
-
-//nolint:lll // kubebuilder marker cannot be split across lines.
-//+kubebuilder:webhook:path=/mutate-ogx-io-v1beta1-ogxserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=ogx.io,resources=ogxservers,verbs=create,versions=v1beta1,name=mogxserver.kb.io,admissionReviewVersions=v1
-
-// Default implements admission.Defaulter. It only runs on CREATE (per the
-// webhook's verbs=create rule), so existing OGXServer CRs from before this
-// field existed are left untouched — PraxisMode is defaulted only for
-// brand-new CRs, not retroactively applied to CRs upgrading from an older
-// operator version.
-func (d *OGXServerDefaulter) Default(_ context.Context, r *OGXServer) error {
-	if r.Spec.PraxisMode == nil {
-		enabled := true
-		r.Spec.PraxisMode = &PraxisModeSpec{Enabled: &enabled}
-	}
-	return nil
 }
 
 //nolint:lll // kubebuilder marker cannot be split across lines.
@@ -103,23 +81,24 @@ func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) 
 }
 
 // collectValidationWarnings returns non-fatal admission warnings. When an OGXServer opts into
-// Praxis-fronted mode (spec.praxisMode.enabled: true), OGX is internal-only, so two settings that
-// would weaken that guarantee are surfaced as warnings rather than rejections (so existing CRs and
-// GitOps applies do not break): requesting external access (not honored — the operator creates no
-// external exposure) and disabling the operator-managed NetworkPolicy (which removes the mandatory
-// Praxis ingress lock-down).
+// Praxis-fronted mode (spec.praxisMode.enabled: true), OGX is internal-only, and has a Tech Preview
+// support level so this is surfaced as a warning. Two settings that would weaken the internal-only
+// guarantee are also surfaced as warnings rather than rejections (so existing CRs and GitOps applies
+// do not break): requesting external access (not honored — the operator creates no external exposure)
+// and disabling the operator-managed NetworkPolicy (which removes the mandatory Praxis ingress
+// lock-down).
 //
-// Warnings are emitted only when Praxis mode is enabled. On create the mutating webhook has
-// already defaulted an unset spec.praxisMode to enabled, so this reflects the effective mode; when
-// Praxis mode is disabled (or unset on an upgrade, meaning legacy), these settings may be honored,
-// so a warning would be misleading.
+// Warnings are emitted only when Praxis mode is enabled. When Praxis mode is disabled
+// or unset, these settings may be honored, so a warning would be misleading.
 func collectValidationWarnings(r *OGXServer) admission.Warnings {
-	// Both warnings only apply in Praxis-fronted mode; in legacy mode these settings may be honored.
+	// All warnings apply only in Praxis-fronted mode; in legacy mode these settings may be honored.
 	if !isPraxisModeEnabled(r) {
 		return nil
 	}
 
-	var warnings admission.Warnings
+	warnings := admission.Warnings{
+		"The support level for OGX is degraded to Tech Preview when Praxis mode is enabled (spec.praxisMode.enabled: true).",
+	}
 
 	if isExternalAccessRequested(r) {
 		warnings = append(warnings,

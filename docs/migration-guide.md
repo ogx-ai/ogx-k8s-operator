@@ -189,14 +189,8 @@ OGX is an **internal-only backend**: it is fronted by Praxis, which is the sole 
 entrypoint. The operator can enforce this via **Praxis-fronted mode** (`spec.praxisMode`, whose
 API is introduced by [#355](https://github.com/ogx-ai/ogx-k8s-operator/pull/355) / RHAIENG-7193).
 
-**Mode selection (upgrade-safe):** `spec.praxisMode.enabled` is tri-state — `true` (force Praxis
-mode), `false` (force legacy mode), or unset. New CRs get `spec.praxisMode.enabled` defaulted to
-`true` on create by the operator's **mutating admission webhook**, so greenfield installs adopt
-Praxis mode. A CR created before the webhook existed (i.e. across an operator upgrade) keeps an
-unset value, which is treated as **legacy mode**, so upgrading the operator does **not** silently
-change behavior. To adopt the internal-only posture on an existing install, set
-`spec.praxisMode.enabled: true` explicitly; because the switch is per-CR, OGXServers can migrate
-independently.
+**Mode selection:** omit `spec.praxisMode` for legacy mode. When `spec.praxisMode` is provided,
+`enabled` defaults to `true`; set `spec.praxisMode.enabled: false` to force legacy mode.
 
 When Praxis mode is active, it is a **breaking change** relative to legacy behavior on clusters
 with a policy-enforcing CNI (OVN-Kubernetes / Calico):

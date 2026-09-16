@@ -100,9 +100,7 @@ func (b *OGXServerBuilder) WithDistribution(distributionName string) *OGXServerB
 	return b
 }
 
-// WithPraxisMode sets spec.praxisMode.enabled explicitly. In production the mutating webhook
-// defaults this to true on create for greenfield installs; envtest does not run the webhook, so
-// tests that need the Praxis-fronted posture set it explicitly.
+// WithPraxisMode sets spec.praxisMode.enabled explicitly.
 func (b *OGXServerBuilder) WithPraxisMode(enabled bool) *OGXServerBuilder {
 	b.instance.Spec.PraxisMode = &ogxiov1beta1.PraxisModeSpec{Enabled: &enabled}
 	return b

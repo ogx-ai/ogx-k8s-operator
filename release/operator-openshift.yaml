@@ -633,14 +633,12 @@ spec:
                 description: |-
                   PraxisMode configures integration with an existing Praxis instance
                   that acts as gateway for this OGX server.
-                  Defaults to enabled on creation via the mutating webhook. Omitted
-                  (disabled) for OGXServer CRs that preexist the addition of this field.
                 properties:
                   enabled:
                     default: true
                     description: |-
                       Enabled controls whether Praxis mode is enabled.
-                      Defaults to true.
+                      Defaults to true when PraxisMode is provided.
                     type: boolean
                   migrationJob:
                     description: |-
@@ -7568,35 +7566,6 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: ogx-k8s-operator
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
-metadata:
-  annotations:
-    service.beta.openshift.io/inject-cabundle: "true"
-  labels:
-    app.kubernetes.io/name: ogx-k8s-operator
-  name: ogx-k8s-operator-mutating-webhook-configuration
-webhooks:
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: ogx-k8s-operator-webhook-service
-      namespace: ogx-k8s-operator-system
-      path: /mutate-ogx-io-v1beta1-ogxserver
-  failurePolicy: Fail
-  name: mogxserver.kb.io
-  rules:
-  - apiGroups:
-    - ogx.io
-    apiVersions:
-    - v1beta1
-    operations:
-    - CREATE
-    resources:
-    - ogxservers
-  sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration

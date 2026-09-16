@@ -495,7 +495,7 @@ type MigrationJobSpec struct {
 // acts as gateway for this OGX server.
 type PraxisModeSpec struct {
 	// Enabled controls whether Praxis mode is enabled.
-	// Defaults to true.
+	// Defaults to true when PraxisMode is provided.
 	// +optional
 	// +kubebuilder:default:=true
 	Enabled *bool `json:"enabled,omitempty"`
@@ -585,8 +585,6 @@ type OGXServerSpec struct {
 
 	// PraxisMode configures integration with an existing Praxis instance
 	// that acts as gateway for this OGX server.
-	// Defaults to enabled on creation via the mutating webhook. Omitted
-	// (disabled) for OGXServer CRs that preexist the addition of this field.
 	// +optional
 	PraxisMode *PraxisModeSpec `json:"praxisMode,omitempty"`
 }

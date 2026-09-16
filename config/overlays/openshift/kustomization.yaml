@@ -29,12 +29,3 @@ patches:
       path: /metadata/annotations
       value:
         service.beta.openshift.io/inject-cabundle: "true"
-# Annotate the MutatingWebhookConfiguration so OpenShift injects the
-# service-ca CA bundle into webhooks[].clientConfig.caBundle.
-- target:
-    kind: MutatingWebhookConfiguration
-  patch: |-
-    - op: add
-      path: /metadata/annotations
-      value:
-        service.beta.openshift.io/inject-cabundle: "true"

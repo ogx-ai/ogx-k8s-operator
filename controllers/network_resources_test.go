@@ -48,8 +48,6 @@ func newIngressTestReconciler(t *testing.T, objs ...client.Object) (*controllers
 }
 
 func newInternalOnlyInstance() *ogxiov1beta1.OGXServer {
-	// A greenfield CR has spec.praxisMode.enabled defaulted to true by the mutating webhook; unit
-	// tests set it explicitly since the webhook does not run against the fake client.
 	praxisOn := true
 	return &ogxiov1beta1.OGXServer{
 		ObjectMeta: metav1.ObjectMeta{
@@ -132,11 +130,9 @@ func TestReconcileIngress_LegacyModeCreatesIngress(t *testing.T) {
 	require.NoError(t, err, "legacy mode with externalAccess enabled should create an Ingress")
 }
 
-// TestReconcileIngress_UnsetModeDefaultsToLegacy verifies that an unset praxisMode resolves to
-// legacy mode. New CRs get praxisMode defaulted to true by the mutating webhook; a CR that reaches
-// the controller with an unset value predates the webhook (an upgrade) and must stay in legacy mode
-// so external access is not silently removed.
-func TestReconcileIngress_UnsetModeDefaultsToLegacy(t *testing.T) {
+// TestReconcileIngress_UnsetModeUsesLegacy verifies that an unset praxisMode resolves to legacy
+// mode.
+func TestReconcileIngress_UnsetModeUsesLegacy(t *testing.T) {
 	instance := newInternalOnlyInstance()
 	instance.Spec.PraxisMode = nil
 

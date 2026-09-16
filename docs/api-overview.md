@@ -961,7 +961,7 @@ _Appears in:_
 | `monitoring` _[MonitoringSpec](#monitoringspec)_ | Monitoring configures Prometheus monitoring and observability. |  |  |
 | `baseConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | BaseConfig references a ConfigMap key containing the base config.yaml used<br />as the starting point for declarative config generation.<br />When set, this takes precedence over OCI label resolution.<br />Mutually exclusive with overrideConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
 | `overrideConfig` _[ConfigMapKeyRef](#configmapkeyref)_ | OverrideConfig references a ConfigMap key containing a full config.yaml override.<br />Mutually exclusive with providers, resources, storage, disabledAPIs, and baseConfig.<br />The ConfigMap must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
-| `praxisMode` _[PraxisModeSpec](#praxismodespec)_ | PraxisMode configures integration with an existing Praxis instance<br />that acts as gateway for this OGX server.<br />Defaults to enabled on creation via the mutating webhook. Omitted<br />(disabled) for OGXServer CRs that preexist the addition of this field. |  |  |
+| `praxisMode` _[PraxisModeSpec](#praxismodespec)_ | PraxisMode configures integration with an existing Praxis instance<br />that acts as gateway for this OGX server. |  |  |
 
 #### OGXServerStatus
 
@@ -1050,7 +1050,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enabled` _boolean_ | Enabled controls whether Praxis mode is enabled.<br />Defaults to true. | true |  |
+| `enabled` _boolean_ | Enabled controls whether Praxis mode is enabled.<br />Defaults to true when PraxisMode is provided. | true |  |
 | `praxisSelector` _[PraxisSelector](#praxisselector)_ | PraxisSelector identifies the Praxis instance that is the gateway to the OGX server.<br />Defaults to the cluster's default Praxis instance if omitted. |  |  |
 | `migrationJob` _[MigrationJobSpec](#migrationjobspec)_ | MigrationJob configures the DB migration Job that migrates OGX data to Praxis.<br />When omitted the Job is not created. |  |  |
 

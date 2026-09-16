@@ -12,7 +12,7 @@ resources:
 patches:
 # Inject cert-manager CA bundle annotation on the CRD.
 - path: cainjection_in_ogxservers.yaml
-# Inject cert-manager CA bundle annotation on the webhook configurations.
+# Inject cert-manager CA bundle annotation on the validating webhook configuration.
 - target:
     kind: ValidatingWebhookConfiguration
   patch: |-
@@ -20,14 +20,6 @@ patches:
       path: /metadata/annotations
       value:
         cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME
-- target:
-    kind: MutatingWebhookConfiguration
-  patch: |-
-    - op: add
-      path: /metadata/annotations
-      value:
-        cert-manager.io/inject-ca-from: CERTIFICATE_NAMESPACE/CERTIFICATE_NAME
-
 # Replacements wire the webhook Service name/namespace into the Certificate
 # dnsNames and the Certificate namespace/name into CA injection annotations.
 replacements:
@@ -82,13 +74,6 @@ replacements:
     options:
       delimiter: "/"
       index: 0
-  - select:
-      kind: MutatingWebhookConfiguration
-    fieldPaths:
-    - metadata.annotations.[cert-manager.io/inject-ca-from]
-    options:
-      delimiter: "/"
-      index: 0
 - source:
     kind: Certificate
     group: cert-manager.io
@@ -105,13 +90,6 @@ replacements:
       index: 1
   - select:
       kind: ValidatingWebhookConfiguration
-    fieldPaths:
-    - metadata.annotations.[cert-manager.io/inject-ca-from]
-    options:
-      delimiter: "/"
-      index: 1
-  - select:
-      kind: MutatingWebhookConfiguration
     fieldPaths:
     - metadata.annotations.[cert-manager.io/inject-ca-from]
     options:

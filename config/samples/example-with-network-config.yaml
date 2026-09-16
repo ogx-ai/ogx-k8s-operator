@@ -4,10 +4,8 @@
 # namespace. The network.policy.ingress rules below are ADDITIVE: they are appended on top of that
 # mandatory lock-down and cannot remove it.
 #
-# spec.praxisMode.enabled is tri-state: true (force Praxis mode), false (force legacy mode), or
-# unset. New CRs get spec.praxisMode.enabled defaulted to true on create by the operator's mutating
-# webhook (greenfield -> Praxis mode); CRs predating the webhook keep an unset value and stay in
-# legacy mode.
+# Omit spec.praxisMode for legacy mode. When spec.praxisMode is provided without enabled,
+# Kubernetes defaults spec.praxisMode.enabled to true; set it to false to force legacy mode.
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
 metadata:

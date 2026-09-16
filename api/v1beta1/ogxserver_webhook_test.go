@@ -17,14 +17,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
 )
 
 func TestDeriveID(t *testing.T) {
@@ -653,134 +649,43 @@ func TestCollectValidationErrors(t *testing.T) {
 	}
 }
 
-func TestOGXServerDefaulter_Default(t *testing.T) {
-	t.Run("nil PraxisMode is defaulted to enabled", func(t *testing.T) {
-		server := &OGXServer{Spec: OGXServerSpec{Distribution: DistributionSpec{Name: "starter"}}}
-
-		if err := (&OGXServerDefaulter{}).Default(context.Background(), server); err != nil {
-			t.Fatalf("Default() returned error: %v", err)
-		}
-
-		if server.Spec.PraxisMode == nil || server.Spec.PraxisMode.Enabled == nil || !*server.Spec.PraxisMode.Enabled {
-			t.Fatalf("Default() = %+v, want PraxisMode.Enabled = true", server.Spec.PraxisMode)
-		}
-	})
-
-	t.Run("existing PraxisMode is left untouched", func(t *testing.T) {
-		existing := &PraxisModeSpec{Enabled: ptr(false)}
-		server := &OGXServer{Spec: OGXServerSpec{
-			Distribution: DistributionSpec{Name: "starter"},
-			PraxisMode:   existing,
-		}}
-
-		if err := (&OGXServerDefaulter{}).Default(context.Background(), server); err != nil {
-			t.Fatalf("Default() returned error: %v", err)
-		}
-
-		if server.Spec.PraxisMode != existing {
-			t.Fatal("Default() overwrote an already-set PraxisMode")
-		}
-	})
-}
-
-// TestMutatingWebhookOnlyFiresOnCreate guards the guarantee that existing
-// OGXServer CRs are never touched by the PraxisMode defaulter: the apiserver
-// only invokes the mutating webhook for operations listed in its rules, and
-// Default() itself has no way to distinguish create from update. If this
-// ever regresses to include UPDATE (e.g. a marker edit above gets
-// regenerated), CRs that predate the praxisMode field would start being
-// mutated on their next update.
-type webhookManifestDoc struct {
-	Kind     string `json:"kind"`
-	Webhooks []struct {
-		Name  string `json:"name"`
-		Rules []struct {
-			Operations []string `json:"operations"`
-		} `json:"rules"`
-	} `json:"webhooks"`
-}
-
-// findWebhookRules returns the rule operations for the named webhook across
-// all MutatingWebhookConfiguration/ValidatingWebhookConfiguration docs in a
-// multi-document YAML manifest.
-func findWebhookRules(t *testing.T, manifest, webhookName string) [][]string {
-	t.Helper()
-
-	var rules [][]string
-	for _, rawDoc := range strings.Split(manifest, "\n---\n") {
-		if strings.TrimSpace(rawDoc) == "" {
-			continue
-		}
-		var doc webhookManifestDoc
-		if err := yaml.Unmarshal([]byte(rawDoc), &doc); err != nil {
-			t.Fatalf("failed to parse webhook manifest doc: %v", err)
-		}
-		for _, wh := range doc.Webhooks {
-			if wh.Name != webhookName {
-				continue
-			}
-			for _, rule := range wh.Rules {
-				rules = append(rules, rule.Operations)
-			}
-		}
-	}
-	return rules
-}
-
-func TestMutatingWebhookOnlyFiresOnCreate(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "config", "webhook", "manifests.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read webhook manifests: %v", err)
-	}
-
-	rules := findWebhookRules(t, string(data), "mogxserver.kb.io")
-	if len(rules) == 0 {
-		t.Fatal("did not find mogxserver.kb.io in config/webhook/manifests.yaml")
-	}
-	for _, ops := range rules {
-		if len(ops) != 1 || ops[0] != "CREATE" {
-			t.Errorf("mogxserver.kb.io rule operations = %v, want [CREATE] only", ops)
-		}
-	}
-}
-
 func TestValidate_ExternalAccessWarning(t *testing.T) {
 	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
 
 	tests := []struct {
-		name        string
-		network     *NetworkSpec
-		praxisMode  *PraxisModeSpec
-		wantWarning bool
+		name                string
+		network             *NetworkSpec
+		praxisMode          *PraxisModeSpec
+		wantExternalWarning bool
 	}{
 		{
-			name:        "no network spec: no warning",
-			network:     nil,
-			wantWarning: false,
+			name:                "no network spec: no external access warning",
+			network:             nil,
+			wantExternalWarning: false,
 		},
 		{
-			name:        "external access disabled: no warning",
-			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: false}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: false,
+			name:                "external access disabled: no external access warning",
+			network:             &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: false}},
+			praxisMode:          &PraxisModeSpec{Enabled: ptr(true)},
+			wantExternalWarning: false,
 		},
 		{
-			name:        "external access enabled + praxis mode enabled: warns but does not reject",
-			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: true,
+			name:                "external access enabled + praxis mode enabled: warns but does not reject",
+			network:             &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:          &PraxisModeSpec{Enabled: ptr(true)},
+			wantExternalWarning: true,
 		},
 		{
-			name:        "external access enabled + praxisMode unset: no warning (legacy)",
-			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
-			praxisMode:  nil,
-			wantWarning: false,
+			name:                "external access enabled + praxisMode unset: no warning (legacy)",
+			network:             &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:          nil,
+			wantExternalWarning: false,
 		},
 		{
-			name:        "external access enabled + praxis mode disabled: no warning (legacy honors it)",
-			network:     &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(false)},
-			wantWarning: false,
+			name:                "external access enabled + praxis mode disabled: no warning (legacy honors it)",
+			network:             &NetworkSpec{ExternalAccess: &ExternalAccessConfig{Enabled: true}},
+			praxisMode:          &PraxisModeSpec{Enabled: ptr(false)},
+			wantExternalWarning: false,
 		},
 	}
 
@@ -799,12 +704,9 @@ func TestValidate_ExternalAccessWarning(t *testing.T) {
 				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
 			}
 
-			got := len(warnings) > 0
-			if got != tt.wantWarning {
-				t.Errorf("ValidateCreate warnings = %v, wantWarning %v", warnings, tt.wantWarning)
-			}
-			if tt.wantWarning && !strings.Contains(strings.Join(warnings, " "), "externalAccess") {
-				t.Errorf("expected warning to mention externalAccess, got %v", warnings)
+			got := strings.Contains(strings.Join(warnings, " "), "externalAccess")
+			if got != tt.wantExternalWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantExternalWarning %v", warnings, tt.wantExternalWarning)
 			}
 		})
 	}
@@ -814,46 +716,46 @@ func TestValidate_PolicyDisabledWarning(t *testing.T) {
 	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
 
 	tests := []struct {
-		name        string
-		network     *NetworkSpec
-		praxisMode  *PraxisModeSpec
-		wantWarning bool
+		name              string
+		network           *NetworkSpec
+		praxisMode        *PraxisModeSpec
+		wantPolicyWarning bool
 	}{
 		{
-			name:        "no network spec: no warning",
-			network:     nil,
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: false,
+			name:              "no network spec: no policy warning",
+			network:           nil,
+			praxisMode:        &PraxisModeSpec{Enabled: ptr(true)},
+			wantPolicyWarning: false,
 		},
 		{
-			name:        "policy enabled + praxis mode enabled: no warning",
-			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(true)}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: false,
+			name:              "policy enabled + praxis mode enabled: no policy warning",
+			network:           &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(true)}},
+			praxisMode:        &PraxisModeSpec{Enabled: ptr(true)},
+			wantPolicyWarning: false,
 		},
 		{
-			name:        "policy unset + praxis mode enabled: no warning",
-			network:     &NetworkSpec{Policy: &NetworkPolicySpec{}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: false,
+			name:              "policy unset + praxis mode enabled: no policy warning",
+			network:           &NetworkSpec{Policy: &NetworkPolicySpec{}},
+			praxisMode:        &PraxisModeSpec{Enabled: ptr(true)},
+			wantPolicyWarning: false,
 		},
 		{
-			name:        "policy disabled + praxis mode enabled: warns but does not reject",
-			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
-			wantWarning: true,
+			name:              "policy disabled + praxis mode enabled: warns but does not reject",
+			network:           &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:        &PraxisModeSpec{Enabled: ptr(true)},
+			wantPolicyWarning: true,
 		},
 		{
-			name:        "policy disabled + praxisMode unset: no warning (legacy)",
-			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
-			praxisMode:  nil,
-			wantWarning: false,
+			name:              "policy disabled + praxisMode unset: no warning (legacy)",
+			network:           &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:        nil,
+			wantPolicyWarning: false,
 		},
 		{
-			name:        "policy disabled + praxis mode disabled: no warning (legacy)",
-			network:     &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
-			praxisMode:  &PraxisModeSpec{Enabled: ptr(false)},
-			wantWarning: false,
+			name:              "policy disabled + praxis mode disabled: no warning (legacy)",
+			network:           &NetworkSpec{Policy: &NetworkPolicySpec{Enabled: ptr(false)}},
+			praxisMode:        &PraxisModeSpec{Enabled: ptr(false)},
+			wantPolicyWarning: false,
 		},
 	}
 
@@ -872,12 +774,56 @@ func TestValidate_PolicyDisabledWarning(t *testing.T) {
 				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
 			}
 
-			got := len(warnings) > 0
-			if got != tt.wantWarning {
-				t.Errorf("ValidateCreate warnings = %v, wantWarning %v", warnings, tt.wantWarning)
+			got := strings.Contains(strings.Join(warnings, " "), "spec.network.policy.enabled")
+			if got != tt.wantPolicyWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantPolicyWarning %v", warnings, tt.wantPolicyWarning)
 			}
-			if tt.wantWarning && !strings.Contains(strings.Join(warnings, " "), "spec.network.policy.enabled") {
-				t.Errorf("expected warning to mention spec.network.policy.enabled, got %v", warnings)
+		})
+	}
+}
+
+func TestValidate_PraxisModeWarning(t *testing.T) {
+	v := &OGXServerValidator{KnownDistributionNames: []string{"starter"}}
+
+	tests := []struct {
+		name        string
+		praxisMode  *PraxisModeSpec
+		wantWarning bool
+	}{
+		{
+			name:        "praxis mode enabled",
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(true)},
+			wantWarning: true,
+		},
+		{
+			name:        "praxis mode unset",
+			praxisMode:  nil,
+			wantWarning: false,
+		},
+		{
+			name:        "praxis mode disabled",
+			praxisMode:  &PraxisModeSpec{Enabled: ptr(false)},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := &OGXServer{
+				Spec: OGXServerSpec{
+					Distribution: DistributionSpec{Name: "starter"},
+					PraxisMode:   tt.praxisMode,
+				},
+			}
+
+			warnings, err := v.ValidateCreate(t.Context(), server)
+			if err != nil {
+				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
+			}
+
+			got := strings.Contains(strings.Join(warnings, " "), "Tech Preview")
+			if got != tt.wantWarning {
+				t.Errorf("ValidateCreate warnings = %v, wantTechPreviewWarning %v", warnings, tt.wantWarning)
 			}
 		})
 	}
