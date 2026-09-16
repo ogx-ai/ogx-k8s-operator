@@ -97,7 +97,7 @@ func collectValidationWarnings(r *OGXServer) admission.Warnings {
 	}
 
 	warnings := admission.Warnings{
-		"The support level for OGX is degraded to Tech Preview when Praxis mode is enabled (spec.praxisMode.enabled: true).",
+		"Praxis mode is enabled (spec.praxisMode.enabled: true). The Responses API served by Praxis is Tech Preview.",
 	}
 
 	if isExternalAccessRequested(r) {

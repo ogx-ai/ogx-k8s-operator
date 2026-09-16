@@ -821,7 +821,7 @@ func TestValidate_PraxisModeWarning(t *testing.T) {
 				t.Fatalf("ValidateCreate returned unexpected error: %v", err)
 			}
 
-			got := strings.Contains(strings.Join(warnings, " "), "Tech Preview")
+			got := strings.Contains(strings.Join(warnings, " "), "Praxis mode is enabled (spec.praxisMode.enabled: true). The Responses API served by Praxis is Tech Preview.")
 			if got != tt.wantWarning {
 				t.Errorf("ValidateCreate warnings = %v, wantTechPreviewWarning %v", warnings, tt.wantWarning)
 			}
