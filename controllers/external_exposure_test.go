@@ -14,9 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Negative tests for RHAIENG-6602: in the greenfield (Praxis-fronted) topology the operator must
-// create no Kubernetes object that routes traffic from outside the cluster to OGX, and the
-// NetworkPolicy it does create must admit no externally-reachable peer on the service port.
+// RHAIENG-6602 — what an explicit opt-in to Praxis mode buys.
+//
+// Praxis mode is off by default as of RHAIENG-7517, so these are no longer greenfield assertions:
+// they describe the topology a CR author gets only after writing spec.praxisMode.enabled: true.
+// Once opted in, the operator must create no Kubernetes object that routes traffic from outside
+// the cluster to OGX, and the NetworkPolicy it does create must admit no externally-reachable peer
+// on the service port.
+//
+// The default (opt-out) topology — which is what a greenfield install gets in 3.6, and which keeps
+// /v1/responses served and reachable — is covered in praxis_default_test.go. That file is the
+// positive control for this one: the router peer and the Ingress this file forbids are the same
+// ones it requires.
 //
 // These run against envtest — a real API server, no CNI and no workloads. They therefore prove
 // the *declarative* topology, not packet-level enforcement. Reachability from a genuinely
@@ -52,10 +61,11 @@ const (
 	networkPolicyNameSuffix          = "-network-policy"
 )
 
-// greenfieldBaseConfig is a minimal distribution default. It declares responses and conversations
-// so the Praxis filter has something to remove, and inference so an emptied list is
-// distinguishable from a deleted one.
-const greenfieldBaseConfig = `version: '2'
+// praxisFixtureBaseConfig is a minimal distribution default shared by the opt-in tests here and
+// the default-mode tests in praxis_default_test.go. It declares responses and conversations so the
+// Praxis filter has something to remove — and so the default-mode tests can prove it is *not*
+// removed — and inference so an emptied list is distinguishable from a deleted one.
+const praxisFixtureBaseConfig = `version: '2'
 apis:
 - inference
 - responses
@@ -65,34 +75,94 @@ server:
   port: 8321
 `
 
-// greenfieldInstance creates and reconciles a Praxis-fronted OGXServer in a fresh namespace,
-// returning it. externalAccess mirrors spec.network.externalAccess.enabled — set it true to prove
-// the operator ignores the request rather than honouring it.
+// praxisOptInInstance creates and reconciles an OGXServer that explicitly opts into Praxis-fronted
+// mode, with no declarative config — the plainest opt-in CR, and the one that takes the
+// GeneratePraxisDefaultConfig path. See reconciledPraxisFixture for the options.
+func praxisOptInInstance(t *testing.T, name string, externalAccess bool) *ogxiov1beta1.OGXServer {
+	t.Helper()
+	return reconciledPraxisFixture(t, name, praxisFixtureOptions{
+		mode:           praxisModeOptIn,
+		externalAccess: externalAccess,
+	})
+}
+
+// praxisModeSetting selects what a fixture CR writes to spec.praxisMode. The three values are the
+// three states a real CR can be in, and only praxisModeOptIn opts in.
+type praxisModeSetting int
+
+const (
+	// praxisModeUnset writes no spec.praxisMode at all — what a greenfield CR carries in 3.6 and
+	// what an upgraded CR keeps carrying.
+	praxisModeUnset praxisModeSetting = iota
+	// praxisModeOptOut writes spec.praxisMode.enabled: false explicitly.
+	praxisModeOptOut
+	// praxisModeOptIn writes spec.praxisMode.enabled: true explicitly.
+	praxisModeOptIn
+)
+
+// praxisFixtureOptions configures reconciledPraxisFixture.
+type praxisFixtureOptions struct {
+	// mode is what the CR writes to spec.praxisMode.
+	mode praxisModeSetting
+	// externalAccess mirrors spec.network.externalAccess.enabled — in opt-in mode set it true to
+	// prove the operator ignores the request, in default mode to prove it honours it.
+	externalAccess bool
+	// declarativeConfig adds a spec.disabledAPIs entry so the CR has declarative config.
+	//
+	// This matters more than it looks. shouldGenerateConfig runs generation only when the CR has
+	// declarative config OR is in Praxis mode, and spec.baseConfig is not declarative config. An
+	// opt-in CR therefore reaches the generator through Praxis mode alone, but a legacy CR needs
+	// something declarative or the operator generates nothing at all and there is no apis: list to
+	// assert on.
+	declarativeConfig bool
+}
+
+// declarativeTriggerAPI is the API the fixture disables purely to make a CR count as declaratively
+// configured. It has to be a value spec.disabledAPIs' enum accepts, must not be one of the
+// Praxis-served APIs the tests assert on, and is deliberately absent from praxisFixtureBaseConfig
+// so disabling it changes nothing about the resulting apis: list.
+const declarativeTriggerAPI = "batches"
+
+// reconciledPraxisFixture creates and reconciles an OGXServer in a fresh namespace, returning it.
 //
 // The CR carries spec.baseConfig rather than spec.overrideConfig: overrideConfig short-circuits
 // config generation entirely, and baseConfig keeps the real generation path in play while
 // avoiding the OCI-label fetch that envtest cannot perform.
-func greenfieldInstance(t *testing.T, name string, externalAccess bool) *ogxiov1beta1.OGXServer {
+func reconciledPraxisFixture(t *testing.T, name string, opts praxisFixtureOptions) *ogxiov1beta1.OGXServer {
 	t.Helper()
 
 	t.Setenv("OPERATOR_NAMESPACE", testOperatorNamespace)
 
-	namespace := createTestNamespace(t, "greenfield")
+	namespace := createTestNamespace(t, "praxis-fixture")
 
 	baseConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: name + "-base-config", Namespace: namespace.Name},
-		Data:       map[string]string{"config.yaml": greenfieldBaseConfig},
+		Data:       map[string]string{"config.yaml": praxisFixtureBaseConfig},
 	}
 	require.NoError(t, k8sClient.Create(t.Context(), baseConfigMap))
 
-	instance := NewOGXServerBuilder().
+	builder := NewOGXServerBuilder().
 		WithName(name).
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
-		WithBaseConfig(baseConfigMap.Name, "config.yaml").
-		WithPraxisMode(true). // the webhook that defaults this does not run in envtest
-		Build()
-	if externalAccess {
+		WithBaseConfig(baseConfigMap.Name, "config.yaml")
+
+	// Set explicitly: no admission webhook runs in envtest, so a fixture that relied on defaulting
+	// would prove nothing either way. The webhook's own behaviour is pinned statically in
+	// api/v1beta1/praxis_default_test.go and live in tests/e2e/greenfield_default_test.go.
+	switch opts.mode {
+	case praxisModeOptIn:
+		builder = builder.WithPraxisMode(true)
+	case praxisModeOptOut:
+		builder = builder.WithPraxisMode(false)
+	case praxisModeUnset:
+	}
+
+	instance := builder.Build()
+	if opts.declarativeConfig {
+		instance.Spec.DisabledAPIs = []string{declarativeTriggerAPI}
+	}
+	if opts.externalAccess {
 		instance.Spec.Network = &ogxiov1beta1.NetworkSpec{
 			ExternalAccess: &ogxiov1beta1.ExternalAccessConfig{Enabled: true},
 		}
@@ -164,24 +234,24 @@ func ingressServiceBackends(ingress *networkingv1.Ingress) []string {
 	return names
 }
 
-func TestGreenfieldPraxisCR_CreatesNoExternalExposurePrimitive(t *testing.T) {
-	instance := greenfieldInstance(t, "greenfield-exposure", false)
+func TestPraxisOptIn_CreatesNoExternalExposurePrimitive(t *testing.T) {
+	instance := praxisOptInInstance(t, "praxis-optin-exposure", false)
 	assertNoExternalExposurePrimitive(t, instance)
 }
 
-// TestGreenfieldPraxisCR_ExternalAccessEnabledStillCreatesNoExposure covers the regression that
+// TestPraxisOptIn_ExternalAccessEnabledStillCreatesNoExposure covers the regression that
 // matters most: a CR author asking for external access in Praxis mode must be ignored, not
 // honoured. network_resources_test.go covers reconcileIngress in isolation with a fake client;
 // this drives the real reconcile loop against a real API server.
-func TestGreenfieldPraxisCR_ExternalAccessEnabledStillCreatesNoExposure(t *testing.T) {
-	instance := greenfieldInstance(t, "greenfield-extaccess", true)
+func TestPraxisOptIn_ExternalAccessEnabledStillCreatesNoExposure(t *testing.T) {
+	instance := praxisOptInInstance(t, "praxis-optin-extaccess", true)
 	assertNoExternalExposurePrimitive(t, instance)
 }
 
-// TestGreenfieldPraxisCR_DeletesAdoptedIngress verifies that an Ingress left behind by a legacy
+// TestPraxisOptIn_DeletesAdoptedIngress verifies that an Ingress left behind by a legacy
 // instance is removed once the CR flips to Praxis mode, rather than merely not being recreated.
-func TestGreenfieldPraxisCR_DeletesAdoptedIngress(t *testing.T) {
-	instance := greenfieldInstance(t, "greenfield-adopted", false)
+func TestPraxisOptIn_DeletesAdoptedIngress(t *testing.T) {
+	instance := praxisOptInInstance(t, "praxis-optin-adopted", false)
 
 	pathType := networkingv1.PathTypePrefix
 	stale := &networkingv1.Ingress{
@@ -221,11 +291,11 @@ func TestGreenfieldPraxisCR_DeletesAdoptedIngress(t *testing.T) {
 	}, testTimeout, testInterval, "operator must delete an owned Ingress in Praxis mode")
 }
 
-// TestGreenfieldPraxisCR_NetworkPolicyAdmitsNoExternalPeers asserts the same structural predicates
+// TestPraxisOptIn_NetworkPolicyAdmitsNoExternalPeers asserts the same structural predicates
 // as the transformer unit tests, but against the object the reconciler actually persisted. The
 // transformer can be correct while the controller passes it the wrong config.
-func TestGreenfieldPraxisCR_NetworkPolicyAdmitsNoExternalPeers(t *testing.T) {
-	instance := greenfieldInstance(t, "greenfield-netpol", true)
+func TestPraxisOptIn_NetworkPolicyAdmitsNoExternalPeers(t *testing.T) {
+	instance := praxisOptInInstance(t, "praxis-optin-netpol", true)
 
 	var np networkingv1.NetworkPolicy
 	waitForResource(t, k8sClient, instance.Namespace, instance.Name+networkPolicyNameSuffix, &np)
@@ -312,11 +382,11 @@ func ingressRuleOpensPort(rule networkingv1.NetworkPolicyIngressRule, port int32
 	return false
 }
 
-// TestGreenfieldPraxisCR_GeneratedConfigOmitsPraxisServedAPIs asserts the disable mechanism end to
+// TestPraxisOptIn_GeneratedConfigOmitsPraxisServedAPIs asserts the disable mechanism end to
 // end through the reconciler: the ConfigMap the Deployment will mount must not list the APIs
 // Praxis serves. pkg/config covers the generator in isolation; this covers the wiring.
-func TestGreenfieldPraxisCR_GeneratedConfigOmitsPraxisServedAPIs(t *testing.T) {
-	instance := greenfieldInstance(t, "greenfield-config", false)
+func TestPraxisOptIn_GeneratedConfigOmitsPraxisServedAPIs(t *testing.T) {
+	instance := praxisOptInInstance(t, "praxis-optin-config", false)
 
 	var configMaps corev1.ConfigMapList
 	require.NoError(t, k8sClient.List(t.Context(), &configMaps,
@@ -340,10 +410,14 @@ func TestGreenfieldPraxisCR_GeneratedConfigOmitsPraxisServedAPIs(t *testing.T) {
 	assert.Contains(t, cfg.APIs, "vector_io")
 }
 
-// TestOperatorRBACGrantsNoExternalExposurePrimitives is the cheapest durable guard in this ticket:
-// an operator with no permission to create a Route or an HTTPRoute cannot regress into creating
-// one. It is a static read of the generated ClusterRole, so it runs in milliseconds and cannot
-// flake. It fails at PR time on the `make manifests` diff, before any cluster is involved.
+// TestOperatorRBACGrantsNoExternalExposurePrimitives bounds the operator's exposure surface to one
+// primitive. In legacy mode the operator creates an Ingress when spec.network.externalAccess.enabled
+// is set, and in Praxis mode it creates nothing — but in neither mode may it reach for a Route, an
+// HTTPRoute, or any other routing object, because those bypass both the externalAccess gate and the
+// Praxis lock-down. An operator without the permission cannot regress into creating one.
+//
+// It is a static read of the generated ClusterRole, so it runs in milliseconds and cannot flake. It
+// fails at PR time on the `make manifests` diff, before any cluster is involved.
 func TestOperatorRBACGrantsNoExternalExposurePrimitives(t *testing.T) {
 	data, err := os.ReadFile("../config/rbac/role.yaml")
 	require.NoError(t, err, "failed to read the generated operator ClusterRole")
@@ -364,16 +438,18 @@ func TestOperatorRBACGrantsNoExternalExposurePrimitives(t *testing.T) {
 		"networking.gke.io",         // GKE MultiClusterIngress / ServiceAttachment
 	}
 
-	// networking.k8s.io is needed for NetworkPolicy and for deleting legacy Ingresses, so it is
-	// allow-listed by resource rather than forbidden outright.
+	// networking.k8s.io is needed for NetworkPolicy and for the Ingress the operator creates in
+	// legacy mode (and deletes on opt-in), so it is allow-listed by resource rather than forbidden
+	// outright.
 	allowedNetworkingResources := map[string]bool{"ingresses": true, "networkpolicies": true}
 
 	for _, rule := range role.Rules {
 		for _, group := range rule.APIGroups {
 			for _, forbidden := range forbiddenGroups {
 				assert.NotEqualf(t, forbidden, group,
-					"operator is granted %v on %s/%v; OGX is internal-only and must not be able to "+
-						"create external routing objects", rule.Verbs, group, rule.Resources)
+					"operator is granted %v on %s/%v; Ingress is the operator's only external "+
+						"exposure primitive, and it is the only one gated on externalAccess and on "+
+						"Praxis mode", rule.Verbs, group, rule.Resources)
 			}
 			if group != "networking.k8s.io" {
 				continue
@@ -381,7 +457,7 @@ func TestOperatorRBACGrantsNoExternalExposurePrimitives(t *testing.T) {
 			for _, res := range rule.Resources {
 				assert.Truef(t, allowedNetworkingResources[res],
 					"operator is granted %v on networking.k8s.io/%s, which is outside the "+
-						"NetworkPolicy + legacy-Ingress allow-list", rule.Verbs, res)
+						"NetworkPolicy + Ingress allow-list", rule.Verbs, res)
 			}
 		}
 	}
