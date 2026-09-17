@@ -348,7 +348,7 @@ func TestReconcile(t *testing.T) {
 		WithNamespace(namespace.Name).
 		WithDistribution("starter").
 		WithPort(instancePort).
-		WithPraxisMode(true). // greenfield posture; webhook does not run in envtest
+		WithPraxisMode(true).
 		Build()
 	require.NoError(t, k8sClient.Create(t.Context(), instance))
 
