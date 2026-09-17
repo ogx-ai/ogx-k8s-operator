@@ -46,6 +46,7 @@ import (
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
@@ -54,6 +55,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -93,6 +95,9 @@ const (
 	WatchLabelKey = "ogx.io/watch"
 	// WatchLabelValue is the expected value for the watch label.
 	WatchLabelValue = "true"
+
+	// migrationRequeueAfter is how often to requeue while a migration Job is active.
+	migrationRequeueAfter = 15 * time.Second
 )
 
 // OGXServerReconciler reconciles an OGXServer object.
@@ -102,6 +107,9 @@ type OGXServerReconciler struct {
 	// which are not cached by the operator). When nil, reads fall back to the cached Client.
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
+	// Recorder emits Kubernetes events for migration and other lifecycle transitions.
+	// Optional; when nil, event emission is skipped.
+	Recorder events.EventRecorder
 	// Image mapping overrides
 	ImageMappingOverrides map[string]string
 	// Cluster info
@@ -179,6 +187,9 @@ func (r *OGXServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Check if requeue is needed based on phase
 	if instance.Status.Phase == ogxiov1beta1.OGXServerPhaseInitializing {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+	if migrationNeedsRequeue(instance) {
+		return ctrl.Result{RequeueAfter: migrationRequeueAfter}, nil
 	}
 
 	logger.Info("Successfully reconciled OGXServer")
@@ -698,6 +709,10 @@ func (r *OGXServerReconciler) reconcileResources(ctx context.Context, instance *
 		return fmt.Errorf("failed to clean up adopted networking: %w", err)
 	}
 
+	if err := r.reconcileMigration(ctx, instance, runtimeConfig); err != nil {
+		return fmt.Errorf("failed to reconcile Praxis migration: %w", err)
+	}
+
 	return nil
 }
 
@@ -824,6 +839,9 @@ func (r *OGXServerReconciler) SetupWithManager(_ context.Context, mgr ctrl.Manag
 	if r.APIReader == nil {
 		r.APIReader = mgr.GetAPIReader()
 	}
+	if r.Recorder == nil {
+		r.Recorder = mgr.GetEventRecorder("ogxserver-controller")
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ogxiov1beta1.OGXServer{}, builder.WithPredicates(predicate.Funcs{
 			UpdateFunc: r.ogxServerUpdatePredicate(mgr),
@@ -833,6 +851,7 @@ func (r *OGXServerReconciler) SetupWithManager(_ context.Context, mgr ctrl.Manag
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{}).
+		Owns(&batchv1.Job{}).
 		Watches(
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.mapConfigMapToReconcileRequests),
@@ -1020,6 +1039,13 @@ func (r *OGXServerReconciler) instanceReferencesSecret(instance *ogxiov1beta1.OG
 			continue
 		}
 		if env.ValueFrom.SecretKeyRef.Name == secretName {
+			return true
+		}
+	}
+
+	if instance.Spec.PraxisMode != nil && instance.Spec.PraxisMode.MigrationJob != nil {
+		mj := instance.Spec.PraxisMode.MigrationJob
+		if mj.TargetConnectionString != nil && mj.TargetConnectionString.Name == secretName {
 			return true
 		}
 	}

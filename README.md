@@ -184,6 +184,11 @@ kubectl apply -f config/samples/example-with-configmap.yaml
 
 `spec.overrideConfig` always takes precedence over declarative generation fields.
 
+## Praxis upgrade migration (3.5 → 3.6)
+
+For operator-managed Responses/Conversations migration and the `PraxisCutoverReady` gate, see
+[docs/upgrade-praxis-migration.md](docs/upgrade-praxis-migration.md).
+
 ## Network Policies (internal-only / Praxis-fronted)
 
 OGX is an **internal-only backend**: in the target topology it is fronted by Praxis, which is

@@ -29,6 +29,16 @@ const (
 	// ConditionTypeTLSConfigured indicates whether spec.network.tls.secretName is set and the
 	// referenced Secret exists (Praxis-fronted mode only).
 	ConditionTypeTLSConfigured = "TLSConfigured"
+	// ConditionTypeMigrationPreflightReady indicates migration preflight checks passed.
+	ConditionTypeMigrationPreflightReady = "MigrationPreflightReady"
+	// ConditionTypeMigrationJobSucceeded indicates the migration Job completed successfully.
+	ConditionTypeMigrationJobSucceeded = "MigrationJobSucceeded"
+	// ConditionTypeMigrationValidated indicates the migration Job completed.
+	ConditionTypeMigrationValidated = "MigrationValidated"
+	// ConditionTypePraxisCutoverReady indicates cutover may proceed after a successful migration Job.
+	ConditionTypePraxisCutoverReady = "PraxisCutoverReady"
+	// ConditionTypeSoftRollbackAvailable indicates only soft rollback is supported (with data-loss risk).
+	ConditionTypeSoftRollbackAvailable = "SoftRollbackAvailable"
 )
 
 // Condition reasons.
@@ -69,6 +79,32 @@ const (
 	ReasonTLSSecretMissing = "TLSSecretMissing"
 	// ReasonTLSNotConfigured indicates spec.network.tls.secretName is not set.
 	ReasonTLSNotConfigured = "TLSSecretNotSet"
+	// ReasonMigrationPreflightPassed indicates migration preflight succeeded.
+	ReasonMigrationPreflightPassed = "MigrationPreflightPassed"
+	// ReasonMigrationPreflightFailed indicates migration preflight failed.
+	ReasonMigrationPreflightFailed = "MigrationPreflightFailed"
+	// ReasonMigrationNotRequested indicates migration was not opted in.
+	ReasonMigrationNotRequested = "MigrationNotRequested"
+	// ReasonMigrationJobRunning indicates the migration Job is active.
+	ReasonMigrationJobRunning = "MigrationJobRunning"
+	// ReasonMigrationJobSucceeded indicates the migration Job succeeded.
+	ReasonMigrationJobSucceeded = "MigrationJobSucceeded"
+	// ReasonMigrationJobFailed indicates the migration Job failed.
+	ReasonMigrationJobFailed = "MigrationJobFailed"
+	// ReasonMigrationJobPending indicates the migration Job has not been observed yet.
+	ReasonMigrationJobPending = "MigrationJobPending"
+	// ReasonMigrationValidated indicates the migration Job completed.
+	ReasonMigrationValidated = "MigrationValidated"
+	// ReasonMigrationValidationPending indicates validation has not succeeded yet.
+	ReasonMigrationValidationPending = "MigrationValidationPending"
+	// ReasonMigrationValidationFailed indicates validation failed.
+	ReasonMigrationValidationFailed = "MigrationValidationFailed"
+	// ReasonPraxisCutoverReady indicates cutover is safe.
+	ReasonPraxisCutoverReady = "PraxisCutoverReady"
+	// ReasonPraxisCutoverNotReady indicates cutover is not safe yet.
+	ReasonPraxisCutoverNotReady = "PraxisCutoverNotReady"
+	// ReasonSoftRollbackOnly indicates only soft rollback is available.
+	ReasonSoftRollbackOnly = "SoftRollbackOnly"
 )
 
 // Condition messages.
@@ -199,23 +235,108 @@ func SetTLSConfiguredCondition(status *ogxiov1beta1.OGXServerStatus, configured 
 	SetCondition(status, condition)
 }
 
-// SetCondition sets a condition in the status.
+// SoftRollbackWarningMessage is the canonical soft-rollback data-loss warning.
+const SoftRollbackWarningMessage = "Soft rollback only restores the pre-enablement OGX Responses/Conversations " +
+	"serving posture. Responses/Conversations writes made through Praxis after cutover do not flow back to OGX, " +
+	"ABAC flattening is not restored, and data loss is possible."
+
+// SetMigrationPreflightReadyCondition sets the migration preflight condition.
+func SetMigrationPreflightReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeMigrationPreflightReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !ready {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetMigrationJobSucceededCondition sets the migration Job success condition.
+func SetMigrationJobSucceededCondition(status *ogxiov1beta1.OGXServerStatus, succeeded bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeMigrationJobSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !succeeded {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetMigrationValidatedCondition sets the migration validation condition.
+func SetMigrationValidatedCondition(status *ogxiov1beta1.OGXServerStatus, validated bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeMigrationValidated,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !validated {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetPraxisCutoverReadyCondition sets the Praxis cutover readiness gate.
+func SetPraxisCutoverReadyCondition(status *ogxiov1beta1.OGXServerStatus, ready bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypePraxisCutoverReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !ready {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetSoftRollbackAvailableCondition sets the soft-rollback availability condition.
+func SetSoftRollbackAvailableCondition(status *ogxiov1beta1.OGXServerStatus, available bool, reason, message string) {
+	condition := metav1.Condition{
+		Type:               ConditionTypeSoftRollbackAvailable,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.NewTime(metav1.Now().UTC()),
+	}
+	if !available {
+		condition.Status = metav1.ConditionFalse
+	}
+	SetCondition(status, condition)
+}
+
+// SetCondition sets a condition. Unchanged Status/Reason/Message are a no-op;
+// LastTransitionTime is preserved when Status is unchanged.
 func SetCondition(status *ogxiov1beta1.OGXServerStatus, condition metav1.Condition) {
-	// Initialize conditions if needed
 	if status.Conditions == nil {
 		status.Conditions = make([]metav1.Condition, 0)
 	}
 
-	// Find existing condition
 	for i := range status.Conditions {
-		if status.Conditions[i].Type == condition.Type {
-			// Update existing condition
-			status.Conditions[i] = condition
+		if status.Conditions[i].Type != condition.Type {
+			continue
+		}
+		existing := status.Conditions[i]
+		if existing.Status == condition.Status && existing.Reason == condition.Reason && existing.Message == condition.Message {
 			return
 		}
+		if existing.Status == condition.Status {
+			condition.LastTransitionTime = existing.LastTransitionTime
+		}
+		status.Conditions[i] = condition
+		return
 	}
 
-	// Add new condition
 	status.Conditions = append(status.Conditions, condition)
 }
 
