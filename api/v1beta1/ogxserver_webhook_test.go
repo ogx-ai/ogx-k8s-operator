@@ -661,6 +661,7 @@ func TestValidate_ExternalAccessWarning(t *testing.T) {
 		{
 			name:                "no network spec: no external access warning",
 			network:             nil,
+			praxisMode:          &PraxisModeSpec{Enabled: ptr(true)},
 			wantExternalWarning: false,
 		},
 		{
