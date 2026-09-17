@@ -17,6 +17,7 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestGetAdoptStorageSource(t *testing.T) {
@@ -309,6 +311,62 @@ func TestOGXServerSpecIsPraxisModeEnabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, tt.spec.IsPraxisModeEnabled())
+		})
+	}
+}
+
+func TestPraxisModeDefaulting(t *testing.T) {
+	ns := createCELTestNamespace(t, "praxis-default")
+
+	tests := []struct {
+		name           string
+		praxisMode     *PraxisModeSpec
+		wantPraxisMode bool
+		wantEnabled    bool
+	}{
+		{
+			name:           "praxisMode provided defaults enabled to true",
+			praxisMode:     &PraxisModeSpec{},
+			wantPraxisMode: true,
+			wantEnabled:    true,
+		},
+		{
+			name:           "explicit enabled true is preserved",
+			praxisMode:     &PraxisModeSpec{Enabled: ptr(true)},
+			wantPraxisMode: true,
+			wantEnabled:    true,
+		},
+		{
+			name:           "explicit enabled false is preserved",
+			praxisMode:     &PraxisModeSpec{Enabled: ptr(false)},
+			wantPraxisMode: true,
+			wantEnabled:    false,
+		},
+		{
+			name:           "praxisMode omitted remains nil",
+			wantPraxisMode: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			obj.Spec.PraxisMode = tt.praxisMode
+			if err := k8sClient.Create(context.Background(), obj); err != nil {
+				t.Fatalf("failed to create OGXServer: %v", err)
+			}
+			t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+
+			var got OGXServer
+			if err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(obj), &got); err != nil {
+				t.Fatalf("failed to get OGXServer: %v", err)
+			}
+			if (got.Spec.PraxisMode != nil) != tt.wantPraxisMode {
+				t.Fatalf("expected spec.praxisMode present=%t, got %#v", tt.wantPraxisMode, got.Spec.PraxisMode)
+			}
+			if tt.wantPraxisMode && (got.Spec.PraxisMode == nil || got.Spec.PraxisMode.Enabled == nil || *got.Spec.PraxisMode.Enabled != tt.wantEnabled) {
+				t.Fatalf("expected spec.praxisMode.enabled=%t, got %#v", tt.wantEnabled, got.Spec.PraxisMode)
+			}
 		})
 	}
 }
