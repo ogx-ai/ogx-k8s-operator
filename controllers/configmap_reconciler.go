@@ -61,7 +61,7 @@ func generatedConfigMapName(crName, contentHash string) string {
 func (r *OGXServerReconciler) reconcileGeneratedConfig(ctx context.Context, instance *ogxiov1beta1.OGXServer) (*config.GeneratedConfig, error) {
 	logger := log.FromContext(ctx)
 
-	praxisMode := r.resolvePraxisMode(instance)
+	praxisMode := instance.Spec.IsPraxisModeEnabled()
 	if !shouldGenerateConfig(instance, praxisMode) {
 		return nil, nil
 	}

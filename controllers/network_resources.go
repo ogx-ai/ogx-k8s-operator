@@ -37,16 +37,6 @@ const (
 	IngressNameSuffix = "-ingress"
 )
 
-// resolvePraxisMode reports whether this instance runs in the internal-only, Praxis-fronted
-// posture. The mode is driven solely by spec.praxisMode.enabled:
-//   - enabled: true  → Praxis-fronted (internal-only).
-//   - enabled: false → legacy behavior.
-//   - spec.praxisMode or spec.praxisMode.enabled unset → legacy behavior.
-func (r *OGXServerReconciler) resolvePraxisMode(instance *ogxiov1beta1.OGXServer) bool {
-	return instance.Spec.PraxisMode != nil &&
-		instance.Spec.PraxisMode.Enabled != nil && *instance.Spec.PraxisMode.Enabled
-}
-
 // buildIngress creates an Ingress for external access to the OGXServer.
 func (r *OGXServerReconciler) buildIngress(
 	instance *ogxiov1beta1.OGXServer,
@@ -104,7 +94,7 @@ func (r *OGXServerReconciler) reconcileIngress(
 	ctx context.Context,
 	instance *ogxiov1beta1.OGXServer,
 ) error {
-	if r.resolvePraxisMode(instance) {
+	if instance.Spec.IsPraxisModeEnabled() {
 		return r.enforceInternalOnlyIngress(ctx, instance)
 	}
 	return r.reconcileLegacyIngress(ctx, instance)

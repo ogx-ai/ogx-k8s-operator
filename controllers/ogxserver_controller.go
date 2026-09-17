@@ -577,7 +577,7 @@ func (r *OGXServerReconciler) buildManifestContext(
 		PodDisruptionBudgetSpec: buildPodDisruptionBudgetSpec(instance),
 		HPASpec:                 buildHPASpec(instance),
 		PraxisPeer:              BuildPraxisPeer(instance),
-		PraxisMode:              r.resolvePraxisMode(instance),
+		PraxisMode:              instance.Spec.IsPraxisModeEnabled(),
 	}, nil
 }
 
@@ -1196,7 +1196,7 @@ func (r *OGXServerReconciler) updateStatus(ctx context.Context, instance *ogxiov
 		// In Praxis-fronted mode, surface preflight readiness (Praxis reachability, TLS secret)
 		// as status conditions. OGX and Praxis deploy independently, so unmet preconditions are
 		// reported rather than rejected.
-		if r.resolvePraxisMode(instance) {
+		if instance.Spec.IsPraxisModeEnabled() {
 			r.updatePraxisPreflightStatus(ctx, instance)
 		}
 
@@ -1318,7 +1318,7 @@ func (r *OGXServerReconciler) updateServiceStatus(ctx context.Context, instance 
 	serviceURL := r.getServerURL(instance, "")
 	instance.Status.ServiceURL = serviceURL.String()
 
-	if r.resolvePraxisMode(instance) {
+	if instance.Spec.IsPraxisModeEnabled() {
 		// OGX is internal-only (Praxis-fronted): no external exposure is created, so the
 		// external URL is always cleared.
 		instance.Status.ExternalURL = nil

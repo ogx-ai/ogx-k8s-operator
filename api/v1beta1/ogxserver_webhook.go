@@ -92,7 +92,7 @@ func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) 
 // or unset, these settings may be honored, so a warning would be misleading.
 func collectValidationWarnings(r *OGXServer) admission.Warnings {
 	// All warnings apply only in Praxis-fronted mode; in legacy mode these settings may be honored.
-	if !isPraxisModeEnabled(r) {
+	if !r.Spec.IsPraxisModeEnabled() {
 		return nil
 	}
 
@@ -119,12 +119,6 @@ func collectValidationWarnings(r *OGXServer) admission.Warnings {
 	}
 
 	return warnings
-}
-
-// isPraxisModeEnabled reports whether spec.praxisMode.enabled is explicitly true.
-func isPraxisModeEnabled(r *OGXServer) bool {
-	return r.Spec.PraxisMode != nil &&
-		r.Spec.PraxisMode.Enabled != nil && *r.Spec.PraxisMode.Enabled
 }
 
 // isExternalAccessRequested reports whether spec.network.externalAccess.enabled is true.

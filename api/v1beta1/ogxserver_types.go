@@ -589,6 +589,14 @@ type OGXServerSpec struct {
 	PraxisMode *PraxisModeSpec `json:"praxisMode,omitempty"`
 }
 
+// IsPraxisModeEnabled reports the effective Praxis mode for the spec. When
+// spec.praxisMode is provided, the CRD defaults enabled to true; an explicit
+// false selects legacy mode. An omitted spec.praxisMode selects legacy mode.
+func (s *OGXServerSpec) IsPraxisModeEnabled() bool {
+	return s != nil && s.PraxisMode != nil &&
+		(s.PraxisMode.Enabled == nil || *s.PraxisMode.Enabled)
+}
+
 // OGXServerPhase represents the current phase of the OGXServer.
 // +kubebuilder:validation:Enum=Pending;Initializing;Ready;Failed;Terminating
 type OGXServerPhase string
