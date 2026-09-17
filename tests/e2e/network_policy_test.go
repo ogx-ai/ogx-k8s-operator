@@ -25,6 +25,10 @@ const (
 
 	praxisLabelKey   = "app"
 	praxisLabelValue = "payload-processing"
+
+	// probeTimeout bounds how long a short-lived probe pod may take to pull its image, run, and
+	// terminate.
+	probeTimeout = 3 * time.Minute
 )
 
 // TestNetworkPolicySuite verifies OGX is enforced internal-only: the operator-managed
@@ -230,8 +234,18 @@ func runConnectivityProbe(t *testing.T, name, namespace, serviceHost string, lab
 	require.NoError(t, TestEnv.Client.Create(TestEnv.Ctx, pod))
 	t.Cleanup(func() { _ = TestEnv.Client.Delete(context.Background(), pod) })
 
+	exitCode := waitForProbePodTerminated(t, namespace, name)
+	t.Logf("connectivity probe %s exited with code %d", name, exitCode)
+	return exitCode
+}
+
+// waitForProbePodTerminated blocks until the probe pod's container has terminated and returns its
+// exit code. Shared with the HTTP probes in greenfield_negative_test.go.
+func waitForProbePodTerminated(t *testing.T, namespace, name string) int32 {
+	t.Helper()
+
 	var exitCode int32 = -1
-	err := wait.PollUntilContextTimeout(TestEnv.Ctx, generalRetryInterval, 3*time.Minute, true,
+	err := wait.PollUntilContextTimeout(TestEnv.Ctx, generalRetryInterval, probeTimeout, true,
 		func(ctx context.Context) (bool, error) {
 			fetched := &corev1.Pod{}
 			if getErr := TestEnv.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, fetched); getErr != nil {
@@ -248,7 +262,6 @@ func runConnectivityProbe(t *testing.T, name, namespace, serviceHost string, lab
 			}
 			return false, nil
 		})
-	require.NoError(t, err, "connectivity probe pod %s did not terminate in time", name)
-	t.Logf("connectivity probe %s exited with code %d", name, exitCode)
+	require.NoError(t, err, "probe pod %s/%s did not terminate in time", namespace, name)
 	return exitCode
 }
