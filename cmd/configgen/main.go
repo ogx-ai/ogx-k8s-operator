@@ -81,8 +81,7 @@ func run(opts options) (*config.GeneratedConfig, error) {
 		return nil, errors.New("failed to generate config: CR has overrideConfig set; the operator would skip config generation and use the override ConfigMap directly")
 	}
 
-	praxisMode := isPraxisMode(server)
-	if !server.HasDeclarativeConfig() && !praxisMode {
+	if !server.HasDeclarativeConfig() && !server.Spec.IsPraxisModeEnabled() {
 		return nil, errors.New("failed to generate config: CR has no declarative config fields (providers, resources, storage, or disabledAPIs); nothing to generate")
 	}
 
@@ -102,16 +101,9 @@ func run(opts options) (*config.GeneratedConfig, error) {
 	}
 
 	if server.HasDeclarativeConfig() {
-		return config.GenerateConfig(&server.Spec, baseConfigData, praxisMode)
+		return config.GenerateConfig(&server.Spec, baseConfigData, server.Spec.IsPraxisModeEnabled())
 	}
 	return config.GeneratePraxisDefaultConfig(&server.Spec, baseConfigData)
-}
-
-// isPraxisMode mirrors the explicit Praxis check used by this offline tool. Unlike the
-// controller, this does not apply webhook defaults.
-func isPraxisMode(server *ogxiov1beta1.OGXServer) bool {
-	return server.Spec.PraxisMode != nil &&
-		server.Spec.PraxisMode.Enabled != nil && *server.Spec.PraxisMode.Enabled
 }
 
 type options struct {

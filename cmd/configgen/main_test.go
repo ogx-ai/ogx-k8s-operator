@@ -110,6 +110,32 @@ func TestLoadKnownDistributionNames(t *testing.T) {
 	require.Equal(t, []string{"postgres-demo", "starter"}, names)
 }
 
+func TestRun_PraxisModeDefaultsEnabledWithoutKubernetesDefaulting(t *testing.T) {
+	dir := t.TempDir()
+	crPath := filepath.Join(dir, "cr.yaml")
+	basePath := filepath.Join(dir, "base.yaml")
+
+	require.NoError(t, os.WriteFile(crPath, []byte(`apiVersion: ogx.io/v1beta1
+kind: OGXServer
+metadata:
+  name: test
+spec:
+  distribution:
+    name: starter
+  praxisMode:
+    praxisSelector:
+      namespace: openshift-ingress
+      podSelector:
+        matchLabels:
+          app: payload-processing
+`), 0o600))
+	require.NoError(t, os.WriteFile(basePath, []byte("version: '2'\napis:\n- responses\n"), 0o600))
+
+	generated, err := run(options{crPath: crPath, basePath: basePath})
+	require.NoError(t, err)
+	require.Contains(t, generated.ConfigYAML, "type: upstream_header")
+}
+
 func (tc testCase) assert(t *testing.T, generated *config.GeneratedConfig, runErr error) {
 	t.Helper()
 

@@ -113,7 +113,9 @@ Notes:
 - If the CR uses `spec.baseConfig`, pass that file with `-base`.
 - If the CR only sets `spec.distribution.name`, pass `-base` as well; image
   resolution for named distributions happens in the operator.
-- The CLI does not run admission defaulting; set `spec.praxisMode.enabled: true` explicitly.
+- Without `-validate`, the CLI does not apply Kubernetes CRD schema defaults.
+- With `-validate`, the CLI additionally validates against the CRD schema,
+  CEL rules, and webhook logic.
 - `-validate` uses `distributions.json` to validate `spec.distribution.name`.
 
 ## Storage Example (Postgres)

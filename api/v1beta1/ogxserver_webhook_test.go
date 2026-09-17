@@ -796,6 +796,11 @@ func TestValidate_PraxisModeWarning(t *testing.T) {
 			wantWarning: true,
 		},
 		{
+			name:        "praxis mode with enabled omitted",
+			praxisMode:  &PraxisModeSpec{},
+			wantWarning: true,
+		},
+		{
 			name:        "praxis mode unset",
 			praxisMode:  nil,
 			wantWarning: false,

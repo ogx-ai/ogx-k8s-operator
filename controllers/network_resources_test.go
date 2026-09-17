@@ -130,6 +130,22 @@ func TestReconcileIngress_LegacyModeCreatesIngress(t *testing.T) {
 	require.NoError(t, err, "legacy mode with externalAccess enabled should create an Ingress")
 }
 
+func TestReconcileIngress_EnabledUnsetUsesPraxisMode(t *testing.T) {
+	instance := newInternalOnlyInstance()
+	instance.Spec.PraxisMode = &ogxiov1beta1.PraxisModeSpec{}
+
+	reconciler, c := newIngressTestReconciler(t)
+
+	require.NoError(t, reconciler.ReconcileIngressForTest(context.Background(), instance))
+
+	var ing networkingv1.Ingress
+	err := c.Get(context.Background(), types.NamespacedName{
+		Name:      instance.Name + controllers.IngressNameSuffix,
+		Namespace: instance.Namespace,
+	}, &ing)
+	require.True(t, apierrors.IsNotFound(err), "praxisMode with enabled omitted should use Praxis mode")
+}
+
 // TestReconcileIngress_UnsetModeUsesLegacy verifies that an unset praxisMode resolves to legacy
 // mode.
 func TestReconcileIngress_UnsetModeUsesLegacy(t *testing.T) {

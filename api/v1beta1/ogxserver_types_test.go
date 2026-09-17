@@ -275,3 +275,40 @@ func TestWorkloadSpecResourceClaimsRoundTrip(t *testing.T) {
 		{Name: "gpu-from-template"},
 	}, got.Resources.Claims)
 }
+
+func TestOGXServerSpecIsPraxisModeEnabled(t *testing.T) {
+	enabled := true
+	disabled := false
+
+	tests := []struct {
+		name string
+		spec OGXServerSpec
+		want bool
+	}{
+		{
+			name: "praxisMode omitted",
+			want: false,
+		},
+		{
+			name: "enabled omitted",
+			spec: OGXServerSpec{PraxisMode: &PraxisModeSpec{}},
+			want: true,
+		},
+		{
+			name: "enabled true",
+			spec: OGXServerSpec{PraxisMode: &PraxisModeSpec{Enabled: &enabled}},
+			want: true,
+		},
+		{
+			name: "enabled false",
+			spec: OGXServerSpec{PraxisMode: &PraxisModeSpec{Enabled: &disabled}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.spec.IsPraxisModeEnabled())
+		})
+	}
+}
