@@ -1829,6 +1829,110 @@ func TestExpandProviders_PgvectorWithVectorIndex(t *testing.T) {
 	}
 }
 
+// RHAIENG-6374: the pgvector provider config must carry a persistence
+// reference, or the OGX server crashes at startup.
+func TestExpandProviders_PgvectorPersistence(t *testing.T) {
+	tests := []struct {
+		name          string
+		id            string
+		wantNamespace string
+	}{
+		{"derived id", "", "vector_io::pgvector"},
+		{"explicit id", "pgvector", "vector_io::pgvector"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providers := &ogxiov1beta1.ProvidersSpec{
+				VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+					Remote: &ogxiov1beta1.VectorIORemoteProviders{
+						Pgvector: []ogxiov1beta1.PgvectorProvider{
+							{
+								RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: tt.id},
+								Host:               "pg.example.com",
+								Password:           ogxiov1beta1.SecretKeyRef{Name: "pg-secret", Key: "password"},
+							},
+						},
+					},
+				},
+			}
+
+			result, err := ExpandProviders(providers)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			p := result["vector_io"][0]
+			persistence, ok := p.Config["persistence"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("expected persistence map, got %v", p.Config["persistence"])
+			}
+			if persistence["backend"] != "kv_default" {
+				t.Errorf("expected persistence backend 'kv_default', got %v", persistence["backend"])
+			}
+			if persistence["namespace"] != tt.wantNamespace {
+				t.Errorf("expected persistence namespace %q, got %v", tt.wantNamespace, persistence["namespace"])
+			}
+		})
+	}
+}
+
+// RHAIENG-6374: two pgvector instances on one OGXServer must not write their
+// vector store records into the same namespace.
+func TestExpandProviders_PgvectorPersistence_DistinctNamespacesPerInstance(t *testing.T) {
+	providers := &ogxiov1beta1.ProvidersSpec{
+		VectorIo: &ogxiov1beta1.VectorIOProvidersSpec{
+			Remote: &ogxiov1beta1.VectorIORemoteProviders{
+				Pgvector: []ogxiov1beta1.PgvectorProvider{
+					{
+						RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "pgvector-a"},
+						Host:               "pg-a.example.com",
+						Password:           ogxiov1beta1.SecretKeyRef{Name: "pg-secret", Key: "password"},
+					},
+					{
+						RoutedProviderBase: ogxiov1beta1.RoutedProviderBase{ID: "pgvector-b"},
+						Host:               "pg-b.example.com",
+						Password:           ogxiov1beta1.SecretKeyRef{Name: "pg-secret", Key: "password"},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := ExpandProviders(providers)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expanded := result["vector_io"]
+	if len(expanded) != 2 {
+		t.Fatalf("expected 2 vector_io providers, got %d", len(expanded))
+	}
+
+	namespaces := make(map[string]string, len(expanded))
+	for _, p := range expanded {
+		persistence, ok := p.Config["persistence"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("provider %q: expected persistence map, got %v", p.ProviderID, p.Config["persistence"])
+		}
+		if len(persistence) != 2 {
+			t.Errorf("provider %q: expected persistence to hold only backend and namespace, got %v", p.ProviderID, persistence)
+		}
+		namespace, ok := persistence["namespace"].(string)
+		if !ok {
+			t.Fatalf("provider %q: expected namespace string, got %v", p.ProviderID, persistence["namespace"])
+		}
+		if other, clash := namespaces[namespace]; clash {
+			t.Fatalf("providers %q and %q share namespace %q", other, p.ProviderID, namespace)
+		}
+		namespaces[namespace] = p.ProviderID
+	}
+
+	if namespaces["vector_io::pgvector-a"] != "pgvector-a" || namespaces["vector_io::pgvector-b"] != "pgvector-b" {
+		t.Errorf("expected namespaces vector_io::pgvector-a and vector_io::pgvector-b, got %v", namespaces)
+	}
+}
+
 func TestExpandProviders_PgvectorWithIVFFlat(t *testing.T) {
 	nlist := 128
 	nprobe := 10

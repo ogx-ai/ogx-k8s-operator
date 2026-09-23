@@ -357,6 +357,12 @@ func expandPgvectorProvider(p ogxiov1beta1.PgvectorProvider) ConfigProvider {
 	if vectorIndex := expandPgvectorVectorIndex(p.VectorIndex); vectorIndex != nil {
 		cfg["vector_index"] = vectorIndex
 	}
+	// PGVectorVectorIOConfig dereferences config.persistence unconditionally, so
+	// omitting it crashes the OGX server at startup rather than failing validation.
+	cfg["persistence"] = map[string]interface{}{
+		"backend":   "kv_default",
+		"namespace": p.PersistenceNamespace(),
+	}
 
 	return ConfigProvider{
 		ProviderID:   p.DeriveID(),

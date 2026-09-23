@@ -96,6 +96,14 @@ type PgvectorProvider struct {
 
 func (p PgvectorProvider) DeriveID() string { return p.deriveOrDefault("remote-pgvector") }
 
+// PersistenceNamespace keys this provider's vector store records in the kvstore.
+// It defaults to pgvector rather than to DeriveID so that an install moving from
+// a base config pgvector provider to a declarative one keeps reaching the records
+// it already wrote: every shipped base config uses vector_io::pgvector.
+func (p PgvectorProvider) PersistenceNamespace() string {
+	return "vector_io::" + p.deriveOrDefault("pgvector")
+}
+
 // MilvusProvider configures a remote::milvus vector I/O provider instance.
 // +kubebuilder:validation:XValidation:rule="!has(self.consistencyLevel) || self.consistencyLevel.size() > 0",message="consistencyLevel must not be empty if specified"
 type MilvusProvider struct {

@@ -18,6 +18,9 @@ providers:
             m: 16
             ef_construction: 200
             ef_search: 100
+        persistence:
+          backend: kv_default
+          namespace: vector_io::pgvector
 registered_resources: {}
 server:
   port: 8321
