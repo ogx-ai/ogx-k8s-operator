@@ -7329,12 +7329,6 @@ rules:
   - watch
 - apiGroups:
   - security.openshift.io
-  resources:
-  - securitycontextconstraints
-  verbs:
-  - use
-- apiGroups:
-  - security.openshift.io
   resourceNames:
   - nonroot-v2
   resources:
