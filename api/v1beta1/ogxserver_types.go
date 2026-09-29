@@ -499,6 +499,16 @@ type MigrationJobSpec struct {
 	// and must have the label ogx.io/watch: "true".
 	// +kubebuilder:validation:Required
 	TargetConnectionString *SecretKeyRef `json:"targetConnectionString"`
+
+	// FallbackTenant is used for source rows with an empty tenant_id.
+	// Required only when such rows exist.
+	// +optional
+	FallbackTenant string `json:"fallbackTenant,omitempty"`
+
+	// FallbackOwnerSubject is used for source rows with an empty owner_principal.
+	// Required only when such rows exist.
+	// +optional
+	FallbackOwnerSubject string `json:"fallbackOwnerSubject,omitempty"`
 }
 
 // PraxisMode configures integration with an existing Praxis instance that

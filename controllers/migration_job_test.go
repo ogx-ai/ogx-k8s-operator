@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
@@ -185,6 +186,53 @@ func TestReconcileMigration_SuccessPathSetsCutoverReady(t *testing.T) {
 	require.True(t, IsConditionTrue(&inst.Status, ConditionTypePraxisCutoverReady))
 }
 
+func TestReconcileMigration_FallbackArguments(t *testing.T) {
+	tests := []struct {
+		name         string
+		tenant       string
+		ownerSubject string
+		wantTenant   string
+		wantOwner    string
+	}{
+		{name: "omitted"},
+		{name: "tenant only", tenant: "legacy-tenant", wantTenant: "--fallback-tenant 'legacy-tenant'"},
+		{name: "owner only", ownerSubject: "legacy-owner", wantOwner: "--fallback-owner-subject 'legacy-owner'"},
+		{
+			name:         "both with shell metacharacters",
+			tenant:       "team's $(whoami)",
+			ownerSubject: "owner; echo injected",
+			wantTenant:   `--fallback-tenant 'team'"'"'s $(whoami)'`,
+			wantOwner:    `--fallback-owner-subject 'owner; echo injected'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inst := migrationInstance(true, true)
+			inst.Spec.PraxisMode.MigrationJob.FallbackTenant = tt.tenant
+			inst.Spec.PraxisMode.MigrationJob.FallbackOwnerSubject = tt.ownerSubject
+			r, _ := migrationReconciler(t, migrationObjects()...)
+			require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+			job := &batchv1.Job{}
+			require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
+			command := job.Spec.Template.Spec.Containers[0].Args[0]
+			require.Contains(t, command, "ogx migrate praxis --dry-run")
+			require.Contains(t, command, "ogx migrate praxis")
+			if tt.wantTenant == "" {
+				require.NotContains(t, command, "--fallback-tenant")
+			} else {
+				require.Equal(t, 2, strings.Count(command, tt.wantTenant))
+			}
+			if tt.wantOwner == "" {
+				require.NotContains(t, command, "--fallback-owner-subject")
+			} else {
+				require.Equal(t, 2, strings.Count(command, tt.wantOwner))
+			}
+		})
+	}
+}
+
 func TestReconcileMigration_UsesImageConfigWhenRuntimeConfigOmitted(t *testing.T) {
 	inst := migrationInstance(true, true)
 	r, _ := migrationReconciler(t, sourceSecret(), targetSecret())
@@ -336,6 +384,8 @@ func TestReconcileMigration_JobFailure(t *testing.T) {
 	job := &batchv1.Job{}
 	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
 	markJobFailed(job)
+	job.Status.Conditions[0].Reason = "BackoffLimitExceeded"
+	job.Status.Conditions[0].Message = "Job has reached the specified backoff limit"
 	require.NoError(t, r.Status().Update(context.Background(), job))
 	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
 
@@ -344,6 +394,8 @@ func TestReconcileMigration_JobFailure(t *testing.T) {
 	require.True(t, IsConditionFalse(&inst.Status, ConditionTypeMigrationValidated))
 	require.True(t, IsConditionFalse(&inst.Status, ConditionTypePraxisCutoverReady))
 	require.Equal(t, ogxiov1beta1.MigrationPhaseFailed, inst.Status.Migration.Phase)
+	require.Contains(t, GetCondition(&inst.Status, ConditionTypeMigrationJobSucceeded).Message, "BackoffLimitExceeded")
+	require.Contains(t, GetCondition(&inst.Status, ConditionTypeMigrationJobSucceeded).Message, "Job has reached the specified backoff limit")
 	require.Contains(t, inst.Status.Migration.Message, "oc logs")
 
 	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
@@ -594,6 +646,33 @@ func TestReconcileMigration_SecretContentChangeStartsNewAttempt(t *testing.T) {
 	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
 	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
 	require.NotEqual(t, firstAttempt, job.Annotations[migrationAttemptAnnotation])
+}
+
+func TestReconcileMigration_FallbackChangeStartsNewAttempt(t *testing.T) {
+	inst := migrationInstance(true, true)
+	r, _ := migrationReconciler(t, migrationObjects()...)
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+	job := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
+	firstAttempt := job.Annotations[migrationAttemptAnnotation]
+	markJobFailed(job)
+	require.NoError(t, r.Status().Update(context.Background(), job))
+
+	inst.Spec.PraxisMode.MigrationJob.FallbackTenant = "legacy-tenant"
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
+	require.NotEqual(t, firstAttempt, job.Annotations[migrationAttemptAnnotation])
+	require.Contains(t, job.Spec.Template.Spec.Containers[0].Args[0], "--fallback-tenant 'legacy-tenant'")
+
+	secondAttempt := job.Annotations[migrationAttemptAnnotation]
+	inst.Spec.PraxisMode.MigrationJob.FallbackOwnerSubject = "legacy-owner"
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}, job))
+	require.NotEqual(t, secondAttempt, job.Annotations[migrationAttemptAnnotation])
+	require.Contains(t, job.Spec.Template.Spec.Containers[0].Args[0], "--fallback-owner-subject 'legacy-owner'")
 }
 
 func TestInstanceReferencesSecretIncludesMigrationTarget(t *testing.T) {

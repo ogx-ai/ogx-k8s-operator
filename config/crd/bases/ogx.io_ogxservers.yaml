@@ -663,6 +663,16 @@ spec:
                           Enabled controls whether the DB migration job is enabled.
                           Defaults to true when migrationJob is present.
                         type: boolean
+                      fallbackOwnerSubject:
+                        description: |-
+                          FallbackOwnerSubject is used for source rows with an empty owner_principal.
+                          Required only when such rows exist.
+                        type: string
+                      fallbackTenant:
+                        description: |-
+                          FallbackTenant is used for source rows with an empty tenant_id.
+                          Required only when such rows exist.
+                        type: string
                       targetConnectionString:
                         description: |-
                           TargetConnectionString references a Secret containing the PostgreSQL

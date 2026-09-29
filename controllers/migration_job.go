@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
@@ -48,11 +49,27 @@ const (
 	praxisDatabaseURLEnv         = "PRAXIS_DATABASE_URL"
 	migrationActiveDeadlineSecs  = int64(3600)
 	migrationJobBackoffLimit     = int32(2)
-	// dash as /bin/sh rejects pipefail.
-	migrationJobShell = "set -eu; " +
-		"ogx migrate praxis --dry-run \"$OGX_CONFIG\" && " +
-		"ogx migrate praxis \"$OGX_CONFIG\""
 )
+
+func migrationJobShell(spec *ogxiov1beta1.MigrationJobSpec) string {
+	flags := ""
+	if spec != nil {
+		if spec.FallbackTenant != "" {
+			flags += " --fallback-tenant " + shellQuote(spec.FallbackTenant)
+		}
+		if spec.FallbackOwnerSubject != "" {
+			flags += " --fallback-owner-subject " + shellQuote(spec.FallbackOwnerSubject)
+		}
+	}
+	// dash as /bin/sh rejects pipefail.
+	return "set -eu; " +
+		"ogx migrate praxis --dry-run" + flags + " \"$OGX_CONFIG\" && " +
+		"ogx migrate praxis" + flags + " \"$OGX_CONFIG\""
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
 
 func (r *OGXServerReconciler) reconcileMigration(
 	ctx context.Context,
@@ -412,6 +429,18 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 	}
 	b.WriteString(";image=")
 	b.WriteString(image)
+	if instance.Spec.PraxisMode != nil {
+		if spec := instance.Spec.PraxisMode.MigrationJob; spec != nil {
+			if spec.FallbackTenant != "" {
+				b.WriteString(";fallbackTenant=")
+				b.WriteString(strconv.Quote(spec.FallbackTenant))
+			}
+			if spec.FallbackOwnerSubject != "" {
+				b.WriteString(";fallbackOwnerSubject=")
+				b.WriteString(strconv.Quote(spec.FallbackOwnerSubject))
+			}
+		}
+	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:8]), nil
 }
@@ -658,7 +687,7 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/sh", "-c"},
-		Args:            []string{migrationJobShell},
+		Args:            []string{migrationJobShell(instance.Spec.PraxisMode.MigrationJob)},
 		Env:             migrationJobEnv(instance),
 	}
 	volumes := []corev1.Volume{}
@@ -847,8 +876,19 @@ func (r *OGXServerReconciler) applyMigrationJobFailed(
 	job *batchv1.Job,
 ) {
 	status.Phase = ogxiov1beta1.MigrationPhaseFailed
-	status.Message = fmt.Sprintf("Migration Job %q failed; inspect logs with `oc logs job/%s`. Delete the Job to retry",
-		job.Name, job.Name)
+	status.Message = fmt.Sprintf("Migration Job %q failed", job.Name)
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+			if condition.Reason != "" {
+				status.Message += ": " + condition.Reason
+			}
+			if condition.Message != "" {
+				status.Message += " (" + condition.Message + ")"
+			}
+			break
+		}
+	}
+	status.Message += fmt.Sprintf("; inspect logs with `oc logs job/%s`. Delete the Job to retry", job.Name)
 	alreadyFailed := GetCondition(&instance.Status, ConditionTypeMigrationJobSucceeded)
 	SetMigrationJobSucceededCondition(&instance.Status, false, ReasonMigrationJobFailed, status.Message)
 	SetMigrationValidatedCondition(&instance.Status, false, ReasonMigrationValidationFailed, status.Message)
