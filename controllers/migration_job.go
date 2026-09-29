@@ -333,6 +333,13 @@ func migrationTargetSecretRef(instance *ogxiov1beta1.OGXServer) *ogxiov1beta1.Se
 	return instance.Spec.PraxisMode.MigrationJob.TargetConnectionString
 }
 
+func migrationJobSpec(instance *ogxiov1beta1.OGXServer) *ogxiov1beta1.MigrationJobSpec {
+	if instance == nil || instance.Spec.PraxisMode == nil {
+		return nil
+	}
+	return instance.Spec.PraxisMode.MigrationJob
+}
+
 func (r *OGXServerReconciler) ensureSecretKeyExists(
 	ctx context.Context,
 	namespace string,
@@ -726,7 +733,7 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/sh", "-c"},
-		Args:            []string{migrationJobShell(instance.Spec.PraxisMode.MigrationJob)},
+		Args:            []string{migrationJobShell(migrationJobSpec(instance))},
 		Env:             migrationJobEnv(instance),
 	}
 	volumes := []corev1.Volume{}
