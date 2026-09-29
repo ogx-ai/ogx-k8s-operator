@@ -186,3 +186,54 @@ func setNestedField(obj map[string]any, value any, fields ...string) {
 	}
 	m[fields[len(fields)-1]] = value
 }
+
+func TestCEL_FallbackOwnerSubject(t *testing.T) {
+	ns := createCELTestNamespace(t, "cel-fallback-owner")
+
+	const invalidSubjectMessage = "must contain a non-whitespace character"
+	tests := []struct {
+		name                 string
+		fallbackOwnerSubject string
+		wantError            string
+	}{
+		{
+			name: "subject omitted is valid",
+		},
+		{
+			name:                 "non-whitespace subject is valid",
+			fallbackOwnerSubject: "legacy-owner",
+		},
+		{
+			name:                 "ASCII whitespace only is invalid",
+			fallbackOwnerSubject: "   ",
+			wantError:            invalidSubjectMessage,
+		},
+		{
+			name:                 "Unicode whitespace only is invalid",
+			fallbackOwnerSubject: "\u3000",
+			wantError:            invalidSubjectMessage,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := validOGXServer(uniqueName(), ns)
+			obj.Spec.PraxisMode = &PraxisModeSpec{
+				MigrationJob: &MigrationJobSpec{
+					TargetConnectionString: &SecretKeyRef{Name: "praxis-db", Key: "url"},
+					FallbackOwnerSubject:   tt.fallbackOwnerSubject,
+				},
+			}
+
+			err := k8sClient.Create(context.Background(), obj)
+			if tt.wantError != "" {
+				requireCELError(t, err, tt.wantError)
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected success, got: %v", err)
+			}
+			t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), obj) })
+		})
+	}
+}

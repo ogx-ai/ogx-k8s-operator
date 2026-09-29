@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
@@ -48,11 +49,27 @@ const (
 	praxisDatabaseURLEnv         = "PRAXIS_DATABASE_URL"
 	migrationActiveDeadlineSecs  = int64(3600)
 	migrationJobBackoffLimit     = int32(2)
-	// dash as /bin/sh rejects pipefail.
-	migrationJobShell = "set -eu; " +
-		"ogx migrate praxis --dry-run \"$OGX_CONFIG\" && " +
-		"ogx migrate praxis \"$OGX_CONFIG\""
 )
+
+func migrationJobShell(spec *ogxiov1beta1.MigrationJobSpec) string {
+	flags := ""
+	if spec != nil {
+		if spec.FallbackTenant != "" {
+			flags += " --fallback-tenant " + shellQuote(spec.FallbackTenant)
+		}
+		if spec.FallbackOwnerSubject != "" {
+			flags += " --fallback-owner-subject " + shellQuote(spec.FallbackOwnerSubject)
+		}
+	}
+	// dash as /bin/sh rejects pipefail.
+	return "set -eu; " +
+		"ogx migrate praxis --dry-run" + flags + " \"$OGX_CONFIG\" && " +
+		"ogx migrate praxis" + flags + " \"$OGX_CONFIG\""
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
 
 func (r *OGXServerReconciler) reconcileMigration(
 	ctx context.Context,
@@ -85,6 +102,10 @@ func (r *OGXServerReconciler) reconcileMigration(
 		return nil
 	}
 	if !migrationJobIsCurrent(job, attemptKey) {
+		if job.DeletionTimestamp.IsZero() && jobHasCondition(job, batchv1.JobComplete) {
+			r.observeMigrationJob(instance, job, job.Annotations[migrationAttemptAnnotation])
+			return nil
+		}
 		r.markMigrationWaiting(instance, job, attemptKey,
 			"Waiting for the previous migration Job to finish terminating before starting a new attempt")
 		return nil
@@ -316,6 +337,13 @@ func migrationTargetSecretRef(instance *ogxiov1beta1.OGXServer) *ogxiov1beta1.Se
 	return instance.Spec.PraxisMode.MigrationJob.TargetConnectionString
 }
 
+func migrationJobSpec(instance *ogxiov1beta1.OGXServer) *ogxiov1beta1.MigrationJobSpec {
+	if instance == nil || instance.Spec.PraxisMode == nil {
+		return nil
+	}
+	return instance.Spec.PraxisMode.MigrationJob
+}
+
 func (r *OGXServerReconciler) ensureSecretKeyExists(
 	ctx context.Context,
 	namespace string,
@@ -368,43 +396,16 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 ) (string, error) {
 	var b strings.Builder
 	b.WriteString("src=")
-	if instance.Spec.Storage != nil && instance.Spec.Storage.SQL != nil && instance.Spec.Storage.SQL.ConnectionString != nil {
-		ref := instance.Spec.Storage.SQL.ConnectionString
-		fp, err := r.secretKeyFingerprint(ctx, instance.Namespace, *ref)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(ref.Name)
-		b.WriteByte('/')
-		b.WriteString(ref.Key)
-		b.WriteByte('@')
-		b.WriteString(fp)
+	if err := r.appendMigrationSourceAttemptKey(ctx, &b, instance); err != nil {
+		return "", err
 	}
 	b.WriteString(";dst=")
-	if target := migrationTargetSecretRef(instance); target != nil {
-		dstFP, err := r.secretKeyFingerprint(ctx, instance.Namespace, *target)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(target.Name)
-		b.WriteByte('/')
-		b.WriteString(target.Key)
-		b.WriteByte('@')
-		b.WriteString(dstFP)
+	if err := r.appendMigrationTargetAttemptKey(ctx, &b, instance); err != nil {
+		return "", err
 	}
 	b.WriteString(";cfg=")
-	if runtimeConfig != nil {
-		cfgFP, cfgErr := r.configMapKeyFingerprint(ctx, instance.Namespace, runtimeConfig)
-		if cfgErr != nil {
-			return "", cfgErr
-		}
-		b.WriteString(runtimeConfig.ConfigMapName)
-		b.WriteByte('/')
-		b.WriteString(runtimeConfig.ConfigMapKey)
-		b.WriteByte('@')
-		b.WriteString(cfgFP)
-	} else {
-		b.WriteString(ogxConfigPath)
+	if err := r.appendMigrationConfigAttemptKey(ctx, &b, instance.Namespace, runtimeConfig); err != nil {
+		return "", err
 	}
 	image, err := r.resolveImage(instance.Spec.Distribution)
 	if err != nil {
@@ -412,8 +413,86 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 	}
 	b.WriteString(";image=")
 	b.WriteString(image)
+	appendMigrationFallbackAttemptKey(&b, instance)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:8]), nil
+}
+
+func (r *OGXServerReconciler) appendMigrationSourceAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	instance *ogxiov1beta1.OGXServer,
+) error {
+	if instance.Spec.Storage == nil || instance.Spec.Storage.SQL == nil || instance.Spec.Storage.SQL.ConnectionString == nil {
+		return nil
+	}
+	return r.appendSecretAttemptKey(ctx, b, instance.Namespace, *instance.Spec.Storage.SQL.ConnectionString)
+}
+
+func (r *OGXServerReconciler) appendMigrationTargetAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	instance *ogxiov1beta1.OGXServer,
+) error {
+	if target := migrationTargetSecretRef(instance); target != nil {
+		return r.appendSecretAttemptKey(ctx, b, instance.Namespace, *target)
+	}
+	return nil
+}
+
+func (r *OGXServerReconciler) appendSecretAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	namespace string,
+	ref ogxiov1beta1.SecretKeyRef,
+) error {
+	fp, err := r.secretKeyFingerprint(ctx, namespace, ref)
+	if err != nil {
+		return err
+	}
+	b.WriteString(ref.Name)
+	b.WriteByte('/')
+	b.WriteString(ref.Key)
+	b.WriteByte('@')
+	b.WriteString(fp)
+	return nil
+}
+
+func (r *OGXServerReconciler) appendMigrationConfigAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	namespace string,
+	runtimeConfig *runtimeConfigRef,
+) error {
+	if runtimeConfig == nil {
+		b.WriteString(ogxConfigPath)
+		return nil
+	}
+	cfgFP, err := r.configMapKeyFingerprint(ctx, namespace, runtimeConfig)
+	if err != nil {
+		return err
+	}
+	b.WriteString(runtimeConfig.ConfigMapName)
+	b.WriteByte('/')
+	b.WriteString(runtimeConfig.ConfigMapKey)
+	b.WriteByte('@')
+	b.WriteString(cfgFP)
+	return nil
+}
+
+func appendMigrationFallbackAttemptKey(b *strings.Builder, instance *ogxiov1beta1.OGXServer) {
+	if instance.Spec.PraxisMode != nil {
+		if spec := instance.Spec.PraxisMode.MigrationJob; spec != nil {
+			if spec.FallbackTenant != "" {
+				b.WriteString(";fallbackTenant=")
+				b.WriteString(strconv.Quote(spec.FallbackTenant))
+			}
+			if spec.FallbackOwnerSubject != "" {
+				b.WriteString(";fallbackOwnerSubject=")
+				b.WriteString(strconv.Quote(spec.FallbackOwnerSubject))
+			}
+		}
+	}
 }
 
 func (r *OGXServerReconciler) secretKeyFingerprint(
@@ -658,7 +737,7 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/sh", "-c"},
-		Args:            []string{migrationJobShell},
+		Args:            []string{migrationJobShell(migrationJobSpec(instance))},
 		Env:             migrationJobEnv(instance),
 	}
 	volumes := []corev1.Volume{}
@@ -847,8 +926,19 @@ func (r *OGXServerReconciler) applyMigrationJobFailed(
 	job *batchv1.Job,
 ) {
 	status.Phase = ogxiov1beta1.MigrationPhaseFailed
-	status.Message = fmt.Sprintf("Migration Job %q failed; inspect logs with `oc logs job/%s`. Delete the Job to retry",
-		job.Name, job.Name)
+	status.Message = fmt.Sprintf("Migration Job %q failed", job.Name)
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+			if condition.Reason != "" {
+				status.Message += ": " + condition.Reason
+			}
+			if condition.Message != "" {
+				status.Message += " (" + condition.Message + ")"
+			}
+			break
+		}
+	}
+	status.Message += fmt.Sprintf("; inspect logs with `oc logs job/%s`. Delete the Job to retry", job.Name)
 	alreadyFailed := GetCondition(&instance.Status, ConditionTypeMigrationJobSucceeded)
 	SetMigrationJobSucceededCondition(&instance.Status, false, ReasonMigrationJobFailed, status.Message)
 	SetMigrationValidatedCondition(&instance.Status, false, ReasonMigrationValidationFailed, status.Message)
