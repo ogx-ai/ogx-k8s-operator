@@ -385,43 +385,16 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 ) (string, error) {
 	var b strings.Builder
 	b.WriteString("src=")
-	if instance.Spec.Storage != nil && instance.Spec.Storage.SQL != nil && instance.Spec.Storage.SQL.ConnectionString != nil {
-		ref := instance.Spec.Storage.SQL.ConnectionString
-		fp, err := r.secretKeyFingerprint(ctx, instance.Namespace, *ref)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(ref.Name)
-		b.WriteByte('/')
-		b.WriteString(ref.Key)
-		b.WriteByte('@')
-		b.WriteString(fp)
+	if err := r.appendMigrationSourceAttemptKey(ctx, &b, instance); err != nil {
+		return "", err
 	}
 	b.WriteString(";dst=")
-	if target := migrationTargetSecretRef(instance); target != nil {
-		dstFP, err := r.secretKeyFingerprint(ctx, instance.Namespace, *target)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(target.Name)
-		b.WriteByte('/')
-		b.WriteString(target.Key)
-		b.WriteByte('@')
-		b.WriteString(dstFP)
+	if err := r.appendMigrationTargetAttemptKey(ctx, &b, instance); err != nil {
+		return "", err
 	}
 	b.WriteString(";cfg=")
-	if runtimeConfig != nil {
-		cfgFP, cfgErr := r.configMapKeyFingerprint(ctx, instance.Namespace, runtimeConfig)
-		if cfgErr != nil {
-			return "", cfgErr
-		}
-		b.WriteString(runtimeConfig.ConfigMapName)
-		b.WriteByte('/')
-		b.WriteString(runtimeConfig.ConfigMapKey)
-		b.WriteByte('@')
-		b.WriteString(cfgFP)
-	} else {
-		b.WriteString(ogxConfigPath)
+	if err := r.appendMigrationConfigAttemptKey(ctx, &b, instance.Namespace, runtimeConfig); err != nil {
+		return "", err
 	}
 	image, err := r.resolveImage(instance.Spec.Distribution)
 	if err != nil {
@@ -429,6 +402,74 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 	}
 	b.WriteString(";image=")
 	b.WriteString(image)
+	appendMigrationFallbackAttemptKey(&b, instance)
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:8]), nil
+}
+
+func (r *OGXServerReconciler) appendMigrationSourceAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	instance *ogxiov1beta1.OGXServer,
+) error {
+	if instance.Spec.Storage == nil || instance.Spec.Storage.SQL == nil || instance.Spec.Storage.SQL.ConnectionString == nil {
+		return nil
+	}
+	return r.appendSecretAttemptKey(ctx, b, instance.Namespace, *instance.Spec.Storage.SQL.ConnectionString)
+}
+
+func (r *OGXServerReconciler) appendMigrationTargetAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	instance *ogxiov1beta1.OGXServer,
+) error {
+	if target := migrationTargetSecretRef(instance); target != nil {
+		return r.appendSecretAttemptKey(ctx, b, instance.Namespace, *target)
+	}
+	return nil
+}
+
+func (r *OGXServerReconciler) appendSecretAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	namespace string,
+	ref ogxiov1beta1.SecretKeyRef,
+) error {
+	fp, err := r.secretKeyFingerprint(ctx, namespace, ref)
+	if err != nil {
+		return err
+	}
+	b.WriteString(ref.Name)
+	b.WriteByte('/')
+	b.WriteString(ref.Key)
+	b.WriteByte('@')
+	b.WriteString(fp)
+	return nil
+}
+
+func (r *OGXServerReconciler) appendMigrationConfigAttemptKey(
+	ctx context.Context,
+	b *strings.Builder,
+	namespace string,
+	runtimeConfig *runtimeConfigRef,
+) error {
+	if runtimeConfig == nil {
+		b.WriteString(ogxConfigPath)
+		return nil
+	}
+	cfgFP, err := r.configMapKeyFingerprint(ctx, namespace, runtimeConfig)
+	if err != nil {
+		return err
+	}
+	b.WriteString(runtimeConfig.ConfigMapName)
+	b.WriteByte('/')
+	b.WriteString(runtimeConfig.ConfigMapKey)
+	b.WriteByte('@')
+	b.WriteString(cfgFP)
+	return nil
+}
+
+func appendMigrationFallbackAttemptKey(b *strings.Builder, instance *ogxiov1beta1.OGXServer) {
 	if instance.Spec.PraxisMode != nil {
 		if spec := instance.Spec.PraxisMode.MigrationJob; spec != nil {
 			if spec.FallbackTenant != "" {
@@ -441,8 +482,6 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 			}
 		}
 	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return hex.EncodeToString(sum[:8]), nil
 }
 
 func (r *OGXServerReconciler) secretKeyFingerprint(
