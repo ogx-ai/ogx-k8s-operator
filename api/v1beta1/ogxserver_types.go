@@ -503,11 +503,15 @@ type MigrationJobSpec struct {
 	// FallbackTenant is used for source rows with an empty tenant_id.
 	// Required only when such rows exist.
 	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	// +kubebuilder:validation:Pattern="^[a-z0-9][a-z0-9_-]{0,127}$"
 	FallbackTenant string `json:"fallbackTenant,omitempty"`
 
 	// FallbackOwnerSubject is used for source rows with an empty owner_principal.
 	// Required only when such rows exist.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self.trim() != ''",message="must contain a non-whitespace character"
 	FallbackOwnerSubject string `json:"fallbackOwnerSubject,omitempty"`
 }
 

@@ -667,11 +667,17 @@ spec:
                         description: |-
                           FallbackOwnerSubject is used for source rows with an empty owner_principal.
                           Required only when such rows exist.
+                        minLength: 1
                         type: string
+                        x-kubernetes-validations:
+                        - message: must contain a non-whitespace character
+                          rule: self.trim() != ''
                       fallbackTenant:
                         description: |-
                           FallbackTenant is used for source rows with an empty tenant_id.
                           Required only when such rows exist.
+                        maxLength: 128
+                        pattern: ^[a-z0-9][a-z0-9_-]{0,127}$
                         type: string
                       targetConnectionString:
                         description: |-
