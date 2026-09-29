@@ -806,6 +806,8 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `enabled` _boolean_ | Enabled controls whether the DB migration job is enabled.<br />Defaults to true when migrationJob is present. | true |  |
 | `targetConnectionString` _[SecretKeyRef](#secretkeyref)_ | TargetConnectionString references a Secret containing the PostgreSQL<br />connection string that the migration Job writes to (PRAXIS_DATABASE_URL).<br />Required when migrationJob is set. Must point at the Praxis database, not<br />the OGX source: both default schemas include openai_conversations.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  | Required: \{\} <br /> |
+| `fallbackTenant` _string_ | FallbackTenant is used for source rows with an empty tenant_id.<br />Required only when such rows exist. |  | MaxLength: 128 <br />Pattern: `^[a-z0-9][a-z0-9_-]\{0,127\}$` <br /> |
+| `fallbackOwnerSubject` _string_ | FallbackOwnerSubject is used for source rows with an empty owner_principal.<br />Required only when such rows exist. |  | MinLength: 1 <br /> |
 
 #### MigrationPhase
 

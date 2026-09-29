@@ -23,6 +23,11 @@ ogx migrate praxis --dry-run "$OGX_CONFIG"
 ogx migrate praxis "$OGX_CONFIG"
 ```
 
+When configured, the Job passes `--fallback-tenant` and/or
+`--fallback-owner-subject` to both commands. `fallbackTenant` is needed only
+when source rows have an empty `tenant_id`; `fallbackOwnerSubject` is needed
+only when source rows have an empty `owner_principal`.
+
 - Config: operator-generated ConfigMap mounted at `/etc/ogx/config.yaml` when the server
   would mount one; otherwise the image's `/etc/ogx/config.yaml`.
 - Source DB: `spec.storage.sql.connectionString` (OGX Postgres Secret).
@@ -48,7 +53,7 @@ ogx migrate praxis "$OGX_CONFIG"
 | Condition | Meaning |
 |-----------|---------|
 | `MigrationPreflightReady` | OGX Postgres Secret exists (`spec.storage.sql`, `ogx.io/watch=true`); Praxis `targetConnectionString` Secret exists and is a different database than the OGX source; ConfigMap if the operator mounts one; CA bundle ConfigMap if TLS trust is configured |
-| `MigrationJobSucceeded` | Kubernetes Job reached condition `Complete` |
+| `MigrationJobSucceeded` | Kubernetes Job reached condition `Complete`; failures include the Job condition reason and message, plus a command to inspect CLI logs |
 | `MigrationValidated` | Same Job: CLI dry-run and live migrate exited 0 |
 | `PraxisCutoverReady` | Cutover gate — only True after `MigrationValidated` |
 | `SoftRollbackAvailable` | Soft rollback only; includes data-loss warning |
@@ -60,15 +65,18 @@ startup-guard or post-write inventory check.
 
 - Job name is `<ogxserver-name>-praxis-migration`, owned by the OGXServer.
 - Attempt fingerprint: OGX (and Praxis, if distinct) Secret **content**, mounted ConfigMap
-  content when present, and image.
+  content when present, image, and configured fallback values.
 - Same in-flight, succeeded, or failed attempt is not duplicated. A Failed Job is kept so
   logs remain: `oc logs job/<ogxserver-name>-praxis-migration`.
 - Pod retries only (`backoffLimit=2`). After terminal Job `Failed`, delete the Job to retry.
-  Changing Secret/config/image content also starts a new attempt. Stale Jobs are deleted
-  with foreground propagation so replacement waits until dependent Pods are gone.
+  Changing Secret/config/image content or fallback values starts a new attempt while
+  migration is pending or failed.
+  Stale Jobs are deleted with foreground propagation so replacement waits until
+  dependent Pods are gone.
 - A Job with this name that is not owned by the OGXServer is left untouched and blocks
   migration until it is deleted.
 - Do not delete a succeeded Job; that attempt stays Validated and is not recreated.
+  Changing fallback values or other attempt inputs after validation does not rerun migration.
 
 The Job pod uses the same ServiceAccount override, FSGroup, and container resources as the
 server workload.
@@ -112,6 +120,8 @@ spec:
       targetConnectionString:
         name: praxis-pg
         key: url
+      # fallbackTenant: target-tenant
+      # fallbackOwnerSubject: target-owner
 ```
 
 The OGX Postgres Secret (`spec.storage.sql.connectionString`) and the Praxis
