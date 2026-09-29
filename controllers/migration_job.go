@@ -102,6 +102,10 @@ func (r *OGXServerReconciler) reconcileMigration(
 		return nil
 	}
 	if !migrationJobIsCurrent(job, attemptKey) {
+		if job.DeletionTimestamp.IsZero() && jobHasCondition(job, batchv1.JobComplete) {
+			r.observeMigrationJob(instance, job, job.Annotations[migrationAttemptAnnotation])
+			return nil
+		}
 		r.markMigrationWaiting(instance, job, attemptKey,
 			"Waiting for the previous migration Job to finish terminating before starting a new attempt")
 		return nil

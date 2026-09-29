@@ -478,6 +478,53 @@ func TestReconcileMigration_SucceededJobNotRecreatedIfDeleted(t *testing.T) {
 	require.True(t, IsConditionTrue(&inst.Status, ConditionTypePraxisCutoverReady))
 }
 
+func TestReconcileMigration_CompletedJobRemainsValidatedAfterFallbackChange(t *testing.T) {
+	for _, tt := range []struct {
+		name                        string
+		observeCompletionBeforeEdit bool
+	}{
+		{name: "completion already observed", observeCompletionBeforeEdit: true},
+		{name: "completion not yet observed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			inst := migrationInstance(true, true)
+			r, _ := migrationReconciler(t, migrationObjects()...)
+			require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+			job := &batchv1.Job{}
+			jobKey := client.ObjectKey{Name: "demo-praxis-migration", Namespace: "ogx"}
+			require.NoError(t, r.Get(context.Background(), jobKey, job))
+			completedAttemptKey := job.Annotations[migrationAttemptAnnotation]
+			markJobComplete(job)
+			require.NoError(t, r.Status().Update(context.Background(), job))
+			if tt.observeCompletionBeforeEdit {
+				require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+				require.Equal(t, ogxiov1beta1.MigrationPhaseValidated, inst.Status.Migration.Phase)
+			}
+
+			inst.Spec.PraxisMode.MigrationJob.FallbackTenant = "target-tenant"
+			inst.Spec.PraxisMode.MigrationJob.FallbackOwnerSubject = "target-owner"
+			inst.Generation++
+			newAttemptKey, err := r.migrationAttemptKey(context.Background(), inst, runtimeCfg())
+			require.NoError(t, err)
+			require.NotEqual(t, completedAttemptKey, newAttemptKey)
+
+			for range 2 {
+				require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+				require.Equal(t, ogxiov1beta1.MigrationPhaseValidated, inst.Status.Migration.Phase)
+				require.Equal(t, completedAttemptKey, inst.Status.Migration.AttemptKey)
+				require.True(t, IsConditionTrue(&inst.Status, ConditionTypeMigrationValidated))
+				require.True(t, IsConditionTrue(&inst.Status, ConditionTypePraxisCutoverReady))
+				require.False(t, migrationNeedsRequeue(inst))
+			}
+
+			require.NoError(t, r.Get(context.Background(), jobKey, job))
+			require.True(t, jobHasCondition(job, batchv1.JobComplete))
+			require.Equal(t, completedAttemptKey, job.Annotations[migrationAttemptAnnotation])
+		})
+	}
+}
+
 func TestReconcileMigration_DeletingJobIsNotObservedAsSuccess(t *testing.T) {
 	inst := migrationInstance(true, true)
 	probe, _ := migrationReconciler(t, migrationObjects()...)

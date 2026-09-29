@@ -76,6 +76,7 @@ startup-guard or post-write inventory check.
 - A Job with this name that is not owned by the OGXServer is left untouched and blocks
   migration until it is deleted.
 - Do not delete a succeeded Job; that attempt stays Validated and is not recreated.
+  Changing fallback values or other attempt inputs after validation does not rerun migration.
 
 The Job pod uses the same ServiceAccount override, FSGroup, and container resources as the
 server workload.
