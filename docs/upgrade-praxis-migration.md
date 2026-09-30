@@ -35,6 +35,13 @@ only when source rows have an empty `owner_principal`.
 - Credentials are injected via `SecretKeyRef` only.
 - Job success is CLI exit 0. The CLI may skip unconfigured store phases with warnings and still exit 0.
 
+The migration Job currently obtains its OGX source DSN only from the deprecated
+`spec.storage.sql.connectionString` field. That field cannot be combined with
+the named `spec.storage.backends` form. Keep the legacy SQL form through a
+migration that needs this Job; the Job's source handling must be updated before
+the field can be removed. After migration, move OGX connection details into
+`sql_postgres` fields and reference the database password through a Secret.
+
 ## Orchestration
 
 ```

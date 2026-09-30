@@ -118,17 +118,62 @@ Notes:
   CEL rules, and webhook logic.
 - `-validate` uses `distributions.json` to validate `spec.distribution.name`.
 
-## Storage Example (Postgres)
+## Named Storage Backends (Postgres)
+
+Use `spec.storage.backends` to configure OGX's structured `kv_postgres` and
+`sql_postgres` backends. API fields use Kubernetes-style camelCase; generated
+OGX config uses snake_case. Host, database, user, TLS, and path values accept
+literal strings or OGX environment substitutions. For example, the shipped
+`POSTGRES_*` convention works as shown below, and custom names such as
+`${env.DATABASE_HOST}` work the same way. `port` accepts either an integer or
+an environment substitution. Passwords are Secret references and are never
+written into the generated config as plaintext.
+Each password Secret is exposed through an operator-generated environment
+variable scoped to its backend. If `password` is omitted, the generated backend
+uses passwordless authentication; it does not read `POSTGRES_PASSWORD` itself.
+Integer pool settings accept integers or OGX environment substitutions. For the
+boolean SQL `pool_pre_ping`, set `poolPrePing` to a literal boolean or use
+`poolPrePingEnv` with an OGX environment substitution.
+
+If `stores` is omitted, the operator creates these mappings:
+
+| Logical store | Backend family | Config |
+| --- | --- | --- |
+| `metadata` | KV | namespace `registry` |
+| `inference` | SQL | table `inference_store` |
+| `conversations` | SQL | table `openai_conversations` |
+| `prompts` | SQL | table `prompts` |
+| `connectors` | SQL | table `connectors` |
+
+The KV and SQL selections are inferred only when exactly one backend of each
+family is configured. Missing or multiple backends of either family produce a
+config-generation error. An explicit `stores` map is complete: omitted store
+entries are not filled in. Set `stores: {}` to request no logical stores.
+Known stores are checked against their expected backend family, and every
+mapping must reference a configured backend.
+OGX's `StackConfig` supplies defaults for omitted store fields, so generated
+explicit maps set every supported but omitted logical store to `null`. This
+keeps a partial map complete after OGX validation; `stores: {}` therefore
+disables all stores. Supported names are `metadata`, `inference`,
+`conversations`, `responses`, `prompts`, `connectors`, and `vector_stores`.
+In Praxis mode, include `vector_stores` explicitly when a configured `vector_io`
+provider requires it; the operator's automatic Praxis mapping is used only when
+the store map is omitted.
+
+These defaults are an intentional change for the named form: `prompts` maps to
+SQL and `connectors` is added. The deprecated `kv`/`sql` converter keeps its
+existing KV-form prompt entry during the compatibility period; OGX currently
+migrates that namespace-style entry to a SQL table while validating its config.
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: pg-conn
+  name: ogx-db
   labels:
     ogx.io/watch: "true"
 stringData:
-  connection-string: "postgresql://user:pass@postgres:5432/ogx"
+  password: "<database-password>"
 ---
 apiVersion: ogx.io/v1beta1
 kind: OGXServer
@@ -138,12 +183,65 @@ spec:
   distribution:
     name: starter
   storage:
-    sql:
-      type: postgres
-      connectionString:
-        name: pg-conn
-        key: connection-string
+    backends:
+      pg_kv:
+        type: kv_postgres
+        host: ${env.POSTGRES_HOST:=localhost}
+        port: ${env.POSTGRES_PORT:=5432}
+        db: ${env.POSTGRES_DB:=ogx}
+        user: ${env.POSTGRES_USER:=ogx}
+        password:
+          name: ogx-db
+          key: password
+        tableName: ${env.POSTGRES_TABLE_NAME:=ogx_kvstore}
+        poolSize: 5
+        maxOverflow: 10
+        commandTimeout: 30
+      pg_sql:
+        type: sql_postgres
+        host: ${env.POSTGRES_HOST:=localhost}
+        port: ${env.POSTGRES_PORT:=5432}
+        db: ${env.POSTGRES_DB:=ogx}
+        user: ${env.POSTGRES_USER:=ogx}
+        password:
+          name: ogx-db
+          key: password
+        poolSize: 10
+        maxOverflow: 20
+        poolRecycle: 3600
+        poolPrePing: true
 ```
+
+To customize or restrict the store set, provide the complete map explicitly:
+
+```yaml
+storage:
+  backends:
+    archive:
+      type: sql_postgres
+      host: ${env.ARCHIVE_HOST}
+      port: 5432
+      db: ogx_archive
+      user: ogx
+  stores:
+    conversations:
+      backend: archive
+      tableName: conversations_v2
+```
+
+The deprecated `storage.kv` and `storage.sql` fields remain available for
+compatibility with SQLite, Redis, and existing SQL DSN configurations. Do not
+combine those fields with `backends` or `stores`. Legacy
+`storage.sql.connectionString` remains in use by the Praxis migration Job as
+its OGX source credential; that Job currently requires the legacy SQL form.
+Keep it through a migration that needs the Job. After migration, move the
+connection details into the structured backend fields and put the password in
+a watched Secret. The new named form emits `host`, `port`, `db`, `user`, and
+other OGX fields, and never emits the legacy `connection_string` property.
+The operator does not resolve or parse an old DSN Secret to populate those
+fields; copy the connection details into the structured values during migration.
+
+If the entire `storage` block is omitted, the base config's storage is kept.
 
 ## Status and Conditions
 

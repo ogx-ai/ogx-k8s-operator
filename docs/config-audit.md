@@ -126,19 +126,13 @@ The product build includes `file_processors` in its API list and a `pypdf` provi
 
 ---
 
-## P2b — Storage gaps
+## P2b — Storage compatibility notes
 
-### 20. `kv_postgres` backend not supported
+### 20. Named Postgres backends and explicit stores
 
-The product build uses `kv_postgres` for its KV backend (individual host/port/db/user/password fields). The operator's KV storage only supports `sqlite` and `redis` (`pkg/config/storage.go:53-67`). When users rely on the product's base config, the KV postgres config passes through unchanged, but they can't configure it via the CRD.
+Resolved for the named storage API: `spec.storage.backends` supports `kv_postgres` and `sql_postgres` with structured fields, and `spec.storage.stores` provides explicit logical-store mappings. Omitted stores generate metadata, inference, conversations, prompts, and connectors mappings when one KV and one SQL backend are configured. `responses` and `vector_stores` remain user- or Praxis-configured stores rather than generated defaults.
 
-### 21. SQL postgres uses `connection_string` but upstream uses individual fields
-
-The operator generates `connection_string` (`pkg/config/storage.go:72-76`), but `PostgresSqlStoreConfig` uses `host`, `port`, `db`, `user`, `password`, `pool_size`, `max_overflow`, `pool_recycle`. These are incompatible schemas — `connection_string` is not a field on the upstream class. (Needs verification — there may be an adapter that accepts connection strings.)
-
-### 22. Missing stores: `connectors`, `responses`, `vector_stores`
-
-`pkg/config/storage.go:95-114` — `defaultStores` generates 4 stores (metadata, inference, conversations, prompts). The upstream `ServerStoresConfig` also defines `connectors` (with a default), `responses`, and `vector_stores`.
+The deprecated `spec.storage.sql.connectionString` path remains for compatibility and for the Praxis migration Job's OGX source DSN. It is kept separate from the named form; only the named form emits the structured OGX backend fields.
 
 ---
 

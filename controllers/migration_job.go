@@ -251,7 +251,16 @@ func (r *OGXServerReconciler) runMigrationPreflight(
 }
 
 func migrationSourceSecretRef(instance *ogxiov1beta1.OGXServer) (ogxiov1beta1.SecretKeyRef, error) {
-	if instance.Spec.Storage == nil || instance.Spec.Storage.SQL == nil {
+	if instance.Spec.Storage == nil {
+		return ogxiov1beta1.SecretKeyRef{}, errors.New("failed to pass migration preflight: spec.storage.sql must be configured")
+	}
+	if instance.Spec.Storage.Backends != nil || instance.Spec.Storage.Stores != nil {
+		return ogxiov1beta1.SecretKeyRef{}, errors.New(
+			"failed to pass migration preflight: the Praxis migration Job currently requires spec.storage.sql.connectionString; " +
+				"named spec.storage.backends are not supported as OGX source credentials",
+		)
+	}
+	if instance.Spec.Storage.SQL == nil {
 		return ogxiov1beta1.SecretKeyRef{}, errors.New("failed to pass migration preflight: spec.storage.sql must be configured")
 	}
 	if instance.Spec.Storage.SQL.Type != "postgres" {

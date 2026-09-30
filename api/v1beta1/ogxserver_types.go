@@ -165,7 +165,7 @@ type ResourcesSpec struct {
 	Models []ModelConfig `json:"models,omitempty"`
 }
 
-// KVStorageSpec configures the key-value storage backend.
+// KVStorageSpec configures the legacy key-value storage backend.
 // +kubebuilder:validation:XValidation:rule="self.type != 'redis' || has(self.endpoint)",message="endpoint is required when type is redis"
 // +kubebuilder:validation:XValidation:rule="!has(self.endpoint) || self.type == 'redis'",message="endpoint is only valid when type is redis"
 // +kubebuilder:validation:XValidation:rule="!has(self.password) || self.type == 'redis'",message="password is only valid when type is redis"
@@ -185,7 +185,9 @@ type KVStorageSpec struct {
 	Password *SecretKeyRef `json:"password,omitempty"`
 }
 
-// SQLStorageSpec configures the relational storage backend.
+// SQLStorageSpec configures the legacy relational storage backend. The
+// connectionString Secret is also used as the OGX source credential by the
+// Praxis migration Job while that Job still supports only DSN-based sources.
 // +kubebuilder:validation:XValidation:rule="self.type != 'postgres' || has(self.connectionString)",message="connectionString is required when type is postgres"
 // +kubebuilder:validation:XValidation:rule="!has(self.connectionString) || self.type == 'postgres'",message="connectionString is only valid when type is postgres"
 type SQLStorageSpec struct {
@@ -196,20 +198,206 @@ type SQLStorageSpec struct {
 	Type string `json:"type,omitempty"`
 	// ConnectionString references a Secret containing the database connection string.
 	// Required when type is "postgres".
+	// This deprecated field remains the Praxis migration Job's OGX source credential;
+	// it is not translated to the structured host/port/db/user fields.
 	// The Secret must be in the same namespace as the OGXServer
 	// and must have the label ogx.io/watch: "true".
 	// +optional
 	ConnectionString *SecretKeyRef `json:"connectionString,omitempty"`
 }
 
-// StateStorageSpec groups key-value and SQL storage backends.
+// StateStorageSpec configures state storage backends and logical store mappings.
+// The named backends form is mutually exclusive with the deprecated kv/sql form.
+// +kubebuilder:validation:XValidation:rule="!(has(self.backends)||has(self.stores))||!(has(self.kv)||has(self.sql))",message="named and deprecated storage fields cannot be mixed"
 type StateStorageSpec struct {
-	// KV configures key-value storage.
+	// Backends defines named OGX storage backends. Connection values may be literals
+	// or OGX environment substitutions such as ${env.POSTGRES_HOST:=localhost}.
+	// Passwords must be supplied through Secret references.
+	// +optional
+	Backends map[string]StorageBackendSpec `json:"backends,omitempty"`
+	// Stores configures OGX's fixed set of logical stores. If omitted with Backends,
+	// the operator generates standard mappings when exactly one KV and one SQL
+	// backend are configured. An explicitly empty object means no stores; omitted
+	// store fields are disabled and are not filled from defaults.
+	// +optional
+	Stores *StorageStoresSpec `json:"stores,omitempty"`
+	// KV configures key-value storage using the deprecated compatibility form.
 	// +optional
 	KV *KVStorageSpec `json:"kv,omitempty"`
-	// SQL configures SQL storage.
+	// SQL configures SQL storage using the deprecated compatibility form.
 	// +optional
 	SQL *SQLStorageSpec `json:"sql,omitempty"`
+}
+
+// StorageBackendSpec configures a named OGX Postgres backend.
+// +kubebuilder:validation:XValidation:rule="!has(self.tableName) || self.type == 'kv_postgres'",message="tableName is only valid for kv_postgres backends"
+// +kubebuilder:validation:XValidation:rule="!has(self.tableName)||self.tableName.startsWith('${env.')||self.tableName.matches('^[A-Za-z_][A-Za-z0-9_]{0,62}$')",message="invalid"
+// +kubebuilder:validation:XValidation:rule="!has(self.commandTimeout) || self.type == 'kv_postgres'",message="commandTimeout is only valid for kv_postgres backends"
+// +kubebuilder:validation:XValidation:rule="!has(self.poolRecycle) || self.type == 'sql_postgres'",message="poolRecycle is only valid for sql_postgres backends"
+// +kubebuilder:validation:XValidation:rule="!has(self.poolPrePing) || self.type == 'sql_postgres'",message="poolPrePing is only valid for sql_postgres backends"
+// +kubebuilder:validation:XValidation:rule="!has(self.poolPrePingEnv) || self.type == 'sql_postgres'",message="poolPrePingEnv is only valid for sql_postgres backends"
+// +kubebuilder:validation:XValidation:rule="!(has(self.poolPrePing) && has(self.poolPrePingEnv))",message="set only one of poolPrePing and poolPrePingEnv"
+// +kubebuilder:validation:XValidation:rule="!has(self.poolPrePingEnv) || self.poolPrePingEnv.startsWith('${env.')",message="poolPrePingEnv must be an OGX environment substitution"
+//nolint:lll // Kubebuilder requires this XValidation marker on one comment line.
+// +kubebuilder:validation:XValidation:rule="self.type != 'sql_postgres' || !has(self.sslMode) || self.sslMode.startsWith('${env.') || self.sslMode in ['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full']",message="sslMode for sql_postgres must be a supported SSL mode or an OGX environment substitution"
+type StorageBackendSpec struct {
+	// Type is the OGX backend type.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=kv_postgres;sql_postgres
+	Type string `json:"type"`
+	// Host is a literal hostname or OGX environment substitution. Defaults to localhost.
+	// +kubebuilder:default:="localhost"
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host,omitempty"`
+	// Port is a port number or an OGX environment substitution. Defaults to 5432.
+	// +kubebuilder:default:=5432
+	// +kubebuilder:validation:XIntOrString
+	Port *intstr.IntOrString `json:"port,omitempty"`
+	// DB is the database name, as a literal or OGX environment substitution. Defaults to ogx.
+	// +kubebuilder:default:="ogx"
+	// +kubebuilder:validation:MinLength=1
+	DB string `json:"db,omitempty"`
+	// User is the database user, as a literal or OGX environment substitution.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	User string `json:"user"`
+	// Password references a Secret key. Plaintext passwords are not accepted.
+	// If omitted, OGX configures passwordless database authentication.
+	// +optional
+	Password *SecretKeyRef `json:"password,omitempty"`
+	// SSLMode configures PostgreSQL TLS behavior. For sql_postgres, accepted literal
+	// values are disable, allow, prefer, require, verify-ca, and verify-full. It may
+	// also be an OGX environment substitution that resolves to one of these values.
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+	// CACertPath is a literal path or OGX environment substitution.
+	// +optional
+	CACertPath string `json:"caCertPath,omitempty"`
+	// TableName is the KV table name. It is only valid for kv_postgres.
+	// +optional
+	TableName string `json:"tableName,omitempty"`
+	// PoolSize configures the connection pool size. It accepts an integer or OGX
+	// environment substitution. OGX defaults to 5 for KV and 10 for SQL.
+	// +optional
+	// +kubebuilder:validation:XIntOrString
+	PoolSize *intstr.IntOrString `json:"poolSize,omitempty"`
+	// MaxOverflow configures the number of connections allowed beyond poolSize.
+	// It accepts an integer or OGX environment substitution. OGX defaults to 10 for
+	// KV and 20 for SQL.
+	// +optional
+	// +kubebuilder:validation:XIntOrString
+	MaxOverflow *intstr.IntOrString `json:"maxOverflow,omitempty"`
+	// CommandTimeout configures the KV Postgres command timeout in seconds. OGX
+	// defaults it to 30 and requires a value greater than zero. It accepts an
+	// integer or OGX environment substitution; quote fractional values.
+	// +optional
+	// +kubebuilder:validation:XIntOrString
+	CommandTimeout *intstr.IntOrString `json:"commandTimeout,omitempty"`
+	// PoolRecycle configures the SQL Postgres connection recycle interval in seconds.
+	// Set -1 to disable recycling; OGX defaults it to 3600. It accepts an integer or
+	// OGX environment substitution and is only valid for sql_postgres.
+	// +optional
+	// +kubebuilder:validation:XIntOrString
+	PoolRecycle *intstr.IntOrString `json:"poolRecycle,omitempty"`
+	// PoolPrePing enables SQL Postgres connection pre-ping. OGX defaults it to true.
+	// It is only valid for sql_postgres.
+	// +optional
+	PoolPrePing *bool `json:"poolPrePing,omitempty"`
+	// PoolPrePingEnv supplies pool_pre_ping from an OGX environment substitution,
+	// such as ${env.POSTGRES_POOL_PRE_PING:=true}. Use this instead of PoolPrePing.
+	// +optional
+	PoolPrePingEnv string `json:"poolPrePingEnv,omitempty"`
+}
+
+// StorageStoresSpec configures OGX's fixed set of logical stores.
+type StorageStoresSpec struct {
+	// Metadata maps OGX metadata to a KV backend.
+	// +optional
+	Metadata *KVStoreMappingSpec `json:"metadata,omitempty"`
+	// Inference maps inference payloads to a SQL backend.
+	// +optional
+	Inference *InferenceStoreMappingSpec `json:"inference,omitempty"`
+	// Conversations maps conversation history to a SQL backend.
+	// +optional
+	Conversations *SQLStoreMappingSpec `json:"conversations,omitempty"`
+	// Responses maps OpenAI responses to a SQL backend. OGX defaults the table
+	// name to openai_responses when it is omitted.
+	// +optional
+	Responses *ResponsesStoreMappingSpec `json:"responses,omitempty"`
+	// Prompts maps prompts to a SQL backend.
+	// +optional
+	Prompts *SQLStoreMappingSpec `json:"prompts,omitempty"`
+	// Connectors maps connectors to a SQL backend.
+	// +optional
+	Connectors *SQLStoreMappingSpec `json:"connectors,omitempty"`
+	// VectorStores maps vector-store metadata to a SQL backend. The operator emits
+	// this API field to OGX as vector_stores.
+	// +optional
+	VectorStores *SQLStoreMappingSpec `json:"vectorStores,omitempty"`
+}
+
+// KVStoreMappingSpec maps a logical KV store to a named backend.
+type KVStoreMappingSpec struct {
+	// Backend names a key in spec.storage.backends.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Backend string `json:"backend"`
+	// Namespace is the key prefix used by the metadata KV store.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+}
+
+// SQLStoreMappingSpec maps a logical SQL store to a named backend.
+type SQLStoreMappingSpec struct {
+	// Backend names a key in spec.storage.backends.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Backend string `json:"backend"`
+	// TableName names the SQL table used by this store.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	TableName string `json:"tableName"`
+}
+
+// InferenceStoreMappingSpec maps inference payloads to a SQL backend.
+type InferenceStoreMappingSpec struct {
+	// Backend names a key in spec.storage.backends.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Backend string `json:"backend"`
+	// TableName names the SQL table used by this store.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	TableName string `json:"tableName"`
+	// MaxWriteQueueSize configures the inference store write queue.
+	// +optional
+	MaxWriteQueueSize *int32 `json:"maxWriteQueueSize,omitempty"`
+	// NumWriters configures the inference store writer count.
+	// +optional
+	NumWriters *int32 `json:"numWriters,omitempty"`
+	// Enabled controls whether the inference store persists payloads.
+	// It is only valid for the inference store. OGX defaults it to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// ResponsesStoreMappingSpec maps OpenAI responses to a SQL backend.
+type ResponsesStoreMappingSpec struct {
+	// Backend names a key in spec.storage.backends.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Backend string `json:"backend"`
+	// TableName names the SQL table used by this store. OGX defaults it to
+	// openai_responses when omitted.
+	// +optional
+	TableName string `json:"tableName,omitempty"`
+	// MaxWriteQueueSize configures the response store write queue.
+	// +optional
+	MaxWriteQueueSize *int32 `json:"maxWriteQueueSize,omitempty"`
+	// NumWriters configures the response store writer count.
+	// +optional
+	NumWriters *int32 `json:"numWriters,omitempty"`
 }
 
 // TLSSpec defines TLS termination configuration for the server.
