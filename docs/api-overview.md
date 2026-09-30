@@ -679,6 +679,21 @@ _Appears in:_
 | `watsonx` _[WatsonxProvider](#watsonxprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 | `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
+#### InferenceStoreMappingSpec
+
+InferenceStoreMappingSpec maps inference payloads to a SQL backend.
+
+_Appears in:_
+- [StorageStoresSpec](#storagestoresspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `backend` _string_ | Backend names a key in spec.storage.backends. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `tableName` _string_ | TableName names the SQL table used by this store. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `maxWriteQueueSize` _integer_ | MaxWriteQueueSize configures the inference store write queue. |  |  |
+| `numWriters` _integer_ | NumWriters configures the inference store writer count. |  |  |
+| `enabled` _boolean_ | Enabled controls whether the inference store persists payloads.<br />It is only valid for the inference store. OGX defaults it to true. |  |  |
+
 #### InlineAutoFileProcessorProvider
 
 InlineAutoFileProcessorProvider configures inline::auto for file_processors.
@@ -781,7 +796,7 @@ _Appears in:_
 
 #### KVStorageSpec
 
-KVStorageSpec configures the key-value storage backend.
+KVStorageSpec configures the legacy key-value storage backend.
 
 _Appears in:_
 - [StateStorageSpec](#statestoragespec)
@@ -791,6 +806,18 @@ _Appears in:_
 | `type` _string_ | Type is the KV storage backend type. | sqlite | Enum: [sqlite redis] <br /> |
 | `endpoint` _string_ | Endpoint is the Redis endpoint URL. Required when type is "redis". |  |  |
 | `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret for Redis authentication.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+
+#### KVStoreMappingSpec
+
+KVStoreMappingSpec maps a logical KV store to a named backend.
+
+_Appears in:_
+- [StorageStoresSpec](#storagestoresspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `backend` _string_ | Backend names a key in spec.storage.backends. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `namespace` _string_ | Namespace is the key prefix used by the metadata KV store. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### MigrationJobSpec
 
@@ -1280,6 +1307,20 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `custom` _[CustomProvider](#customprovider) array_ |  |  | MaxItems: 100 <br />MinItems: 1 <br /> |
 
+#### ResponsesStoreMappingSpec
+
+ResponsesStoreMappingSpec maps OpenAI responses to a SQL backend.
+
+_Appears in:_
+- [StorageStoresSpec](#storagestoresspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `backend` _string_ | Backend names a key in spec.storage.backends. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `tableName` _string_ | TableName names the SQL table used by this store. OGX defaults it to<br />openai_responses when omitted. |  |  |
+| `maxWriteQueueSize` _integer_ | MaxWriteQueueSize configures the response store write queue. |  |  |
+| `numWriters` _integer_ | NumWriters configures the response store writer count. |  |  |
+
 #### RoutedProviderBase
 
 RoutedProviderBase contains fields common to all routed (non-singleton) provider instances.
@@ -1322,7 +1363,9 @@ _Appears in:_
 
 #### SQLStorageSpec
 
-SQLStorageSpec configures the relational storage backend.
+SQLStorageSpec configures the legacy relational storage backend. The
+connectionString Secret is also used as the OGX source credential by the
+Praxis migration Job while that Job still supports only DSN-based sources.
 
 _Appears in:_
 - [StateStorageSpec](#statestoragespec)
@@ -1330,7 +1373,19 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `type` _string_ | Type is the SQL storage backend type. | sqlite | Enum: [sqlite postgres] <br /> |
-| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres".<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+| `connectionString` _[SecretKeyRef](#secretkeyref)_ | ConnectionString references a Secret containing the database connection string.<br />Required when type is "postgres".<br />This deprecated field remains the Praxis migration Job's OGX source credential;<br />it is not translated to the structured host/port/db/user fields.<br />The Secret must be in the same namespace as the OGXServer<br />and must have the label ogx.io/watch: "true". |  |  |
+
+#### SQLStoreMappingSpec
+
+SQLStoreMappingSpec maps a logical SQL store to a named backend.
+
+_Appears in:_
+- [StorageStoresSpec](#storagestoresspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `backend` _string_ | Backend names a key in spec.storage.backends. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `tableName` _string_ | TableName names the SQL table used by this store. |  | MinLength: 1 <br />Required: \{\} <br /> |
 
 #### SecretKeyRef
 
@@ -1353,6 +1408,7 @@ _Appears in:_
 - [QdrantProvider](#qdrantprovider)
 - [S3Provider](#s3provider)
 - [SQLStorageSpec](#sqlstoragespec)
+- [StorageBackendSpec](#storagebackendspec)
 - [TavilySearchProvider](#tavilysearchprovider)
 - [VLLMProvider](#vllmprovider)
 - [WatsonxProvider](#watsonxprovider)
@@ -1364,15 +1420,60 @@ _Appears in:_
 
 #### StateStorageSpec
 
-StateStorageSpec groups key-value and SQL storage backends.
+StateStorageSpec configures state storage backends and logical store mappings.
+The named backends form is mutually exclusive with the deprecated kv/sql form.
 
 _Appears in:_
 - [OGXServerSpec](#ogxserverspec)
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `kv` _[KVStorageSpec](#kvstoragespec)_ | KV configures key-value storage. |  |  |
-| `sql` _[SQLStorageSpec](#sqlstoragespec)_ | SQL configures SQL storage. |  |  |
+| `backends` _object (keys:string, values:[StorageBackendSpec](#storagebackendspec))_ | Backends defines named OGX storage backends. Connection values may be literals<br />or OGX environment substitutions such as $\{env.POSTGRES_HOST:=localhost\}.<br />Passwords must be supplied through Secret references. |  |  |
+| `stores` _[StorageStoresSpec](#storagestoresspec)_ | Stores configures OGX's fixed set of logical stores. If omitted with Backends,<br />the operator generates standard mappings when exactly one KV and one SQL<br />backend are configured. An explicitly empty object means no stores; omitted<br />store fields are disabled and are not filled from defaults. |  |  |
+| `kv` _[KVStorageSpec](#kvstoragespec)_ | KV configures key-value storage using the deprecated compatibility form. |  |  |
+| `sql` _[SQLStorageSpec](#sqlstoragespec)_ | SQL configures SQL storage using the deprecated compatibility form. |  |  |
+
+#### StorageBackendSpec
+
+StorageBackendSpec configures a named OGX Postgres backend.
+
+_Appears in:_
+- [StateStorageSpec](#statestoragespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `type` _string_ | Type is the OGX backend type. |  | Enum: [kv_postgres sql_postgres] <br />Required: \{\} <br /> |
+| `host` _string_ | Host is a literal hostname or OGX environment substitution. Defaults to localhost. | localhost | MinLength: 1 <br /> |
+| `port` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | Port is a port number or an OGX environment substitution. Defaults to 5432. | 5432 | XIntOrString: \{\} <br /> |
+| `db` _string_ | DB is the database name, as a literal or OGX environment substitution. Defaults to ogx. | ogx | MinLength: 1 <br /> |
+| `user` _string_ | User is the database user, as a literal or OGX environment substitution. |  | MinLength: 1 <br />Required: \{\} <br /> |
+| `password` _[SecretKeyRef](#secretkeyref)_ | Password references a Secret key. Plaintext passwords are not accepted.<br />If omitted, OGX configures passwordless database authentication. |  |  |
+| `sslMode` _string_ | SSLMode configures PostgreSQL TLS behavior. For sql_postgres, accepted literal<br />values are disable, allow, prefer, require, verify-ca, and verify-full. It may<br />also be an OGX environment substitution that resolves to one of these values. |  |  |
+| `caCertPath` _string_ | CACertPath is a literal path or OGX environment substitution. |  |  |
+| `tableName` _string_ | TableName is the KV table name. It is only valid for kv_postgres. |  |  |
+| `poolSize` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | PoolSize configures the connection pool size. It accepts an integer or OGX<br />environment substitution. OGX defaults to 5 for KV and 10 for SQL. |  | XIntOrString: \{\} <br /> |
+| `maxOverflow` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | MaxOverflow configures the number of connections allowed beyond poolSize.<br />It accepts an integer or OGX environment substitution. OGX defaults to 10 for<br />KV and 20 for SQL. |  | XIntOrString: \{\} <br /> |
+| `commandTimeout` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | CommandTimeout configures the KV Postgres command timeout in seconds. OGX<br />defaults it to 30 and requires a value greater than zero. It accepts an<br />integer or OGX environment substitution; quote fractional values. |  | XIntOrString: \{\} <br /> |
+| `poolRecycle` _[IntOrString](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.31/#intorstring-intstr-util)_ | PoolRecycle configures the SQL Postgres connection recycle interval in seconds.<br />Set -1 to disable recycling; OGX defaults it to 3600. It accepts an integer or<br />OGX environment substitution and is only valid for sql_postgres. |  | XIntOrString: \{\} <br /> |
+| `poolPrePing` _boolean_ | PoolPrePing enables SQL Postgres connection pre-ping. OGX defaults it to true.<br />It is only valid for sql_postgres. |  |  |
+| `poolPrePingEnv` _string_ | PoolPrePingEnv supplies pool_pre_ping from an OGX environment substitution,<br />such as $\{env.POSTGRES_POOL_PRE_PING:=true\}. Use this instead of PoolPrePing. |  |  |
+
+#### StorageStoresSpec
+
+StorageStoresSpec configures OGX's fixed set of logical stores.
+
+_Appears in:_
+- [StateStorageSpec](#statestoragespec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `metadata` _[KVStoreMappingSpec](#kvstoremappingspec)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `inference` _[InferenceStoreMappingSpec](#inferencestoremappingspec)_ | Inference maps inference payloads to a SQL backend. |  |  |
+| `conversations` _[SQLStoreMappingSpec](#sqlstoremappingspec)_ | Conversations maps conversation history to a SQL backend. |  |  |
+| `responses` _[ResponsesStoreMappingSpec](#responsesstoremappingspec)_ | Responses maps OpenAI responses to a SQL backend. OGX defaults the table<br />name to openai_responses when it is omitted. |  |  |
+| `prompts` _[SQLStoreMappingSpec](#sqlstoremappingspec)_ | Prompts maps prompts to a SQL backend. |  |  |
+| `connectors` _[SQLStoreMappingSpec](#sqlstoremappingspec)_ | Connectors maps connectors to a SQL backend. |  |  |
+| `vectorStores` _[SQLStoreMappingSpec](#sqlstoremappingspec)_ | VectorStores maps vector-store metadata to a SQL backend. The operator emits<br />this API field to OGX as vector_stores. |  |  |
 
 #### TLSClientConfig
 

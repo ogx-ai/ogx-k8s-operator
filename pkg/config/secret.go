@@ -321,7 +321,31 @@ func collectStorageSecrets(storage *ogxiov1beta1.StateStorageSpec) []corev1.EnvV
 			},
 		})
 	}
+	backendNames := make([]string, 0, len(storage.Backends))
+	for name := range storage.Backends {
+		backendNames = append(backendNames, name)
+	}
+	sort.Strings(backendNames)
+	for _, name := range backendNames {
+		password := storage.Backends[name].Password
+		if password == nil {
+			continue
+		}
+		envVars = append(envVars, corev1.EnvVar{
+			Name: storageBackendPasswordEnvVarName(name),
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: password.Name},
+					Key:                  password.Key,
+				},
+			},
+		})
+	}
 	return envVars
+}
+
+func storageBackendPasswordEnvVarName(backendName string) string {
+	return fmt.Sprintf("%s_STORAGE_BACKEND_%s_PASSWORD", envVarPrefix, normalizeEnvVarField(backendName))
 }
 
 func secretToEnvVar(providerID, field string, ref ogxiov1beta1.SecretKeyRef) corev1.EnvVar {

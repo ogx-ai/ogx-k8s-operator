@@ -4089,8 +4089,154 @@ spec:
                   Storage configures state storage backends (KV and SQL).
                   Mutually exclusive with overrideConfig.
                 properties:
+                  backends:
+                    additionalProperties:
+                      description: StorageBackendSpec configures a named OGX Postgres
+                        backend.
+                      properties:
+                        caCertPath:
+                          description: CACertPath is a literal path or OGX environment
+                            substitution.
+                          type: string
+                        commandTimeout:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            CommandTimeout configures the KV Postgres command timeout in seconds. OGX
+                            defaults it to 30 and requires a value greater than zero. It accepts an
+                            integer or OGX environment substitution; quote fractional values.
+                          x-kubernetes-int-or-string: true
+                        db:
+                          default: ogx
+                          description: DB is the database name, as a literal or OGX
+                            environment substitution. Defaults to ogx.
+                          minLength: 1
+                          type: string
+                        host:
+                          default: localhost
+                          description: Host is a literal hostname or OGX environment
+                            substitution. Defaults to localhost.
+                          minLength: 1
+                          type: string
+                        maxOverflow:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            MaxOverflow configures the number of connections allowed beyond poolSize.
+                            It accepts an integer or OGX environment substitution. OGX defaults to 10 for
+                            KV and 20 for SQL.
+                          x-kubernetes-int-or-string: true
+                        password:
+                          description: |-
+                            Password references a Secret key. Plaintext passwords are not accepted.
+                            If omitted, OGX configures passwordless database authentication.
+                          properties:
+                            key:
+                              description: Key is the key within the Secret.
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-zA-Z0-9]([a-zA-Z0-9\-_.]*[a-zA-Z0-9])?$
+                              type: string
+                            name:
+                              description: Name is the name of the Kubernetes Secret.
+                              minLength: 1
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                        poolPrePing:
+                          description: |-
+                            PoolPrePing enables SQL Postgres connection pre-ping. OGX defaults it to true.
+                            It is only valid for sql_postgres.
+                          type: boolean
+                        poolPrePingEnv:
+                          description: |-
+                            PoolPrePingEnv supplies pool_pre_ping from an OGX environment substitution,
+                            such as ${env.POSTGRES_POOL_PRE_PING:=true}. Use this instead of PoolPrePing.
+                          type: string
+                        poolRecycle:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            PoolRecycle configures the SQL Postgres connection recycle interval in seconds.
+                            Set -1 to disable recycling; OGX defaults it to 3600. It accepts an integer or
+                            OGX environment substitution and is only valid for sql_postgres.
+                          x-kubernetes-int-or-string: true
+                        poolSize:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          description: |-
+                            PoolSize configures the connection pool size. It accepts an integer or OGX
+                            environment substitution. OGX defaults to 5 for KV and 10 for SQL.
+                          x-kubernetes-int-or-string: true
+                        port:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          default: 5432
+                          description: Port is a port number or an OGX environment
+                            substitution. Defaults to 5432.
+                          x-kubernetes-int-or-string: true
+                        sslMode:
+                          description: |-
+                            SSLMode configures PostgreSQL TLS behavior. For sql_postgres, accepted literal
+                            values are disable, allow, prefer, require, verify-ca, and verify-full. It may
+                            also be an OGX environment substitution that resolves to one of these values.
+                          type: string
+                        tableName:
+                          description: TableName is the KV table name. It is only
+                            valid for kv_postgres.
+                          type: string
+                        type:
+                          description: Type is the OGX backend type.
+                          enum:
+                          - kv_postgres
+                          - sql_postgres
+                          type: string
+                        user:
+                          description: User is the database user, as a literal or
+                            OGX environment substitution.
+                          minLength: 1
+                          type: string
+                      required:
+                      - type
+                      - user
+                      type: object
+                      x-kubernetes-validations:
+                      - message: tableName is only valid for kv_postgres backends
+                        rule: '!has(self.tableName) || self.type == ''kv_postgres'''
+                      - message: invalid
+                        rule: '!has(self.tableName)||self.tableName.startsWith(''${env.'')||self.tableName.matches(''^[A-Za-z_][A-Za-z0-9_]{0,62}$'')'
+                      - message: commandTimeout is only valid for kv_postgres backends
+                        rule: '!has(self.commandTimeout) || self.type == ''kv_postgres'''
+                      - message: poolRecycle is only valid for sql_postgres backends
+                        rule: '!has(self.poolRecycle) || self.type == ''sql_postgres'''
+                      - message: poolPrePing is only valid for sql_postgres backends
+                        rule: '!has(self.poolPrePing) || self.type == ''sql_postgres'''
+                      - message: poolPrePingEnv is only valid for sql_postgres backends
+                        rule: '!has(self.poolPrePingEnv) || self.type == ''sql_postgres'''
+                      - message: set only one of poolPrePing and poolPrePingEnv
+                        rule: '!(has(self.poolPrePing) && has(self.poolPrePingEnv))'
+                      - message: poolPrePingEnv must be an OGX environment substitution
+                        rule: '!has(self.poolPrePingEnv) || self.poolPrePingEnv.startsWith(''${env.'')'
+                      - message: sslMode for sql_postgres must be a supported SSL
+                          mode or an OGX environment substitution
+                        rule: self.type != 'sql_postgres' || !has(self.sslMode) ||
+                          self.sslMode.startsWith('${env.') || self.sslMode in ['disable',
+                          'allow', 'prefer', 'require', 'verify-ca', 'verify-full']
+                    description: |-
+                      Backends defines named OGX storage backends. Connection values may be literals
+                      or OGX environment substitutions such as ${env.POSTGRES_HOST:=localhost}.
+                      Passwords must be supplied through Secret references.
+                    type: object
                   kv:
-                    description: KV configures key-value storage.
+                    description: KV configures key-value storage using the deprecated
+                      compatibility form.
                     properties:
                       endpoint:
                         description: Endpoint is the Redis endpoint URL. Required
@@ -4132,12 +4278,15 @@ spec:
                     - message: password is only valid when type is redis
                       rule: '!has(self.password) || self.type == ''redis'''
                   sql:
-                    description: SQL configures SQL storage.
+                    description: SQL configures SQL storage using the deprecated compatibility
+                      form.
                     properties:
                       connectionString:
                         description: |-
                           ConnectionString references a Secret containing the database connection string.
                           Required when type is "postgres".
+                          This deprecated field remains the Praxis migration Job's OGX source credential;
+                          it is not translated to the structured host/port/db/user fields.
                           The Secret must be in the same namespace as the OGXServer
                           and must have the label ogx.io/watch: "true".
                         properties:
@@ -4168,7 +4317,159 @@ spec:
                       rule: self.type != 'postgres' || has(self.connectionString)
                     - message: connectionString is only valid when type is postgres
                       rule: '!has(self.connectionString) || self.type == ''postgres'''
+                  stores:
+                    description: |-
+                      Stores configures OGX's fixed set of logical stores. If omitted with Backends,
+                      the operator generates standard mappings when exactly one KV and one SQL
+                      backend are configured. An explicitly empty object means no stores; omitted
+                      store fields are disabled and are not filled from defaults.
+                    properties:
+                      connectors:
+                        description: Connectors maps connectors to a SQL backend.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          tableName:
+                            description: TableName names the SQL table used by this
+                              store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - tableName
+                        type: object
+                      conversations:
+                        description: Conversations maps conversation history to a
+                          SQL backend.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          tableName:
+                            description: TableName names the SQL table used by this
+                              store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - tableName
+                        type: object
+                      inference:
+                        description: Inference maps inference payloads to a SQL backend.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          enabled:
+                            description: |-
+                              Enabled controls whether the inference store persists payloads.
+                              It is only valid for the inference store. OGX defaults it to true.
+                            type: boolean
+                          maxWriteQueueSize:
+                            description: MaxWriteQueueSize configures the inference
+                              store write queue.
+                            format: int32
+                            type: integer
+                          numWriters:
+                            description: NumWriters configures the inference store
+                              writer count.
+                            format: int32
+                            type: integer
+                          tableName:
+                            description: TableName names the SQL table used by this
+                              store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - tableName
+                        type: object
+                      metadata:
+                        description: Metadata maps OGX metadata to a KV backend.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          namespace:
+                            description: Namespace is the key prefix used by the metadata
+                              KV store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - namespace
+                        type: object
+                      prompts:
+                        description: Prompts maps prompts to a SQL backend.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          tableName:
+                            description: TableName names the SQL table used by this
+                              store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - tableName
+                        type: object
+                      responses:
+                        description: |-
+                          Responses maps OpenAI responses to a SQL backend. OGX defaults the table
+                          name to openai_responses when it is omitted.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          maxWriteQueueSize:
+                            description: MaxWriteQueueSize configures the response
+                              store write queue.
+                            format: int32
+                            type: integer
+                          numWriters:
+                            description: NumWriters configures the response store
+                              writer count.
+                            format: int32
+                            type: integer
+                          tableName:
+                            description: |-
+                              TableName names the SQL table used by this store. OGX defaults it to
+                              openai_responses when omitted.
+                            type: string
+                        required:
+                        - backend
+                        type: object
+                      vectorStores:
+                        description: |-
+                          VectorStores maps vector-store metadata to a SQL backend. The operator emits
+                          this API field to OGX as vector_stores.
+                        properties:
+                          backend:
+                            description: Backend names a key in spec.storage.backends.
+                            minLength: 1
+                            type: string
+                          tableName:
+                            description: TableName names the SQL table used by this
+                              store.
+                            minLength: 1
+                            type: string
+                        required:
+                        - backend
+                        - tableName
+                        type: object
+                    type: object
                 type: object
+                x-kubernetes-validations:
+                - message: named and deprecated storage fields cannot be mixed
+                  rule: '!(has(self.backends)||has(self.stores))||!(has(self.kv)||has(self.sql))'
               tls:
                 description: |-
                   TLS configures outbound TLS trust anchors and client identity for
