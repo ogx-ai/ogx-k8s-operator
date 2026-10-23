@@ -82,10 +82,8 @@ jobs:
 
       - name: Push operator image to local registry
         run: |
-          echo '{"insecure-registries": ["kind-registry:5000"]}' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-          until docker exec kind-registry true 2>/dev/null; do sleep 1; done
-          docker push kind-registry:5000/ogx-k8s-operator:latest
+          docker tag kind-registry:5000/ogx-k8s-operator:latest localhost:5000/ogx-k8s-operator:latest
+          docker push localhost:5000/ogx-k8s-operator:latest
 
       - name: Install cert-manager
         run: |
