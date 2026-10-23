@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -63,7 +64,7 @@ func (v *OGXServerValidator) ValidateCreate(_ context.Context, r *OGXServer) (ad
 // ValidateUpdate implements admission.Validator.
 func (v *OGXServerValidator) ValidateUpdate(_ context.Context, oldObj, newObj *OGXServer) (admission.Warnings, error) {
 	ogxserverlog.Info("validating update", "name", newObj.Name)
-	warnings, err := v.validate(newObj)
+	warnings, err := v.validateAgainst(oldObj, newObj)
 	if isMigrationRequested(oldObj) && !isMigrationRequested(newObj) {
 		warnings = append(warnings,
 			"disabling Praxis migration is a soft rollback only: it restores the pre-enablement OGX "+
@@ -79,9 +80,13 @@ func (v *OGXServerValidator) ValidateDelete(_ context.Context, _ *OGXServer) (ad
 }
 
 func (v *OGXServerValidator) validate(r *OGXServer) (admission.Warnings, error) {
+	return v.validateAgainst(nil, r)
+}
+
+func (v *OGXServerValidator) validateAgainst(old, r *OGXServer) (admission.Warnings, error) {
 	warnings := collectValidationWarnings(r)
 
-	allErrs := v.collectValidationErrors(r)
+	allErrs := v.collectErrors(old, r)
 	if len(allErrs) > 0 {
 		return warnings, allErrs.ToAggregate()
 	}
@@ -162,6 +167,13 @@ func isNetworkPolicyDisabled(r *OGXServer) bool {
 }
 
 func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorList {
+	return v.collectErrors(nil, r)
+}
+
+// On update (old non-nil), external access and volumes are checked only where they changed,
+// so objects admitted before these checks existed (3.5 OGXServers with external access and
+// no TLS) stay editable after an operator upgrade.
+func (v *OGXServerValidator) collectErrors(old, r *OGXServer) field.ErrorList {
 	var allErrs field.ErrorList
 
 	if r.Spec.Distribution.Name != "" {
@@ -177,8 +189,10 @@ func (v *OGXServerValidator) collectValidationErrors(r *OGXServer) field.ErrorLi
 	}
 
 	allErrs = append(allErrs, validateAdoptionAnnotations(r)...)
-	allErrs = append(allErrs, validateVolumeTypes(r)...)
-	allErrs = append(allErrs, validateExternalAccess(r)...)
+	allErrs = append(allErrs, validateChangedVolumeTypes(old, r)...)
+	if old == nil || !equality.Semantic.DeepEqual(externalAccessOf(old), externalAccessOf(r)) {
+		allErrs = append(allErrs, validateExternalAccess(r)...)
+	}
 
 	return allErrs
 }
@@ -297,12 +311,31 @@ func isAllowedVolumeType(vol corev1.Volume) bool {
 }
 
 func validateVolumeTypes(r *OGXServer) field.ErrorList {
+	return validateChangedVolumeTypes(nil, r)
+}
+
+func overrideVolumesByName(r *OGXServer) map[string]corev1.Volume {
+	vols := make(map[string]corev1.Volume)
+	if r == nil || r.Spec.Workload == nil || r.Spec.Workload.Overrides == nil {
+		return vols
+	}
+	for _, vol := range r.Spec.Workload.Overrides.Volumes {
+		vols[vol.Name] = vol
+	}
+	return vols
+}
+
+func validateChangedVolumeTypes(old, r *OGXServer) field.ErrorList {
 	var errs field.ErrorList
 	if r.Spec.Workload == nil || r.Spec.Workload.Overrides == nil {
 		return errs
 	}
+	unchanged := overrideVolumesByName(old)
 	volumesPath := field.NewPath("spec", "workload", "overrides", "volumes")
 	for i, vol := range r.Spec.Workload.Overrides.Volumes {
+		if prev, ok := unchanged[vol.Name]; ok && equality.Semantic.DeepEqual(prev, vol) {
+			continue
+		}
 		if !isAllowedVolumeType(vol) {
 			errs = append(errs, field.Forbidden(
 				volumesPath.Index(i),
@@ -313,6 +346,13 @@ func validateVolumeTypes(r *OGXServer) field.ErrorList {
 		}
 	}
 	return errs
+}
+
+func externalAccessOf(r *OGXServer) *ExternalAccessConfig {
+	if r.Spec.Network == nil {
+		return nil
+	}
+	return r.Spec.Network.ExternalAccess
 }
 
 func validateExternalAccess(r *OGXServer) field.ErrorList {
