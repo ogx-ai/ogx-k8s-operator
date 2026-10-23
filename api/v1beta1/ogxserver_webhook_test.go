@@ -1310,3 +1310,152 @@ func TestValidateUpdate_SoftRollbackWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateUpdate_ExternalAccessOnlyWhenChanged(t *testing.T) {
+	v := &OGXServerValidator{}
+
+	server := func(ea *ExternalAccessConfig, replicas int32) *OGXServer {
+		return &OGXServer{
+			Spec: OGXServerSpec{
+				Distribution: DistributionSpec{Image: "x"},
+				Network:      &NetworkSpec{ExternalAccess: ea},
+				Workload:     &WorkloadSpec{Replicas: ptr(replicas)},
+			},
+		}
+	}
+	noTLS := &ExternalAccessConfig{Enabled: true}
+
+	tests := []struct {
+		name      string
+		oldObj    *OGXServer
+		newObj    *OGXServer
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "unrelated edit to a server with external access and no TLS is allowed",
+			oldObj:  server(noTLS, 1),
+			newObj:  server(&ExternalAccessConfig{Enabled: true}, 2),
+			wantErr: false,
+		},
+		{
+			name:      "setting a hostname without TLS is rejected",
+			oldObj:    server(noTLS, 1),
+			newObj:    server(&ExternalAccessConfig{Enabled: true, Hostname: "ogx.example.com"}, 1),
+			wantErr:   true,
+			errSubstr: "TLS secretName is required",
+		},
+		{
+			name:    "disabling external access is allowed",
+			oldObj:  server(noTLS, 1),
+			newObj:  server(&ExternalAccessConfig{Enabled: false}, 1),
+			wantErr: false,
+		},
+		{
+			name:    "adding hostname and TLS is allowed",
+			oldObj:  server(noTLS, 1),
+			newObj:  server(&ExternalAccessConfig{Enabled: true, Hostname: "ogx.example.com", TLS: &TLSSpec{SecretName: "ogx-tls"}}, 1),
+			wantErr: false,
+		},
+		{
+			name:    "unrelated edit with no network spec is allowed",
+			oldObj:  &OGXServer{Spec: OGXServerSpec{Distribution: DistributionSpec{Image: "x"}}},
+			newObj:  &OGXServer{Spec: OGXServerSpec{Distribution: DistributionSpec{Image: "y"}}},
+			wantErr: false,
+		},
+		{
+			name:      "enabling external access without TLS is rejected",
+			oldObj:    server(nil, 1),
+			newObj:    server(noTLS, 1),
+			wantErr:   true,
+			errSubstr: "hostname is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := v.ValidateUpdate(t.Context(), tt.oldObj, tt.newObj)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateUpdate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.errSubstr != "" && (err == nil || !strings.Contains(err.Error(), tt.errSubstr)) {
+				t.Errorf("ValidateUpdate error %q does not contain %q", err, tt.errSubstr)
+			}
+		})
+	}
+}
+
+func TestValidateUpdate_VolumeTypesOnlyWhenChanged(t *testing.T) {
+	v := &OGXServerValidator{}
+
+	hostPath := corev1.Volume{
+		Name:         "host",
+		VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/data"}},
+	}
+	server := func(replicas int32, vols ...corev1.Volume) *OGXServer {
+		return &OGXServer{
+			Spec: OGXServerSpec{
+				Distribution: DistributionSpec{Image: "x"},
+				Workload: &WorkloadSpec{
+					Replicas:  ptr(replicas),
+					Overrides: &WorkloadOverrides{Volumes: vols},
+				},
+			},
+		}
+	}
+	changedHostPath := hostPath
+	changedHostPath.HostPath = &corev1.HostPathVolumeSource{Path: "/other"}
+	renamedHostPath := hostPath
+	renamedHostPath.Name = "host2"
+	otherHostPath := corev1.Volume{
+		Name:         "other",
+		VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/tmp"}},
+	}
+
+	tests := []struct {
+		name    string
+		oldObj  *OGXServer
+		newObj  *OGXServer
+		wantErr bool
+	}{
+		{
+			name:    "unrelated edit keeps an existing disallowed volume",
+			oldObj:  server(1, hostPath),
+			newObj:  server(2, hostPath),
+			wantErr: false,
+		},
+		{
+			name:    "adding a disallowed volume is rejected",
+			oldObj:  server(1),
+			newObj:  server(1, hostPath),
+			wantErr: true,
+		},
+		{
+			name:    "renaming an existing disallowed volume is rejected",
+			oldObj:  server(1, hostPath),
+			newObj:  server(1, renamedHostPath),
+			wantErr: true,
+		},
+		{
+			name:    "reordering existing disallowed volumes is allowed",
+			oldObj:  server(1, hostPath, otherHostPath),
+			newObj:  server(1, otherHostPath, hostPath),
+			wantErr: false,
+		},
+		{
+			name:    "changing an existing disallowed volume is rejected",
+			oldObj:  server(1, hostPath),
+			newObj:  server(1, changedHostPath),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := v.ValidateUpdate(t.Context(), tt.oldObj, tt.newObj)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateUpdate error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
