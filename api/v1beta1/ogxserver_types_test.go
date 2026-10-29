@@ -370,3 +370,12 @@ func TestPraxisModeDefaulting(t *testing.T) {
 		})
 	}
 }
+
+func TestPraxisSelectorDefaults(t *testing.T) {
+	require.Equal(t, "app", DefaultLabelKey, "OGX DefaultLabelKey must remain app")
+	require.Equal(t, "ogx", DefaultLabelValue)
+	require.Equal(t, "app.kubernetes.io/name", DefaultPraxisPodLabelKey)
+	require.Equal(t, "praxis-gateway", DefaultPraxisPodLabelValue)
+	require.Equal(t, "praxis-standalone", DefaultPraxisNamespace)
+	require.NotEqual(t, DefaultLabelKey, DefaultPraxisPodLabelKey)
+}

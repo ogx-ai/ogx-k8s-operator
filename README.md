@@ -210,8 +210,8 @@ operator creates a `NetworkPolicy` whose ingress on the service port (`8321`) ad
 **only** from:
 
 1. **Praxis pods** — identified per-CR by `spec.praxisMode.praxisSelector` (see below), defaulting
-   to pods labeled `app: payload-processing` (the MaaS Gateway contract). This is the only
-   *application* traffic OGX accepts.
+   to pods labeled `app.kubernetes.io/name: praxis-gateway` in the `praxis-standalone` namespace.
+   This is the only *application* traffic OGX accepts.
 2. **The operator namespace** — so the operator can poll OGX status (`/v1/providers`,
    `/v1/version`). This is control-plane traffic, not application traffic.
 
@@ -228,10 +228,15 @@ generated config (they are served by Praxis instead). This is applied internally
 generation and does **not** mutate your CR's `spec.disabledAPIs`.
 
 Every generated Praxis config replaces `server.auth` with upstream-header authentication using
-`x-user-id` and `x-tenant-id`, applies ownership-based access rules, and sets
-`server.tenancy.mode: multi`. When no declarative config fields are set, the operator preserves the
-distribution's default config and changes only auth, tenancy, and an explicit `spec.network.port`.
+`x-user-id` and `x-tenant-id` and applies ownership-based access rules. Existing `server.tenancy`
+is preserved (including when it is absent); the operator does not set `server.tenancy.mode: multi`.
+When no declarative config fields are set, the operator preserves the distribution's default
+config and changes only auth, the Praxis-served API list, and an explicit `spec.network.port`.
 `spec.overrideConfig` remains unchanged and takes precedence.
+
+With tenancy disabled, Praxis must supply `x-user-id`. Accessing historical owned records
+requires that header to match the stored owner; unowned historical records are readable under
+the injected access policy. This is not a promise of update or delete access.
 
 #### Praxis-mode readiness conditions
 
@@ -285,8 +290,8 @@ instead.
 Which pods count as "Praxis" is configured **per-CR** via `spec.praxisMode.praxisSelector` — a
 namespace plus a Pod label selector. It becomes the NetworkPolicy ingress peer, so different
 OGXServers can point at different Praxis instances independently. If omitted, the operator fails
-safe to pods labeled `app: payload-processing` in the `openshift-ingress` namespace (never an
-allow-all peer):
+safe to pods labeled `app.kubernetes.io/name: praxis-gateway` in the `praxis-standalone`
+namespace (never an allow-all peer). MaaS or custom deployments need an explicit `praxisSelector`:
 
 ```yaml
 apiVersion: ogx.io/v1beta1
@@ -305,15 +310,13 @@ spec:
           app: payload-processing
 ```
 
-> **Note (Praxis namespace):** the fail-safe default peer pins the `openshift-ingress` namespace,
-> matching where the PoC operator places the Praxis/extproc servers. This is **provisional and
-> pending confirmation with the MaaS team** — if Praxis runs elsewhere, set `praxisSelector` with
-> the correct `namespace`.
+> **Note (Praxis selector):** MaaS or custom deployments (for example the former
+> `app: payload-processing` / `openshift-ingress` contract) must set `praxisSelector` explicitly.
 
 | Field | Description |
 |-------|-------------|
 | `praxisMode.enabled` | Praxis-fronted (internal-only) mode: `true` (default when `praxisMode` is provided) or `false` (force legacy). Omit `praxisMode` for legacy behavior. |
-| `praxisMode.praxisSelector` | Per-CR `NetworkPolicyPeer` (namespace + pod selector) identifying the Praxis instance. Fails safe to `app: payload-processing` in the `openshift-ingress` namespace when omitted. |
+| `praxisMode.praxisSelector` | Per-CR `NetworkPolicyPeer` (namespace + pod selector) identifying the Praxis instance. Fails safe to `app.kubernetes.io/name: praxis-gateway` in the `praxis-standalone` namespace when omitted. |
 | `network.policy.enabled` | When `true` (default), the operator creates a `NetworkPolicy` for the OGXServer workload. Set to `false` to disable it entirely. |
 | `network.policy.ingress` | In Praxis mode, additional ingress rules appended to the mandatory Praxis + operator rules. In legacy mode, rules that replace the defaults. |
 | `network.externalAccess.enabled` | Honored only in legacy mode. In Praxis mode it is not honored (admission warning; no external exposure created). |

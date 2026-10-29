@@ -14,8 +14,14 @@ The operator can generate server `config.yaml` from declarative CR fields:
 When this mode is active, the operator resolves a base config from `spec.baseConfig` when provided, otherwise from OCI image labels, merges your CR values, writes an immutable generated ConfigMap, and mounts it into the server pod.
 
 With `spec.praxisMode.enabled: true`, the operator also generates a config when no declarative
-fields are set. It preserves the distribution default while replacing `server.auth`, enabling
-multi-tenancy, and applying an explicit `spec.network.port`.
+fields are set. This path preserves the distribution default while replacing `server.auth` with
+upstream-header authentication and an ownership policy, preserving existing tenancy (including
+when it is absent), disabling the Praxis-served APIs (Responses, Conversations), and applying an
+explicit `spec.network.port`.
+
+The fail-safe Praxis selector defaults to `app.kubernetes.io/name: praxis-gateway` in the
+`praxis-standalone` namespace. Identify a MaaS or custom Praxis instance with
+`spec.praxisMode.praxisSelector`.
 
 ## Precedence Rules
 
@@ -54,8 +60,8 @@ This label allows the operator to watch changes and trigger reconciliation.
    - providers: user values replace base per API type
    - models/resources: user values replace base models
    - storage: user value replaces base storage
-   - APIs: base filtered by `disabledAPIs`
-   - Praxis mode: use upstream-header auth and `server.tenancy.mode: multi`
+   - APIs: base filtered by `disabledAPIs`; Praxis mode also disables Responses and Conversations
+   - Praxis mode: use upstream-header auth and an ownership access policy; preserve existing tenancy
 5. Create immutable ConfigMap: `${ogxserver-name}-config-${contentHash}`.
 6. Mount generated `config.yaml` to `/etc/ogx/config.yaml`.
 7. Inject secret-backed environment variables for provider/storage credentials.

@@ -1,8 +1,8 @@
 # OGX in Praxis-fronted (internal-only) mode. When Praxis mode is enabled, the operator restricts
 # ingress on port 8321 to the Praxis pods identified by spec.praxisMode.praxisSelector (defaulting
-# to pods labeled app: payload-processing in the openshift-ingress namespace) plus the operator
-# namespace. The network.policy.ingress rules below are ADDITIVE: they are appended on top of that
-# mandatory lock-down and cannot remove it.
+# to pods labeled app.kubernetes.io/name: praxis-gateway in the praxis-standalone namespace) plus
+# the operator namespace. The network.policy.ingress rules below are ADDITIVE: they are appended
+# on top of that mandatory lock-down and cannot remove it.
 #
 # Omit spec.praxisMode for legacy mode. When spec.praxisMode is provided without enabled,
 # Kubernetes defaults spec.praxisMode.enabled to true; set it to false to force legacy mode.
@@ -17,8 +17,8 @@ spec:
     enabled: true
     # praxisSelector identifies the Praxis instance that fronts this OGXServer. It is honored as the
     # NetworkPolicy ingress peer. When omitted, the operator falls back to pods labeled
-    # app: payload-processing in the openshift-ingress namespace. Set it per-CR so different
-    # OGXServers can migrate to different Praxis instances independently.
+    # app.kubernetes.io/name: praxis-gateway in the praxis-standalone namespace. Set it per-CR so
+    # different OGXServers can point at different Praxis instances independently.
     praxisSelector:
       namespace: praxis
       podSelector:
