@@ -66,8 +66,24 @@ func instanceWithPraxisSelector() *ogxiov1beta1.OGXServer {
 	}
 }
 
+func TestResolvePraxisPodSelector_Defaults(t *testing.T) {
+	ns, sel := resolvePraxisPodSelector(&ogxiov1beta1.OGXServer{})
+	require.Equal(t, "praxis-standalone", ns)
+	require.Equal(t, "praxis-gateway", sel.MatchLabels["app.kubernetes.io/name"])
+	require.NotContains(t, sel.MatchLabels, "app")
+	require.NotContains(t, sel.MatchLabels, "release")
+	require.NotContains(t, sel.MatchLabels, "app.kubernetes.io/instance")
+	require.Len(t, sel.MatchLabels, 1)
+
+	custom := instanceWithPraxisSelector()
+	gotNS, gotSel := resolvePraxisPodSelector(custom)
+	require.Equal(t, praxisTestNamespace, gotNS)
+	require.Equal(t, praxisTestLabels(), gotSel.MatchLabels)
+}
+
 func TestUpdatePraxisReachableCondition(t *testing.T) {
-	defaultLabels := map[string]string{ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue}
+	defaultLabels := map[string]string{"app.kubernetes.io/name": "praxis-gateway"}
+	maasLabels := map[string]string{"app": "payload-processing"}
 
 	tests := []struct {
 		name       string
@@ -106,8 +122,32 @@ func TestUpdatePraxisReachableCondition(t *testing.T) {
 		},
 		{
 			name:       "default selector used when praxisSelector unset",
-			pods:       []client.Object{praxisPod(ogxiov1beta1.DefaultPraxisNamespace, defaultLabels, true)},
+			pods:       []client.Object{praxisPod("praxis-standalone", defaultLabels, true)},
 			instance:   &ogxiov1beta1.OGXServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ogx"}},
+			wantStatus: metav1.ConditionTrue,
+			wantReason: ReasonPraxisReachable,
+		},
+		{
+			name:       "old MaaS labels and namespace are not matched by default discovery",
+			pods:       []client.Object{praxisPod("openshift-ingress", maasLabels, true)},
+			instance:   &ogxiov1beta1.OGXServer{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ogx"}},
+			wantStatus: metav1.ConditionFalse,
+			wantReason: ReasonPraxisUnreachable,
+		},
+		{
+			name: "legacy MaaS app:payload-processing selector override is honored",
+			pods: []client.Object{praxisPod("openshift-ingress", maasLabels, true)},
+			instance: &ogxiov1beta1.OGXServer{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "ogx"},
+				Spec: ogxiov1beta1.OGXServerSpec{
+					PraxisMode: &ogxiov1beta1.PraxisModeSpec{
+						PraxisSelector: &ogxiov1beta1.PraxisSelector{
+							Namespace:   "openshift-ingress",
+							PodSelector: metav1.LabelSelector{MatchLabels: maasLabels},
+						},
+					},
+				},
+			},
 			wantStatus: metav1.ConditionTrue,
 			wantReason: ReasonPraxisReachable,
 		},

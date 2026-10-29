@@ -129,11 +129,14 @@ spec:
         matchLabels:
           app: payload-processing
 `), 0o600))
-	require.NoError(t, os.WriteFile(basePath, []byte("version: '2'\napis:\n- responses\n"), 0o600))
+	require.NoError(t, os.WriteFile(basePath, []byte("version: '2'\napis:\n- inference\n- responses\n- conversations\n"), 0o600))
 
 	generated, err := run(options{crPath: crPath, basePath: basePath})
 	require.NoError(t, err)
 	require.Contains(t, generated.ConfigYAML, "type: upstream_header")
+	require.NotContains(t, generated.ConfigYAML, "- responses")
+	require.NotContains(t, generated.ConfigYAML, "- conversations")
+	require.Contains(t, generated.ConfigYAML, "- inference")
 }
 
 func (tc testCase) assert(t *testing.T, generated *config.GeneratedConfig, runErr error) {

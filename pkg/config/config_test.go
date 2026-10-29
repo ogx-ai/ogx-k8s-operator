@@ -827,8 +827,6 @@ server:
 	assertConfigContains(t, generated.ConfigYAML,
 		"when: resource is unowned",
 		"when: user is owner",
-		"tenancy:",
-		"mode: multi",
 		"port: 9000",
 	)
 }
@@ -865,11 +863,129 @@ server:
 	}
 	if !strings.Contains(generated.ConfigYAML, "custom_section:") ||
 		!strings.Contains(generated.ConfigYAML, "enabled: true") ||
-		!strings.Contains(generated.ConfigYAML, "tenancy:") ||
-		!strings.Contains(generated.ConfigYAML, "mode: multi") ||
+		strings.Contains(generated.ConfigYAML, "tenancy:") ||
 		!strings.Contains(generated.ConfigYAML, "port: 9443") ||
 		strings.Contains(generated.ConfigYAML, "port: 9000") {
-		t.Errorf("expected multi-tenancy and non-auth default config to be preserved, got:\n%s", generated.ConfigYAML)
+		t.Errorf("expected non-auth default config to be preserved without inventing tenancy, got:\n%s", generated.ConfigYAML)
+	}
+}
+
+func praxisGenerationPaths() []struct {
+	name string
+	fn   func(*ogxiov1beta1.OGXServerSpec, []byte) (*GeneratedConfig, error)
+} {
+	return []struct {
+		name string
+		fn   func(*ogxiov1beta1.OGXServerSpec, []byte) (*GeneratedConfig, error)
+	}{
+		{
+			name: "GenerateConfig",
+			fn: func(spec *ogxiov1beta1.OGXServerSpec, base []byte) (*GeneratedConfig, error) {
+				return GenerateConfig(spec, base, true)
+			},
+		},
+		{name: "GeneratePraxisDefaultConfig", fn: GeneratePraxisDefaultConfig},
+	}
+}
+
+func TestGenerateConfig_PraxisModePreservesTenancy(t *testing.T) {
+	tests := []struct {
+		name           string
+		baseConfig     string
+		wantTenancySet bool
+		wantMode       string
+		wantDefaultID  string
+	}{
+		{
+			name: "absent tenancy stays absent",
+			baseConfig: `version: '2'
+server:
+  port: 8321
+`,
+		},
+		{
+			name: "disabled tenancy is preserved",
+			baseConfig: `version: '2'
+server:
+  tenancy:
+    mode: disabled
+  port: 8321
+`,
+			wantTenancySet: true,
+			wantMode:       "disabled",
+		},
+		{
+			name: "single tenancy with default_tenant_id is preserved",
+			baseConfig: `version: '2'
+server:
+  tenancy:
+    mode: single
+    default_tenant_id: team-a
+  port: 8321
+`,
+			wantTenancySet: true,
+			wantMode:       "single",
+			wantDefaultID:  "team-a",
+		},
+		{
+			name: "multi tenancy is preserved",
+			baseConfig: `version: '2'
+server:
+  tenancy:
+    mode: multi
+  port: 8321
+`,
+			wantTenancySet: true,
+			wantMode:       "multi",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, path := range praxisGenerationPaths() {
+				t.Run(path.name, func(t *testing.T) {
+					generated, err := path.fn(&ogxiov1beta1.OGXServerSpec{}, []byte(tt.baseConfig))
+					if err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					assertPraxisTenancyPreserved(t, generated.ConfigYAML, tt.wantTenancySet, tt.wantMode, tt.wantDefaultID)
+				})
+			}
+		})
+	}
+}
+
+func assertPraxisTenancyPreserved(t *testing.T, configYAML string, wantTenancySet bool, wantMode, wantDefaultID string) {
+	t.Helper()
+	assertConfigContains(t, configYAML,
+		"type: upstream_header",
+		"when: resource is unowned",
+		"when: user is owner",
+	)
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal([]byte(configYAML), &cfg); err != nil {
+		t.Fatalf("failed to parse generated config: %v", err)
+	}
+	server, _ := cfg["server"].(map[string]interface{})
+	if server == nil {
+		t.Fatalf("expected server section, got:\n%s", configYAML)
+	}
+	tenancy, hasTenancy := server["tenancy"].(map[string]interface{})
+	if hasTenancy != wantTenancySet {
+		t.Errorf("tenancy present=%v, want %v in:\n%s", hasTenancy, wantTenancySet, configYAML)
+	}
+	if !wantTenancySet {
+		return
+	}
+	if got, _ := tenancy["mode"].(string); got != wantMode {
+		t.Errorf("tenancy mode %q, want %q in:\n%s", got, wantMode, configYAML)
+	}
+	if wantDefaultID == "" {
+		return
+	}
+	got, _ := tenancy["default_tenant_id"].(string)
+	if got != wantDefaultID {
+		t.Errorf("default_tenant_id %q, want %q in:\n%s", got, wantDefaultID, configYAML)
 	}
 }
 
@@ -2340,11 +2456,11 @@ providers:
 
 // --- Praxis vector-store metadata ------------------------------------------------------------
 //
-// Praxis mode turns on multi-tenancy and an access policy (applyPraxisAuth). OGX then refuses to
-// start a vector_io provider unless storage.stores.vector_stores names a SQL store to use as the
-// provider's metadata_store. No shipped distribution config declares one, so without the
-// operator declaring it the greenfield pod CrashLoopBackOffs before serving anything — which is
-// how the e2e greenfield suite found this.
+// Praxis mode injects an access policy (applyPraxisAuth). OGX then refuses to start a vector_io
+// provider unless storage.stores.vector_stores names a SQL store to use as the provider's
+// metadata_store. No shipped distribution config declares one, so without the operator declaring
+// it the greenfield pod CrashLoopBackOffs before serving anything — which is how the e2e
+// greenfield suite found this.
 
 // praxisStorageBase mirrors the shape of the real starter distribution's default config: a faiss
 // vector_io provider, sqlite backends named kv_default/sql_default, and a stores section that
@@ -2457,8 +2573,8 @@ func TestGenerateConfig_PraxisDeclaresVectorStoreMetadata(t *testing.T) {
 }
 
 // TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone is the negative control. Outside
-// Praxis mode nothing forces multi-tenancy, so the operator must not add stores the distribution
-// did not ask for. If this ever passes vacuously the assertions above prove nothing.
+// Praxis mode nothing injects an access policy, so the operator must not add stores the
+// distribution did not ask for. If this ever passes vacuously the assertions above prove nothing.
 func TestGenerateConfig_LegacyModeLeavesVectorStoreMetadataAlone(t *testing.T) {
 	spec := &ogxiov1beta1.OGXServerSpec{
 		Distribution: ogxiov1beta1.DistributionSpec{Name: "starter"},

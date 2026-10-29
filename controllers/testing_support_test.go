@@ -388,7 +388,7 @@ func AssertNetworkPolicyAllowsDeploymentPort(t *testing.T, networkPolicy *networ
 
 	praxisPredicate := func(peer networkingv1.NetworkPolicyPeer) bool {
 		return peer.PodSelector != nil &&
-			peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultLabelKey] == ogxiov1beta1.DefaultPraxisPodLabelValue
+			peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultPraxisPodLabelKey] == ogxiov1beta1.DefaultPraxisPodLabelValue
 	}
 	require.True(t,
 		hasMatchingIngressRule(t, networkPolicy, containerPort, praxisPredicate),

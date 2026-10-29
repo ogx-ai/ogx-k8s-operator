@@ -196,8 +196,9 @@ When Praxis mode is active, it is a **breaking change** relative to legacy behav
 with a policy-enforcing CNI (OVN-Kubernetes / Calico):
 
 - The default NetworkPolicy ingress on port `8321` admits traffic **only** from the Praxis pods
-  identified by `spec.praxisMode.praxisSelector` (defaulting to label `app: payload-processing`)
-  and the operator namespace. The previous "allow all pods in the same namespace" and
+  identified by `spec.praxisMode.praxisSelector` (defaulting to `app.kubernetes.io/name:
+  praxis-gateway` in `praxis-standalone`) and the operator namespace. The previous "allow all pods
+  in the same namespace" and
   OpenShift-router rules are removed. Co-located workloads that reached OGX directly will lose
   access.
 - `spec.network.policy.ingress` rules are now **additive** — appended on top of the mandatory
@@ -206,17 +207,21 @@ with a policy-enforcing CNI (OVN-Kubernetes / Calico):
   (surfaced as an admission warning, not a rejection), and any operator-created Ingress is
   removed. `status.externalURL` is cleared; `status.serviceURL` continues to hold the internal
   cluster DNS endpoint.
-- The **Responses API** is disabled in OGX's generated config (Praxis serves it). This is applied
-  internally during config generation and does **not** mutate your CR's `spec.disabledAPIs`.
+- The **Responses API** and **Conversations API** are disabled in OGX's generated config (Praxis
+  serves them). This is applied internally during config generation and does **not** mutate your
+  CR's `spec.disabledAPIs`.
+- Generated config replaces `server.auth` with upstream-header authentication and an ownership
+  access policy. Existing `server.tenancy` is preserved (including absent, disabled, single, and
+  multi); the operator does not force `tenancy.mode: multi`.
 
 Escape hatches: set the Praxis selector per-CR via `spec.praxisMode.praxisSelector` (see the
-README); add per-CR additive `spec.network.policy.ingress` rules; or disable the policy entirely
-with `spec.network.policy.enabled: false`.
+README) when a MaaS or custom Praxis instance uses different labels or namespace than the
+standalone default; add per-CR additive `spec.network.policy.ingress` rules; or disable the
+policy entirely with `spec.network.policy.enabled: false`.
 
-> **Note (Praxis namespace):** the fail-safe default Praxis peer pins the `openshift-ingress`
-> namespace (where the PoC operator runs the Praxis/extproc servers). This is **provisional and
-> pending confirmation with the MaaS team**; if Praxis runs elsewhere, set the correct `namespace`
-> in `spec.praxisMode.praxisSelector`.
+> **Note (Praxis selector):** MaaS or custom deployments must set `praxisSelector` explicitly
+> rather than relying on the standalone default (`app.kubernetes.io/name: praxis-gateway` in
+> `praxis-standalone`).
 
 > **Validated assumption (RHAISTRAT-2277):** OGX can be restricted to internal-only access via
 > NetworkPolicy without changes to the OGX Distribution (the Praxis selector is configured per-CR
