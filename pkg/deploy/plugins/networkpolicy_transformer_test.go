@@ -75,9 +75,12 @@ func TestNetworkPolicyTransformer_Default(t *testing.T) {
 	// Should have pod selector with instance name
 	assert.Contains(t, yamlStr, "app.kubernetes.io/instance: test-instance")
 
-	// Default ingress allows only Praxis pods (fail-safe label) plus the operator namespace.
-	assert.Contains(t, yamlStr, "app: payload-processing")
+	// Default ingress allows only Praxis pods (fail-safe standalone labels) plus the operator namespace.
+	assert.Contains(t, yamlStr, "app.kubernetes.io/name: praxis-gateway")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: praxis-standalone")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
+	assert.NotContains(t, yamlStr, "payload-processing")
+	assert.NotContains(t, yamlStr, "openshift-ingress")
 
 	// Must NOT allow all pods in the same namespace, nor the OpenShift router.
 	assert.NotContains(t, yamlStr, "podSelector: {}")
@@ -135,7 +138,8 @@ func TestNetworkPolicyTransformer_ExplicitIngressFromCR(t *testing.T) {
 	// User rule is present...
 	assert.Contains(t, yamlStr, "namespaceSelector: {}")
 	// ...and the mandatory Praxis + operator peers are still present (additive, not replacing).
-	assert.Contains(t, yamlStr, "app: payload-processing")
+	assert.Contains(t, yamlStr, "app.kubernetes.io/name: praxis-gateway")
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: praxis-standalone")
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 }
 
@@ -239,7 +243,43 @@ func TestNetworkPolicyTransformer_PraxisPeerFromConfig(t *testing.T) {
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: praxis-ns")
 	assert.Contains(t, yamlStr, "app: custom-praxis")
 	// The fail-safe default must not appear when a peer is configured.
-	assert.NotContains(t, yamlStr, "app: payload-processing")
+	assert.NotContains(t, yamlStr, "praxis-gateway")
+	assert.NotContains(t, yamlStr, "praxis-standalone")
+}
+
+func TestNetworkPolicyTransformer_LegacyMaaSPeerOverride(t *testing.T) {
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes([]byte(networkPolicyTestYAML))
+	require.NoError(t, err)
+
+	rm := resmap.New()
+	require.NoError(t, rm.Append(res))
+
+	transformer := CreateNetworkPolicyTransformer(NetworkPolicyTransformerConfig{
+		InstanceName:      "test-instance",
+		ServicePort:       8321,
+		OperatorNamespace: "operator-ns",
+		PraxisMode:        true,
+		PraxisPeer: &networkingv1.NetworkPolicyPeer{
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-ingress"},
+			},
+			PodSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "payload-processing"},
+			},
+		},
+	})
+
+	require.NoError(t, transformer.Transform(rm))
+
+	yamlBytes, err := rm.Resources()[0].AsYAML()
+	require.NoError(t, err)
+	yamlStr := string(yamlBytes)
+
+	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: openshift-ingress")
+	assert.Contains(t, yamlStr, "app: payload-processing")
+	assert.NotContains(t, yamlStr, "praxis-gateway")
+	assert.NotContains(t, yamlStr, "praxis-standalone")
 }
 
 func TestNetworkPolicyTransformer_MonitoringIngressWhenMetricsPortSet(t *testing.T) {
@@ -333,7 +373,8 @@ func TestNetworkPolicyTransformer_LegacyMode(t *testing.T) {
 	assert.Contains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
 
 	// The Praxis fail-safe peer must NOT appear in legacy mode.
-	assert.NotContains(t, yamlStr, "app: payload-processing")
+	assert.NotContains(t, yamlStr, "praxis-gateway")
+	assert.NotContains(t, yamlStr, "praxis-standalone")
 }
 
 // renderNetworkPolicy runs the transformer over the base fixture and decodes the result into a
@@ -603,5 +644,5 @@ func TestNetworkPolicyTransformer_LegacyModeUserIngressReplaces(t *testing.T) {
 	// User rule present; defaults (operator namespace peer) replaced, not appended.
 	assert.Contains(t, yamlStr, "namespaceSelector: {}")
 	assert.NotContains(t, yamlStr, "kubernetes.io/metadata.name: operator-ns")
-	assert.NotContains(t, yamlStr, "app: payload-processing")
+	assert.NotContains(t, yamlStr, "praxis-gateway")
 }

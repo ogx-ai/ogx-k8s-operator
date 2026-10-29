@@ -50,7 +50,7 @@ func TestNetworkPolicySuite(t *testing.T) {
 	server.Name = "ogx-np"
 	server.Namespace = nsName
 	// Set the Praxis-fronted posture explicitly; the CR must not rely on webhook defaulting. The
-	// fail-safe Praxis peer pins the openshift-ingress namespace, but connectivity probes run in the
+	// fail-safe Praxis peer pins the praxis-standalone namespace, but connectivity probes run in the
 	// test namespace, so set a per-CR praxisSelector admitting Praxis-labeled pods from the test
 	// namespace. This also exercises the spec.praxisMode.praxisSelector override path.
 	praxisOn := true

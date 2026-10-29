@@ -232,7 +232,7 @@ func setupPraxisOptInCR(t *testing.T) *ogxiov1beta1.OGXServer {
 
 	// Force the Praxis-fronted posture. The deployed webhook defaults this on create, but being
 	// explicit keeps the suite deterministic if the webhook is unavailable. The fail-safe Praxis
-	// peer pins the openshift-ingress namespace; the probes run in the test namespace, so scope
+	// peer pins the praxis-standalone namespace; the probes run in the test namespace, so scope
 	// the selector there.
 	praxisOn := true
 	server.Spec.PraxisMode = &ogxiov1beta1.PraxisModeSpec{

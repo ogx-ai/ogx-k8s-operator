@@ -973,7 +973,7 @@ func praxisDefault() *networkingv1.NetworkPolicyPeer {
 	return &networkingv1.NetworkPolicyPeer{
 		PodSelector: &metav1.LabelSelector{
 			MatchLabels: map[string]string{
-				ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+				ogxiov1beta1.DefaultPraxisPodLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
 			},
 		},
 		NamespaceSelector: &metav1.LabelSelector{
@@ -1017,6 +1017,23 @@ func TestBuildPraxisPeer(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "legacy MaaS app:payload-processing selector override is honored",
+			praxisMode: &ogxiov1beta1.PraxisModeSpec{
+				PraxisSelector: &ogxiov1beta1.PraxisSelector{
+					Namespace:   "openshift-ingress",
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "payload-processing"}},
+				},
+			},
+			want: &networkingv1.NetworkPolicyPeer{
+				PodSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "payload-processing"},
+				},
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"kubernetes.io/metadata.name": "openshift-ingress"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1032,10 +1049,18 @@ func TestBuildPraxisPeer(t *testing.T) {
 func TestBuildPraxisPeer_DefaultNeverAllowAll(t *testing.T) {
 	peer := controllers.BuildPraxisPeer(&ogxiov1beta1.OGXServer{})
 	require.NotNil(t, peer.PodSelector)
-	require.Equal(t, ogxiov1beta1.DefaultPraxisPodLabelValue, peer.PodSelector.MatchLabels[ogxiov1beta1.DefaultLabelKey])
+	require.Equal(t, "praxis-gateway", peer.PodSelector.MatchLabels["app.kubernetes.io/name"])
+	require.NotContains(t, peer.PodSelector.MatchLabels, "app")
+	require.NotContains(t, peer.PodSelector.MatchLabels, "release")
+	require.NotContains(t, peer.PodSelector.MatchLabels, "app.kubernetes.io/instance")
+	require.Len(t, peer.PodSelector.MatchLabels, 1)
 	require.NotNil(t, peer.NamespaceSelector, "default peer should pin the Praxis namespace")
-	require.Equal(t, ogxiov1beta1.DefaultPraxisNamespace,
+	require.Equal(t, "praxis-standalone",
 		peer.NamespaceSelector.MatchLabels[ogxiov1beta1.DefaultNamespaceNameLabel])
+	require.NotEqual(t, "openshift-ingress",
+		peer.NamespaceSelector.MatchLabels[ogxiov1beta1.DefaultNamespaceNameLabel])
+	require.Equal(t, "app", ogxiov1beta1.DefaultLabelKey, "OGX DefaultLabelKey must remain app")
+	require.Equal(t, "app.kubernetes.io/name", ogxiov1beta1.DefaultPraxisPodLabelKey)
 }
 
 func TestNewOGXServerReconciler_WithImageOverrides(t *testing.T) {

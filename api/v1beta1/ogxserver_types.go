@@ -38,21 +38,23 @@ const (
 	DefaultServerPort int32 = 8321
 	// DefaultServicePortName is the default name for the service port.
 	DefaultServicePortName = "http"
-	// DefaultLabelKey is the default key for labels.
+	// DefaultLabelKey is the default key for labels on OGX-owned resources.
 	DefaultLabelKey = "app"
 	// DefaultLabelValue is the default value for labels.
 	DefaultLabelValue = "ogx"
-	// DefaultPraxisPodLabelValue is the value of the "app" label identifying Praxis
-	// (MaaS Gateway) pods. Praxis is the only application workload permitted to reach
+	// DefaultPraxisPodLabelKey is the label key identifying Praxis pods. Distinct from
+	// DefaultLabelKey, which remains "app" for OGX-owned resources.
+	DefaultPraxisPodLabelKey = "app.kubernetes.io/name"
+	// DefaultPraxisPodLabelValue is the value of DefaultPraxisPodLabelKey identifying
+	// Praxis gateway pods. Praxis is the only application workload permitted to reach
 	// OGX; this value is used as the fail-safe NetworkPolicy ingress peer when a CR's
-	// spec.praxisMode.praxisSelector is not set.
-	DefaultPraxisPodLabelValue = "payload-processing"
-	// DefaultPraxisNamespace is the namespace Praxis (MaaS) pods run in by default. The PoC
-	// operator places the extproc/Praxis servers in openshift-ingress, so the fail-safe
-	// NetworkPolicy peer pins its namespaceSelector to this namespace. This is provisional and
-	// pending confirmation with the MaaS team; override it per-CR via
-	// spec.praxisMode.praxisSelector if Praxis runs elsewhere.
-	DefaultPraxisNamespace = "openshift-ingress"
+	// spec.praxisMode.praxisSelector is not set. The default selector is this key/value
+	// in DefaultPraxisNamespace and does not include a release or instance label; MaaS
+	// or custom deployments that use different labels must set praxisSelector explicitly.
+	DefaultPraxisPodLabelValue = "praxis-gateway"
+	// DefaultPraxisNamespace is the namespace Praxis pods run in by default. The
+	// fail-safe NetworkPolicy peer pins its namespaceSelector to this namespace.
+	DefaultPraxisNamespace = "praxis-standalone"
 	// DefaultNamespaceNameLabel is the well-known Kubernetes label the API server sets on every
 	// namespace to its own name; it is used to select a namespace by name in a NetworkPolicy peer.
 	DefaultNamespaceNameLabel = "kubernetes.io/metadata.name"

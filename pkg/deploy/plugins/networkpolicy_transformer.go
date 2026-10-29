@@ -53,7 +53,8 @@ type NetworkPolicyTransformerConfig struct {
 	MetricsPort int32
 	// PraxisPeer is the ingress peer identifying Praxis pods, the only application
 	// workload allowed to reach OGX on the service port. When nil, a fail-safe default
-	// peer (pods labeled app: payload-processing in the openshift-ingress namespace) is used.
+	// peer (pods labeled app.kubernetes.io/name: praxis-gateway in the praxis-standalone
+	// namespace) is used.
 	PraxisPeer *networkingv1.NetworkPolicyPeer
 	// PraxisMode selects the internal-only, Praxis-fronted ingress posture. When true,
 	// ingress is restricted to the Praxis peer plus the operator namespace and user rules
@@ -330,15 +331,15 @@ func (t *networkPolicyTransformer) buildRouterPeers() []any {
 }
 
 // praxisPeerMap returns the configured Praxis peer as a generic map for the ingress rule,
-// falling back to the default peer (pods labeled app: payload-processing in the
-// openshift-ingress namespace) when none is configured.
+// falling back to the default peer (pods labeled app.kubernetes.io/name: praxis-gateway in the
+// praxis-standalone namespace) when none is configured.
 func (t *networkPolicyTransformer) praxisPeerMap() (map[string]any, error) {
 	peer := t.config.PraxisPeer
 	if peer == nil {
 		peer = &networkingv1.NetworkPolicyPeer{
 			PodSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+					ogxiov1beta1.DefaultPraxisPodLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
 				},
 			},
 			NamespaceSelector: &metav1.LabelSelector{

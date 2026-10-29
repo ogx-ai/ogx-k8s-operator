@@ -109,8 +109,8 @@ func (r *OGXServerReconciler) updateTLSConfiguredCondition(ctx context.Context, 
 
 // resolvePraxisPodSelector returns the namespace and Pod label selector that identify the Praxis
 // instance fronting this OGXServer. It mirrors BuildPraxisPeer: spec.praxisMode.praxisSelector is
-// honored when set, otherwise the fail-safe default (app: payload-processing in the default Praxis
-// namespace) is used.
+// honored when set, otherwise the fail-safe default (app.kubernetes.io/name: praxis-gateway in
+// the praxis-standalone namespace) is used.
 func resolvePraxisPodSelector(instance *ogxiov1beta1.OGXServer) (string, *metav1.LabelSelector) {
 	if instance.Spec.PraxisMode != nil && instance.Spec.PraxisMode.PraxisSelector != nil {
 		sel := instance.Spec.PraxisMode.PraxisSelector
@@ -119,7 +119,7 @@ func resolvePraxisPodSelector(instance *ogxiov1beta1.OGXServer) (string, *metav1
 	}
 	return ogxiov1beta1.DefaultPraxisNamespace, &metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			ogxiov1beta1.DefaultLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
+			ogxiov1beta1.DefaultPraxisPodLabelKey: ogxiov1beta1.DefaultPraxisPodLabelValue,
 		},
 	}
 }

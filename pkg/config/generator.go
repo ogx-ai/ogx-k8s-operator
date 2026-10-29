@@ -108,7 +108,8 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 
 // GeneratePraxisDefaultConfig derives a runtime config from the distribution default, replacing
 // only server.auth and the Praxis-served entries of apis: for a Praxis-fronted instance. Unlike
-// GenerateConfig, it preserves all unrecognized sections from the default config.
+// GenerateConfig, it preserves all unrecognized sections from the default config. Existing
+// tenancy is left unchanged.
 //
 // This path is only reachable in Praxis-fronted mode: shouldGenerateConfig requires
 // !HasOverrideConfig() && (HasDeclarativeConfig() || praxisMode), and the caller selects this
@@ -347,6 +348,8 @@ func serverSection(cfg map[string]interface{}) (map[string]interface{}, error) {
 	return section, nil
 }
 
+// applyPraxisAuth replaces server.auth with upstream-header authentication and an ownership
+// access policy. Existing tenancy is left unchanged.
 func applyPraxisAuth(server map[string]interface{}) {
 	server["auth"] = map[string]interface{}{
 		"provider_config": map[string]interface{}{
@@ -371,7 +374,6 @@ func applyPraxisAuth(server map[string]interface{}) {
 			},
 		},
 	}
-	server["tenancy"] = map[string]interface{}{"mode": "multi"}
 }
 
 func buildStorageSection(cfg map[string]interface{}, storage map[string]interface{}, base *BaseConfig) {
@@ -382,17 +384,16 @@ func buildStorageSection(cfg map[string]interface{}, storage map[string]interfac
 	}
 }
 
-// praxisVectorStoreTable names the SQL table holding per-tenant vector-store metadata when the
+// praxisVectorStoreTable names the SQL table holding vector-store metadata when the
 // operator has to declare the store itself. See applyPraxisVectorStoreMetadata.
 const praxisVectorStoreTable = "openai_vector_stores"
 
 // applyPraxisVectorStoreMetadata makes the storage section satisfy what Praxis mode's own auth
 // settings demand of OGX.
 //
-// applyPraxisAuth turns on multi-tenancy and an access policy. OGX then refuses to start any
-// vector_io provider unless storage.stores.vector_stores names a SQL store to hold per-tenant
-// vector-store metadata — it is injected as the provider's metadata_store, and its absence is a
-// hard startup error ("metadata_store is required when tenancy mode is 'multi'"). No shipped
+// applyPraxisAuth injects an access policy. OGX then refuses to start any vector_io provider
+// unless storage.stores.vector_stores names a SQL store to hold vector-store metadata — it is
+// injected as the provider's metadata_store, and its absence is a hard startup error. No shipped
 // distribution config declares that store, so without this the greenfield path emits a config
 // whose pod CrashLoopBackOffs before serving anything.
 //
