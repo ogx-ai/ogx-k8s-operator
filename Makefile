@@ -273,11 +273,19 @@ docker-buildx: image-buildx ## Deprecated: use image-buildx instead
 
 # Installer directory is updated to `release` from operator-sdk default `dist` directory.
 .PHONY: build-installer
-build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
-	mkdir -p release
+build-installer: kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	$(MAKE) generate-installer
+
+.PHONY: generate-installer
+generate-installer: manifests generate kustomize ## Regenerate installers using the configured controller image.
+	mkdir -p release
 	$(KUSTOMIZE) build config/overlays/cert-manager > release/operator.yaml
 	$(KUSTOMIZE) build config/overlays/openshift > release/operator-openshift.yaml
+
+.PHONY: test-installer
+test-installer: kustomize yq ## Test installer image preservation and regeneration.
+	KUSTOMIZE=$(KUSTOMIZE) YQ=$(YQ) bash hack/test-installer.sh
 
 .PHONY: image
 image: image-build image-push ## Build and push image with the manager.

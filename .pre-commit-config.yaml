@@ -42,7 +42,7 @@ repos:
         require_serial: true
       - id: build-installer
         name: Update Install Script
-        entry: make build-installer
+        entry: make generate-installer
         language: system
         pass_filenames: false
         require_serial: true
