@@ -13,15 +13,20 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/kustomize/api/resmap"
 	kresource "sigs.k8s.io/kustomize/api/resource"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -1399,4 +1404,259 @@ func resourceToUnstructured(t *testing.T, res *kresource.Resource) (*unstructure
 	}
 
 	return u, nil
+}
+
+func ensureTestClusterRole(t *testing.T, ctx context.Context, name string) {
+	t.Helper()
+	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	err := k8sClient.Create(ctx, cr)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		require.NoError(t, err)
+	}
+	t.Cleanup(func() {
+		// t.Context is canceled before Cleanup runs.
+		_ = k8sClient.Delete(context.WithoutCancel(ctx), cr)
+	})
+}
+
+func createOwnedRoleBinding(t *testing.T, ctx context.Context, owner *ogxiov1beta1.OGXServer, name, namespace, roleName string, labels map[string]string) *rbacv1.RoleBinding {
+	t.Helper()
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, owner.GroupVersionKind()),
+			},
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      "sa",
+			Namespace: namespace,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     roleName,
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, rb))
+	created := &rbacv1.RoleBinding{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, created))
+	return created
+}
+
+func applyRoleBinding(t *testing.T, ctx context.Context, owner *ogxiov1beta1.OGXServer, name, namespace, roleName string, labels map[string]string) {
+	t.Helper()
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(newRoleBindingResource(t, name, namespace, roleName, labels)))
+	require.NoError(t, ApplyResources(ctx, k8sClient, scheme.Scheme, owner, &resMap))
+}
+
+func roleBindingTestRESTMapper() *meta.DefaultRESTMapper {
+	mapper := meta.NewDefaultRESTMapper([]schema.GroupVersion{rbacv1.SchemeGroupVersion})
+	mapper.Add(rbacv1.SchemeGroupVersion.WithKind("RoleBinding"), meta.RESTScopeNamespace)
+	mapper.Add(rbacv1.SchemeGroupVersion.WithKind("ClusterRole"), meta.RESTScopeRoot)
+	return mapper
+}
+
+func TestApplyResources_RoleBindingRoleRefChangedReplaces(t *testing.T) {
+	ctx, testNs, owner := setupApplyResourcesTest(t, "rb-changed")
+	oldRole := "test-scc-anyuid-rb-changed"
+	newRole := "test-scc-nonroot-v2-rb-changed"
+	ensureTestClusterRole(t, ctx, oldRole)
+	ensureTestClusterRole(t, ctx, newRole)
+
+	existing := createOwnedRoleBinding(t, ctx, owner, "my-rb", testNs, oldRole, map[string]string{"state": "initial"})
+
+	// envtest uses a real API server: roleRef mutation must be rejected.
+	existing.RoleRef.Name = newRole
+	err := k8sClient.Update(ctx, existing)
+	require.Error(t, err, "API server must reject RoleBinding roleRef mutation")
+	require.Contains(t, err.Error(), "roleRef")
+
+	originalUID := existing.UID
+	applyRoleBinding(t, ctx, owner, "my-rb", testNs, newRole, map[string]string{"state": "updated"})
+
+	updated := &rbacv1.RoleBinding{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "my-rb", Namespace: testNs}, updated))
+	require.Equal(t, newRole, updated.RoleRef.Name)
+	require.NotEqual(t, originalUID, updated.UID, "replacement should allocate a new UID")
+	require.Equal(t, "updated", updated.Labels["state"])
+	require.True(t, metav1.IsControlledBy(updated, owner), "replacement must preserve controller owner")
+}
+
+func TestApplyResources_RoleBindingRoleRefUnchangedPatches(t *testing.T) {
+	ctx, testNs, owner := setupApplyResourcesTest(t, "rb-unchanged")
+	roleName := "test-scc-nonroot-v2-rb-unchanged"
+	ensureTestClusterRole(t, ctx, roleName)
+
+	existing := createOwnedRoleBinding(t, ctx, owner, "my-rb", testNs, roleName, map[string]string{"state": "initial"})
+	originalUID := existing.UID
+
+	applyRoleBinding(t, ctx, owner, "my-rb", testNs, roleName, map[string]string{"state": "updated"})
+
+	updated := &rbacv1.RoleBinding{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "my-rb", Namespace: testNs}, updated))
+	require.Equal(t, originalUID, updated.UID, "unchanged roleRef must not recreate the RoleBinding")
+	require.Equal(t, roleName, updated.RoleRef.Name)
+	require.Equal(t, "updated", updated.Labels["state"])
+}
+
+func TestApplyResources_RoleBindingUnownedPreserved(t *testing.T) {
+	ctx, testNs, owner := setupApplyResourcesTest(t, "rb-unowned")
+	oldRole := "test-scc-anyuid-rb-unowned"
+	newRole := "test-scc-nonroot-v2-rb-unowned"
+	ensureTestClusterRole(t, ctx, oldRole)
+	ensureTestClusterRole(t, ctx, newRole)
+
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-rb",
+			Namespace: testNs,
+			Labels:    map[string]string{"state": "initial"},
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      "sa",
+			Namespace: testNs,
+		}},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     oldRole,
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, existing))
+
+	applyRoleBinding(t, ctx, owner, "my-rb", testNs, newRole, map[string]string{"state": "updated"})
+
+	unchanged := &rbacv1.RoleBinding{}
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Name: "my-rb", Namespace: testNs}, unchanged))
+	require.Equal(t, oldRole, unchanged.RoleRef.Name)
+	require.Equal(t, "initial", unchanged.Labels["state"])
+	require.Empty(t, unchanged.OwnerReferences)
+}
+
+func TestApplyResources_RoleBindingReplacementRetriesWhenDeletionInProgress(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, ogxiov1beta1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	owner := &ogxiov1beta1.OGXServer{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "ogx.io/v1beta1",
+			Kind:       ogxiov1beta1.OGXServerKind,
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "retry-owner",
+			Namespace: "retry-ns",
+			UID:       "owner-uid",
+		},
+	}
+	owner.SetGroupVersionKind(ogxiov1beta1.GroupVersion.WithKind(ogxiov1beta1.OGXServerKind))
+
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "my-rb",
+			Namespace:       "retry-ns",
+			UID:             "rb-uid",
+			ResourceVersion: "1",
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, owner.GroupVersionKind()),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     "anyuid",
+		},
+	}
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "nonroot-v2"}}
+
+	var sawPreconditions bool
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(roleBindingTestRESTMapper()).WithObjects(existing, clusterRole).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				delOpts := &client.DeleteOptions{}
+				delOpts.ApplyOptions(opts)
+				require.NotNil(t, delOpts.Preconditions)
+				require.NotNil(t, delOpts.Preconditions.UID)
+				require.Equal(t, existing.UID, *delOpts.Preconditions.UID)
+				require.NotNil(t, delOpts.Preconditions.ResourceVersion)
+				require.Equal(t, existing.ResourceVersion, *delOpts.Preconditions.ResourceVersion)
+				sawPreconditions = true
+				return c.Delete(ctx, obj, opts...)
+			},
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				return apierrors.NewAlreadyExists(schema.GroupResource{Group: rbacv1.GroupName, Resource: "rolebindings"}, obj.GetName())
+			},
+		}).Build()
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(newRoleBindingResource(t, "my-rb", "retry-ns", "nonroot-v2", nil)))
+
+	err := ApplyResources(t.Context(), cli, scheme, owner, &resMap)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "deletion still in progress")
+	require.True(t, sawPreconditions, "delete must use UID and resourceVersion preconditions")
+}
+
+func TestApplyResources_RoleBindingReplacementNotFoundDeleteIsIdempotent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, ogxiov1beta1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	owner := &ogxiov1beta1.OGXServer{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "ogx.io/v1beta1",
+			Kind:       ogxiov1beta1.OGXServerKind,
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "retry-owner",
+			Namespace: "retry-ns",
+			UID:       "owner-uid",
+		},
+	}
+	owner.SetGroupVersionKind(ogxiov1beta1.GroupVersion.WithKind(ogxiov1beta1.OGXServerKind))
+
+	existing := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "my-rb",
+			Namespace:       "retry-ns",
+			UID:             "rb-uid",
+			ResourceVersion: "1",
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(owner, owner.GroupVersionKind()),
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "ClusterRole",
+			Name:     "anyuid",
+		},
+	}
+	clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "nonroot-v2"}}
+
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithRESTMapper(roleBindingTestRESTMapper()).WithObjects(existing, clusterRole).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if err := c.Delete(ctx, obj, opts...); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+				return apierrors.NewNotFound(schema.GroupResource{Group: rbacv1.GroupName, Resource: "rolebindings"}, obj.GetName())
+			},
+		}).Build()
+
+	resMap := resmap.New()
+	require.NoError(t, resMap.Append(newRoleBindingResource(t, "my-rb", "retry-ns", "nonroot-v2", nil)))
+	require.NoError(t, ApplyResources(t.Context(), cli, scheme, owner, &resMap))
+
+	created := &rbacv1.RoleBinding{}
+	require.NoError(t, cli.Get(t.Context(), types.NamespacedName{Name: "my-rb", Namespace: "retry-ns"}, created))
+	require.Equal(t, "nonroot-v2", created.RoleRef.Name)
+	require.True(t, metav1.IsControlledBy(created, owner))
 }
