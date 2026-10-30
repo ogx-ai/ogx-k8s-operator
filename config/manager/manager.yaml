@@ -55,7 +55,7 @@ spec:
         - name: GOMEMLIMIT
           value: "800MiB"
         - name: OPERATOR_VERSION
-          value: "0.17.1"
+          value: "0.17.2"
         - name: RELATED_IMAGE_STARTER
           value: ""
         - name: RELATED_IMAGE_REMOTE_VLLM
