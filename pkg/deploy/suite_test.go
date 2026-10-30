@@ -107,3 +107,40 @@ func newTestResource(t *testing.T, apiVersion, kind, name, namespace string, con
 
 	return res
 }
+
+// newRoleBindingResource creates a kustomize RoleBinding with top-level roleRef
+// and subjects. newTestResource would incorrectly nest those fields under spec.
+func newRoleBindingResource(t *testing.T, name, namespace, roleName string, labels map[string]string) *resource.Resource {
+	t.Helper()
+
+	metadata := map[string]any{"name": name, "namespace": namespace}
+	if labels != nil {
+		metadata["labels"] = labels
+	}
+	obj := map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   metadata,
+		"subjects": []any{
+			map[string]any{
+				"kind":      "ServiceAccount",
+				"name":      "sa",
+				"namespace": namespace,
+			},
+		},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "ClusterRole",
+			"name":     roleName,
+		},
+	}
+
+	yamlBytes, err := yaml.Marshal(obj)
+	require.NoError(t, err)
+
+	rf := resource.NewFactory(nil)
+	res, err := rf.FromBytes(yamlBytes)
+	require.NoError(t, err)
+
+	return res
+}
