@@ -19,6 +19,7 @@ import (
 	policyv1 "k8s.io/api/policy/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -126,7 +127,7 @@ func manageResource(
 		}
 		return createResource(ctx, cli, u, ownerInstance, scheme, gvk)
 	}
-	return patchResource(ctx, cli, u, found, ownerInstance)
+	return patchResource(ctx, cli, scheme, u, found, ownerInstance)
 }
 
 // createResource creates a new resource, setting an owner reference only if it's namespace-scoped.
@@ -163,25 +164,58 @@ func isClusterScoped(mapper meta.RESTMapper, gvk schema.GroupVersionKind) (bool,
 }
 
 // patchResource patches an existing resource, but only if we own it.
-func patchResource(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured, ownerInstance *ogxiov1beta1.OGXServer) error {
-	logger := log.FromContext(ctx)
-
+func patchResource(ctx context.Context, cli client.Client, scheme *runtime.Scheme, desired, existing *unstructured.Unstructured, ownerInstance *ogxiov1beta1.OGXServer) error {
 	// Critical safety check to prevent the operator from "stealing" or
 	// overwriting a resource that was created by another user or controller.
-	isOwner := false
-	for _, ref := range existing.GetOwnerReferences() {
-		if ref.UID == ownerInstance.GetUID() {
-			isOwner = true
-			break
-		}
-	}
-	if !isOwner {
-		logger.V(1).Info("Skipping resource not owned by this instance",
+	if !ownedByInstance(existing, ownerInstance) {
+		log.FromContext(ctx).V(1).Info("Skipping resource not owned by this instance",
 			"kind", existing.GetKind(),
 			"name", existing.GetName(),
 			"namespace", existing.GetNamespace())
 		return nil
 	}
+
+	handled, err := replaceRoleBindingOnRoleRefChange(ctx, cli, scheme, desired, existing, ownerInstance)
+	if err != nil || handled {
+		return err
+	}
+	return applyResourcePatch(ctx, cli, desired, existing)
+}
+
+func ownedByInstance(existing *unstructured.Unstructured, ownerInstance *ogxiov1beta1.OGXServer) bool {
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == ownerInstance.GetUID() {
+			return true
+		}
+	}
+	return false
+}
+
+// replaceRoleBindingOnRoleRefChange recreates a controller-owned RoleBinding
+// when roleRef differs. roleRef is immutable, so server-side apply cannot update it.
+// The bool is true when the object was fully handled.
+func replaceRoleBindingOnRoleRefChange(
+	ctx context.Context,
+	cli client.Client,
+	scheme *runtime.Scheme,
+	desired, existing *unstructured.Unstructured,
+	ownerInstance *ogxiov1beta1.OGXServer,
+) (bool, error) {
+	if existing.GetKind() != "RoleBinding" || !roleRefChanged(desired, existing) {
+		return false, nil
+	}
+	if !metav1.IsControlledBy(existing, ownerInstance) {
+		log.FromContext(ctx).V(1).Info("Skipping RoleBinding replacement; not controller-owned by this instance",
+			"kind", existing.GetKind(),
+			"name", existing.GetName(),
+			"namespace", existing.GetNamespace())
+		return true, nil
+	}
+	return true, replaceOwnedRoleBinding(ctx, cli, scheme, desired, existing, ownerInstance)
+}
+
+func applyResourcePatch(ctx context.Context, cli client.Client, desired, existing *unstructured.Unstructured) error {
+	logger := log.FromContext(ctx)
 
 	switch existing.GetKind() {
 	case "PersistentVolumeClaim":
@@ -219,6 +253,57 @@ func patchResource(ctx context.Context, cli client.Client, desired, existing *un
 		client.ForceOwnership,
 		client.FieldOwner("ogx-operator"),
 	)
+}
+
+func roleRefChanged(desired, existing *unstructured.Unstructured) bool {
+	return roleRefIdentity(desired) != roleRefIdentity(existing)
+}
+
+func roleRefIdentity(obj *unstructured.Unstructured) string {
+	apiGroup, _, _ := unstructured.NestedString(obj.Object, "roleRef", "apiGroup")
+	kind, _, _ := unstructured.NestedString(obj.Object, "roleRef", "kind")
+	name, _, _ := unstructured.NestedString(obj.Object, "roleRef", "name")
+	return apiGroup + "/" + kind + "/" + name
+}
+
+// replaceOwnedRoleBinding deletes a controller-owned RoleBinding with UID and
+// resourceVersion preconditions, then recreates it via createResource so the
+// owner reference is preserved. AlreadyExists after delete is treated as
+// in-progress deletion and returned for retry. NotFound on delete is idempotent.
+func replaceOwnedRoleBinding(
+	ctx context.Context,
+	cli client.Client,
+	scheme *runtime.Scheme,
+	desired, existing *unstructured.Unstructured,
+	ownerInstance *ogxiov1beta1.OGXServer,
+) error {
+	logger := log.FromContext(ctx)
+	uid := existing.GetUID()
+	resourceVersion := existing.GetResourceVersion()
+	name := existing.GetName()
+	namespace := existing.GetNamespace()
+
+	logger.Info("Replacing RoleBinding because roleRef is immutable",
+		"name", name,
+		"namespace", namespace,
+		"existingRoleRef", roleRefIdentity(existing),
+		"desiredRoleRef", roleRefIdentity(desired))
+
+	err := cli.Delete(ctx, existing, client.Preconditions{
+		UID:             &uid,
+		ResourceVersion: &resourceVersion,
+	})
+	if err != nil && !k8serr.IsNotFound(err) {
+		return fmt.Errorf("failed to delete RoleBinding %s/%s for replacement: %w", namespace, name, err)
+	}
+
+	if err := createResource(ctx, cli, desired, ownerInstance, scheme, desired.GroupVersionKind()); err != nil {
+		if k8serr.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to replace RoleBinding %s/%s: deletion still in progress: %w", namespace, name, err)
+		}
+		return fmt.Errorf("failed to create replacement RoleBinding %s/%s: %w", namespace, name, err)
+	}
+	return nil
 }
 
 // applyPlugins runs all Go-based transformations on the resource map.

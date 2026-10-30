@@ -18,12 +18,14 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 
 	"github.com/go-logr/logr"
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,12 +37,18 @@ import (
 const (
 	// IngressNameSuffix is the suffix for the Ingress name.
 	IngressNameSuffix = "-ingress"
+	// ReasonInsecureExternalAccess is emitted when external access is enabled
+	// without a hostname and TLS secretName.
+	ReasonInsecureExternalAccess = "InsecureExternalAccess"
 )
 
 // buildIngress creates an Ingress for external access to the OGXServer.
 func (r *OGXServerReconciler) buildIngress(
 	instance *ogxiov1beta1.OGXServer,
 ) (*networkingv1.Ingress, error) {
+	if !externalAccessIsSafeToExpose(instance) {
+		return nil, errors.New("failed to build Ingress: hostname and TLS secretName are required")
+	}
 	servicePort := deploy.GetServicePort(instance)
 	serviceName := deploy.GetServiceName(instance)
 	ea := instance.Spec.Network.ExternalAccess
@@ -56,6 +64,12 @@ func (r *OGXServerReconciler) buildIngress(
 			},
 		},
 		Spec: networkingv1.IngressSpec{
+			TLS: []networkingv1.IngressTLS{
+				{
+					Hosts:      []string{ea.Hostname},
+					SecretName: ea.TLS.SecretName,
+				},
+			},
 			Rules: []networkingv1.IngressRule{
 				{
 					Host: ea.Hostname,
@@ -80,15 +94,6 @@ func (r *OGXServerReconciler) buildIngress(
 				},
 			},
 		},
-	}
-
-	if ea.TLS != nil && ea.TLS.SecretName != "" {
-		ingress.Spec.TLS = []networkingv1.IngressTLS{
-			{
-				Hosts:      []string{ea.Hostname},
-				SecretName: ea.TLS.SecretName,
-			},
-		}
 	}
 
 	if err := ctrl.SetControllerReference(instance, ingress, r.Scheme); err != nil {
@@ -155,11 +160,15 @@ func (r *OGXServerReconciler) reconcileLegacyIngress(
 
 	existing := &networkingv1.Ingress{}
 	err := r.Get(ctx, types.NamespacedName{Name: ingressName, Namespace: instance.Namespace}, existing)
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get Ingress: %w", err)
+	}
 	existsAlready := err == nil
 
-	expose := instance.Spec.Network != nil && instance.Spec.Network.ExternalAccess != nil && instance.Spec.Network.ExternalAccess.Enabled
-
-	if !expose {
+	if !externalAccessRequested(instance) || !externalAccessIsSafeToExpose(instance) {
+		if externalAccessRequested(instance) {
+			r.warnInsecureExternalAccess(instance)
+		}
 		return r.handleDisabledIngress(ctx, instance, existing, existsAlready, ingressName)
 	}
 
@@ -282,6 +291,50 @@ func buildURLString(host string) *string {
 	return &s
 }
 
+// cleanupUnsafeOwnedIngress removes a controller-owned Ingress when external
+// access is enabled without a hostname and TLS secretName. It runs before
+// config/manifest reconciliation so a later failure cannot leave HTTP exposure
+// in place. Correctly configured Ingress objects are left untouched, including
+// when a referenced TLS Secret cannot be read.
+func (r *OGXServerReconciler) cleanupUnsafeOwnedIngress(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	if instance.Spec.IsPraxisModeEnabled() {
+		return nil
+	}
+	if !externalAccessRequested(instance) || externalAccessIsSafeToExpose(instance) {
+		return nil
+	}
+	r.warnInsecureExternalAccess(instance)
+	ingressName := instance.Name + IngressNameSuffix
+	existing := &networkingv1.Ingress{}
+	err := r.Get(ctx, types.NamespacedName{Name: ingressName, Namespace: instance.Namespace}, existing)
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get Ingress: %w", err)
+	}
+	return r.handleDisabledIngress(ctx, instance, existing, err == nil, ingressName)
+}
+
+func externalAccessRequested(instance *ogxiov1beta1.OGXServer) bool {
+	return instance.Spec.Network != nil &&
+		instance.Spec.Network.ExternalAccess != nil &&
+		instance.Spec.Network.ExternalAccess.Enabled
+}
+
+func externalAccessIsSafeToExpose(instance *ogxiov1beta1.OGXServer) bool {
+	if !externalAccessRequested(instance) {
+		return false
+	}
+	ea := instance.Spec.Network.ExternalAccess
+	return ea.Hostname != "" && ea.TLS != nil && ea.TLS.SecretName != ""
+}
+
+func (r *OGXServerReconciler) warnInsecureExternalAccess(instance *ogxiov1beta1.OGXServer) {
+	if r.Recorder == nil {
+		return
+	}
+	r.Recorder.Eventf(instance, nil, corev1.EventTypeWarning, ReasonInsecureExternalAccess, "Reconciling",
+		"external access is enabled but hostname and TLS secretName are required; skipping Ingress creation and removing operator-owned Ingress")
+}
+
 // BuildIngressForTest is a test helper that exposes buildIngress for unit testing.
 func (r *OGXServerReconciler) BuildIngressForTest(
 	instance *ogxiov1beta1.OGXServer,
@@ -292,4 +345,9 @@ func (r *OGXServerReconciler) BuildIngressForTest(
 // ReconcileIngressForTest exposes reconcileIngress for unit testing.
 func (r *OGXServerReconciler) ReconcileIngressForTest(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
 	return r.reconcileIngress(ctx, instance)
+}
+
+// ReconcileResourcesForTest exposes reconcileResources for unit testing.
+func (r *OGXServerReconciler) ReconcileResourcesForTest(ctx context.Context, instance *ogxiov1beta1.OGXServer) error {
+	return r.reconcileResources(ctx, instance)
 }
