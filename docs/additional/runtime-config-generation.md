@@ -59,7 +59,7 @@ This label allows the operator to watch changes and trigger reconciliation.
 4. Merge with base config:
    - providers: user values replace base per API type
    - models/resources: user values replace base models
-   - storage: user value replaces base storage
+   - storage: explicit CR KV/SQL backends replace the corresponding base backend; omitted backends inherit from the base (SQLite if neither defines them); store mappings and extra storage fields are preserved
    - APIs: base filtered by `disabledAPIs`; Praxis mode also disables Responses and Conversations
    - Praxis mode: use upstream-header auth and an ownership access policy; preserve existing tenancy
 5. Create immutable ConfigMap: `${ogxserver-name}-config-${contentHash}`.
