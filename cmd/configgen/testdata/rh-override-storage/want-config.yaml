@@ -205,11 +205,16 @@ storage:
             connection_string: ${env.OGX_STORAGE_SQL_CONNECTION_STRING}
             type: sql_postgres
     stores:
+        connectors:
+            backend: sql_default
+            table_name: connectors
         conversations:
             backend: sql_default
             table_name: openai_conversations
         inference:
             backend: sql_default
+            max_write_queue_size: 10000
+            num_writers: 4
             table_name: inference_store
         metadata:
             backend: kv_default

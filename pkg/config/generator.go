@@ -61,9 +61,9 @@ func GenerateConfig(spec *ogxiov1beta1.OGXServerSpec, baseConfigData []byte, pra
 		return nil, fmt.Errorf("failed to expand resources: %w", err)
 	}
 
-	// Apply storage configuration
-	userStorage := ApplyStorage(spec.Storage)
-	mergedStorage := MergeStorage(baseConfig.Storage, userStorage)
+	// Overlay explicit CR storage onto the distribution base. Omitted KV/SQL
+	// inherit from the base; ApplyStorage is the public no-base entry point.
+	mergedStorage := MergeStorage(baseConfig.Storage, storageOverlay(spec.Storage))
 
 	// Determine APIs (filter disabled). In Praxis-fronted mode the Responses and Conversations
 	// APIs are served by Praxis, so they are disabled here internally — this augments
