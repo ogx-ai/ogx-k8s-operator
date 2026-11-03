@@ -59,7 +59,7 @@ func TestIsTransientReadError(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"wrapped deadline":    {fmt.Errorf("request failed: %w", context.DeadlineExceeded), true},
+		"wrapped deadline":    {fmt.Errorf("failed to read profile: %w", context.DeadlineExceeded), true},
 		"service unavailable": {apierrors.NewServiceUnavailable("temporarily unavailable"), true},
 		"timeout":             {apierrors.NewTimeoutError("timeout", 1), true},
 		"too many requests":   {apierrors.NewTooManyRequests("slow down", 1), true},
