@@ -17,8 +17,11 @@ limitations under the License.
 package tls
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +33,9 @@ import (
 	"github.com/go-logr/logr"
 	configv1 "github.com/openshift/api/config/v1"
 	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	restclient "k8s.io/client-go/rest"
 )
 
@@ -47,6 +52,42 @@ func applyTLSOpts(t *testing.T, opts []func(*tls.Config)) *tls.Config {
 		opt(cfg)
 	}
 	return cfg
+}
+
+func TestIsTransientReadError(t *testing.T) {
+	tests := map[string]struct {
+		err  error
+		want bool
+	}{
+		"wrapped deadline":    {fmt.Errorf("request failed: %w", context.DeadlineExceeded), true},
+		"service unavailable": {apierrors.NewServiceUnavailable("temporarily unavailable"), true},
+		"timeout":             {apierrors.NewTimeoutError("timeout", 1), true},
+		"too many requests":   {apierrors.NewTooManyRequests("slow down", 1), true},
+		"transport timeout": {
+			&url.Error{
+				Op: "Get", URL: "https://api.example.test/apiservers/cluster",
+				Err: &net.DNSError{IsTimeout: true, Err: "i/o timeout", Name: "api.example.test"},
+			},
+			true,
+		},
+		"forbidden": {
+			apierrors.NewForbidden(
+				schema.GroupResource{Group: "config.openshift.io", Resource: "apiservers"}, "cluster", errors.New("denied")),
+			false,
+		},
+		"not found": {
+			apierrors.NewNotFound(
+				schema.GroupResource{Group: "config.openshift.io", Resource: "apiservers"}, "cluster"),
+			false,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := isTransientReadError(tt.err); got != tt.want {
+				t.Errorf("isTransientReadError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func newResolveProfilePolicyTestServer(t *testing.T, profile *configv1.TLSSecurityProfile) *httptest.Server {
