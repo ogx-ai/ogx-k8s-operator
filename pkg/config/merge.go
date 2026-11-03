@@ -56,17 +56,17 @@ func MergeProviders(base map[string][]ConfigProvider, user map[string][]ConfigPr
 	return merged
 }
 
-// MergeStorage merges user storage config over base storage.
-// Strategy: full replacement when user storage is specified.
+// MergeStorage overlays explicit CR storage onto a clone of the distribution base.
+// Nil user storage leaves the base content unchanged. Explicit backends replace the
+// complete corresponding backend object; omitted KV/SQL inherit from the base, with
+// SQLite used only when both omit the backend. Extra base backends, store mappings,
+// and other storage fields are preserved. Default store mappings are filled only
+// when absent; explicit null entries are left in place.
 func MergeStorage(base map[string]interface{}, user map[string]interface{}) map[string]interface{} {
 	if user == nil {
-		return base
+		return cloneStorageMap(base)
 	}
-	if base == nil {
-		return user
-	}
-	// User storage replaces base storage entirely when specified
-	return user
+	return overlayStorage(base, user)
 }
 
 // MergeAPIs filters the API list based on disabled APIs.
