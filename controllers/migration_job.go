@@ -20,8 +20,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -46,6 +48,7 @@ const (
 	migrationComponentLabelKey   = "app.kubernetes.io/component"
 	migrationComponentLabelValue = "praxis-migration"
 	migrationContainerName       = "ogx-praxis-migration"
+	ogxConfigEnv                 = "OGX_CONFIG"
 	praxisDatabaseURLEnv         = "PRAXIS_DATABASE_URL"
 	migrationActiveDeadlineSecs  = int64(3600)
 	migrationJobBackoffLimit     = int32(2)
@@ -413,9 +416,26 @@ func (r *OGXServerReconciler) migrationAttemptKey(
 	}
 	b.WriteString(";image=")
 	b.WriteString(image)
+	if err := appendMigrationEnvAttemptKey(&b, instance); err != nil {
+		return "", err
+	}
 	appendMigrationFallbackAttemptKey(&b, instance)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:8]), nil
+}
+
+func appendMigrationEnvAttemptKey(
+	b *strings.Builder,
+	instance *ogxiov1beta1.OGXServer,
+) error {
+	// CA discovery is best effort and must not change the identity of a running Job.
+	env, err := json.Marshal(migrationJobEnv(instance, false))
+	if err != nil {
+		return fmt.Errorf("failed to encode migration Job environment for attempt key: %w", err)
+	}
+	b.WriteString(";env=")
+	b.Write(env)
+	return nil
 }
 
 func (r *OGXServerReconciler) appendMigrationSourceAttemptKey(
@@ -732,13 +752,14 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 	runtimeConfig *runtimeConfigRef,
 	image string,
 ) (corev1.Container, []corev1.Volume) {
+	hasCABundle := hasAnyCABundle(ctx, r, instance)
 	container := corev1.Container{
 		Name:            migrationContainerName,
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"/bin/sh", "-c"},
 		Args:            []string{migrationJobShell(migrationJobSpec(instance))},
-		Env:             migrationJobEnv(instance),
+		Env:             migrationJobEnv(instance, hasCABundle),
 	}
 	volumes := []corev1.Volume{}
 	if runtimeConfig != nil {
@@ -760,11 +781,7 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 			},
 		})
 	}
-	if hasAnyCABundle(ctx, r, instance) {
-		container.Env = append(container.Env, corev1.EnvVar{
-			Name:  "SSL_CERT_FILE",
-			Value: ManagedCABundleFilePath,
-		})
+	if hasCABundle {
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      CABundleVolumeName,
 			MountPath: ManagedCABundleMountPath,
@@ -775,12 +792,22 @@ func (r *OGXServerReconciler) migrationJobPodInputs(
 	return container, volumes
 }
 
-func migrationJobEnv(instance *ogxiov1beta1.OGXServer) []corev1.EnvVar {
-	env := append([]corev1.EnvVar{}, config.CollectSecretRefs(&instance.Spec)...)
+func migrationJobEnv(instance *ogxiov1beta1.OGXServer, hasCABundle bool) []corev1.EnvVar {
+	env := config.CollectSecretRefs(&instance.Spec)
+	if hasCABundle {
+		env = append(env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: ManagedCABundleFilePath})
+	}
+	container := corev1.Container{Env: env}
+	applyEnvOverrides(instance, &container)
+	// The migration command and target connection use the Job's own values.
+	env = slices.DeleteFunc(container.Env, func(entry corev1.EnvVar) bool {
+		return entry.Name == ogxConfigEnv || entry.Name == "RUN_CONFIG_PATH" || entry.Name == praxisDatabaseURLEnv
+	})
 	env = append(env,
-		corev1.EnvVar{Name: "OGX_CONFIG", Value: ogxConfigPath},
+		corev1.EnvVar{Name: ogxConfigEnv, Value: ogxConfigPath},
 		corev1.EnvVar{Name: "RUN_CONFIG_PATH", Value: ogxConfigPath},
 	)
+	// Preflight requires the target Secret reference before a Job can be created.
 	if targetRef := migrationTargetSecretRef(instance); targetRef != nil {
 		env = append(env, corev1.EnvVar{
 			Name: praxisDatabaseURLEnv,
