@@ -186,6 +186,78 @@ func TestReconcileMigration_SuccessPathSetsCutoverReady(t *testing.T) {
 	require.True(t, IsConditionTrue(&inst.Status, ConditionTypePraxisCutoverReady))
 }
 
+func TestReconcileMigration_JobInheritsEnvOverrides(t *testing.T) {
+	inst := migrationInstance(true, true)
+	passwordRef := &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "postgres-credentials"}, Key: "password",
+	}}
+	connectionRef := &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+		LocalObjectReference: corev1.LocalObjectReference{Name: "override-connection"}, Key: "url",
+	}}
+	inst.Spec.Workload = &ogxiov1beta1.WorkloadSpec{Overrides: &ogxiov1beta1.WorkloadOverrides{Env: []corev1.EnvVar{
+		{Name: "POSTGRES_DB", Value: "ps_db"},
+		{Name: "POSTGRES_HOST", Value: "postgres.example"},
+		{Name: "POSTGRES_PASSWORD", ValueFrom: passwordRef},
+		{Name: "OGX_STORAGE_SQL_CONNECTION_STRING", ValueFrom: connectionRef},
+		{Name: "OGX_CONFIG", Value: "/wrong/config.yaml"},
+		{Name: "RUN_CONFIG_PATH", Value: "/wrong/run.yaml"},
+		{Name: praxisDatabaseURLEnv, Value: "postgres://wrong"},
+	}}}
+	r, _ := migrationReconciler(t, migrationObjects()...)
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+	job := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: migrationJobName(inst.Name), Namespace: inst.Namespace}, job))
+	env := make(map[string]corev1.EnvVar)
+	for _, entry := range job.Spec.Template.Spec.Containers[0].Env {
+		_, duplicate := env[entry.Name]
+		require.False(t, duplicate, "duplicate migration Job environment variable %s", entry.Name)
+		env[entry.Name] = entry
+	}
+	require.Equal(t, "ps_db", env["POSTGRES_DB"].Value)
+	require.Equal(t, "postgres.example", env["POSTGRES_HOST"].Value)
+	require.Equal(t, passwordRef, env["POSTGRES_PASSWORD"].ValueFrom)
+	require.Equal(t, connectionRef, env["OGX_STORAGE_SQL_CONNECTION_STRING"].ValueFrom)
+	require.Equal(t, ogxConfigPath, env["OGX_CONFIG"].Value)
+	require.Equal(t, ogxConfigPath, env["RUN_CONFIG_PATH"].Value)
+	require.Contains(t, env, praxisDatabaseURLEnv)
+	require.NotNil(t, env[praxisDatabaseURLEnv].ValueFrom)
+	require.NotNil(t, env[praxisDatabaseURLEnv].ValueFrom.SecretKeyRef)
+	require.Empty(t, env[praxisDatabaseURLEnv].Value)
+	require.Equal(t, "praxis-pg", env[praxisDatabaseURLEnv].ValueFrom.SecretKeyRef.Name)
+	require.Equal(t, "url", env[praxisDatabaseURLEnv].ValueFrom.SecretKeyRef.Key)
+}
+
+func TestReconcileMigration_EnvOverrideChangeRecreatesFailedJob(t *testing.T) {
+	inst := migrationInstance(true, true)
+	inst.Spec.Workload = &ogxiov1beta1.WorkloadSpec{Overrides: &ogxiov1beta1.WorkloadOverrides{Env: []corev1.EnvVar{
+		{Name: "POSTGRES_DB", Value: "wrong_db"},
+	}}}
+	r, _ := migrationReconciler(t, migrationObjects()...)
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+	jobKey := client.ObjectKey{Name: migrationJobName(inst.Name), Namespace: inst.Namespace}
+	job := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), jobKey, job))
+	oldAttemptKey := job.Annotations[migrationAttemptAnnotation]
+	markJobFailed(job)
+	require.NoError(t, r.Status().Update(context.Background(), job))
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.Equal(t, ogxiov1beta1.MigrationPhaseFailed, inst.Status.Migration.Phase)
+
+	inst.Spec.Workload.Overrides.Env[0].Value = "ps_db"
+	inst.Generation++
+	newAttemptKey, err := r.migrationAttemptKey(context.Background(), inst, runtimeCfg())
+	require.NoError(t, err)
+	require.NotEqual(t, oldAttemptKey, newAttemptKey)
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+	require.NoError(t, r.Get(context.Background(), jobKey, job))
+	require.Equal(t, newAttemptKey, job.Annotations[migrationAttemptAnnotation])
+	require.False(t, jobHasCondition(job, batchv1.JobFailed))
+	require.Contains(t, job.Spec.Template.Spec.Containers[0].Env, corev1.EnvVar{Name: "POSTGRES_DB", Value: "ps_db"})
+}
+
 func TestReconcileMigration_FallbackArguments(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -299,6 +371,9 @@ func TestReconcileMigration_PreflightRequiresWatchLabel(t *testing.T) {
 func TestReconcileMigration_RequiresTargetConnectionString(t *testing.T) {
 	inst := migrationInstance(true, true)
 	inst.Spec.PraxisMode.MigrationJob.TargetConnectionString = nil
+	inst.Spec.Workload = &ogxiov1beta1.WorkloadSpec{Overrides: &ogxiov1beta1.WorkloadOverrides{Env: []corev1.EnvVar{
+		{Name: praxisDatabaseURLEnv, Value: "postgres://override"},
+	}}}
 	r, _ := migrationReconciler(t, sourceSecret(), runtimeConfigMap())
 	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
 	require.Equal(t, ogxiov1beta1.MigrationPhasePreflightFailed, inst.Status.Migration.Phase)
@@ -374,6 +449,45 @@ func TestReconcileMigration_MountsCABundleWhenConfigured(t *testing.T) {
 	}
 	require.True(t, hasCAVolume)
 	require.True(t, hasCAMount)
+}
+
+func TestReconcileMigration_CABundleEnvOverrideWins(t *testing.T) {
+	inst := migrationInstance(true, true)
+	inst.Spec.TLS = &ogxiov1beta1.TLSClientConfig{Trust: &ogxiov1beta1.TrustConfig{
+		CACertificates: []ogxiov1beta1.ConfigMapKeyRef{{Name: "custom-ca", Key: "ca.crt"}},
+	}}
+	inst.Spec.Workload = &ogxiov1beta1.WorkloadSpec{Overrides: &ogxiov1beta1.WorkloadOverrides{Env: []corev1.EnvVar{
+		{Name: "SSL_CERT_FILE", Value: "/custom/ca.pem"},
+	}}}
+	caBundle := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: inst.Name + ManagedCABundleConfigMapSuffix, Namespace: inst.Namespace,
+	}}
+	r, _ := migrationReconciler(t, append(migrationObjects(), caBundle)...)
+	require.NoError(t, r.reconcileMigration(context.Background(), inst, runtimeCfg()))
+
+	job := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), client.ObjectKey{Name: migrationJobName(inst.Name), Namespace: inst.Namespace}, job))
+	var sslEnv []corev1.EnvVar
+	for _, entry := range job.Spec.Template.Spec.Containers[0].Env {
+		if entry.Name == "SSL_CERT_FILE" {
+			sslEnv = append(sslEnv, entry)
+		}
+	}
+	require.Equal(t, []corev1.EnvVar{{Name: "SSL_CERT_FILE", Value: "/custom/ca.pem"}}, sslEnv)
+}
+
+func TestMigrationAttemptKey_IgnoresCABundlePresence(t *testing.T) {
+	inst := migrationInstance(true, true)
+	r, _ := migrationReconciler(t, migrationObjects()...)
+	withoutCA, err := r.migrationAttemptKey(context.Background(), inst, runtimeCfg())
+	require.NoError(t, err)
+
+	inst.Spec.TLS = &ogxiov1beta1.TLSClientConfig{Trust: &ogxiov1beta1.TrustConfig{
+		CACertificates: []ogxiov1beta1.ConfigMapKeyRef{{Name: "custom-ca", Key: "ca.crt"}},
+	}}
+	withCA, err := r.migrationAttemptKey(context.Background(), inst, runtimeCfg())
+	require.NoError(t, err)
+	require.Equal(t, withoutCA, withCA)
 }
 
 func TestReconcileMigration_JobFailure(t *testing.T) {
