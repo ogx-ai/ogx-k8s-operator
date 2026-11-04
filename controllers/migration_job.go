@@ -48,6 +48,7 @@ const (
 	migrationComponentLabelKey   = "app.kubernetes.io/component"
 	migrationComponentLabelValue = "praxis-migration"
 	migrationContainerName       = "ogx-praxis-migration"
+	ogxConfigEnv                 = "OGX_CONFIG"
 	praxisDatabaseURLEnv         = "PRAXIS_DATABASE_URL"
 	migrationActiveDeadlineSecs  = int64(3600)
 	migrationJobBackoffLimit     = int32(2)
@@ -800,10 +801,10 @@ func migrationJobEnv(instance *ogxiov1beta1.OGXServer, hasCABundle bool) []corev
 	applyEnvOverrides(instance, &container)
 	// The migration command and target connection use the Job's own values.
 	env = slices.DeleteFunc(container.Env, func(entry corev1.EnvVar) bool {
-		return entry.Name == "OGX_CONFIG" || entry.Name == "RUN_CONFIG_PATH" || entry.Name == praxisDatabaseURLEnv
+		return entry.Name == ogxConfigEnv || entry.Name == "RUN_CONFIG_PATH" || entry.Name == praxisDatabaseURLEnv
 	})
 	env = append(env,
-		corev1.EnvVar{Name: "OGX_CONFIG", Value: ogxConfigPath},
+		corev1.EnvVar{Name: ogxConfigEnv, Value: ogxConfigPath},
 		corev1.EnvVar{Name: "RUN_CONFIG_PATH", Value: ogxConfigPath},
 	)
 	// Preflight requires the target Secret reference before a Job can be created.
