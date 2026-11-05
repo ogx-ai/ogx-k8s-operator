@@ -18,19 +18,17 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
 	ogxiov1beta1 "github.com/ogx-ai/ogx-k8s-operator/api/v1beta1"
 	"github.com/ogx-ai/ogx-k8s-operator/controllers"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/cluster"
 	"github.com/ogx-ai/ogx-k8s-operator/pkg/deploy"
+	pkgtls "github.com/ogx-ai/ogx-k8s-operator/pkg/tls"
 	configv1 "github.com/openshift/api/config/v1"
-	tlspkg "github.com/openshift/controller-runtime-common/pkg/tls"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"go.uber.org/zap/zapcore"
 	appsv1 "k8s.io/api/apps/v1"
@@ -39,8 +37,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -149,57 +145,6 @@ func setupHealthChecks(mgr ctrl.Manager) error {
 
 var errTLSProfileChanged = errors.New("TLS profile changed, restarting")
 
-type tlsSetupResult struct {
-	tlsOpts               []func(*tls.Config)
-	profile               configv1.TLSProfileSpec
-	hasOpenShiftConfigAPI bool
-}
-
-func setupTLS(cfg *restclient.Config) (tlsSetupResult, error) {
-	var result tlsSetupResult
-	bootstrapClient, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		return result, fmt.Errorf("failed to create bootstrap client for TLS profile: %w", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	profile, err := tlspkg.FetchAPIServerTLSProfile(ctx, bootstrapClient)
-	if err != nil {
-		switch {
-		case apimeta.IsNoMatchError(err):
-			setupLog.Info("config.openshift.io API not available (non-OpenShift cluster), using Intermediate TLS profile as fallback")
-		case apierrors.IsNotFound(err):
-			setupLog.Info("APIServer resource not found, using Intermediate TLS profile as fallback")
-		case apierrors.IsServiceUnavailable(err),
-			apierrors.IsTimeout(err),
-			apierrors.IsServerTimeout(err),
-			apierrors.IsTooManyRequests(err):
-			setupLog.Info("Transient API error reading TLS profile, using Intermediate TLS profile as fallback", "error", err)
-		default:
-			return result, fmt.Errorf("failed to read APIServer TLS profile: %w", err)
-		}
-		fallbackProfile := *configv1.TLSProfiles[configv1.TLSProfileIntermediateType]
-		fallbackFn, _ := tlspkg.NewTLSConfigFromProfile(fallbackProfile)
-		result.tlsOpts = append(result.tlsOpts, fallbackFn)
-		result.profile = fallbackProfile
-	} else {
-		result.hasOpenShiftConfigAPI = true
-		result.profile = profile
-		tlsConfigFn, unsupportedCiphers := tlspkg.NewTLSConfigFromProfile(profile)
-		if len(unsupportedCiphers) > 0 {
-			setupLog.Info("some ciphers from TLS profile are not supported by Go", "unsupported", unsupportedCiphers)
-		}
-		if len(profile.Ciphers) > 0 && len(unsupportedCiphers) == len(profile.Ciphers) {
-			return result, fmt.Errorf("failed to configure TLS: all %d ciphers in TLS profile are unsupported by Go", len(profile.Ciphers))
-		}
-		result.tlsOpts = append(result.tlsOpts, tlsConfigFn)
-	}
-	result.tlsOpts = append(result.tlsOpts, func(c *tls.Config) {
-		c.NextProtos = []string{"h2", "http/1.1"}
-	})
-	return result, nil
-}
-
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
@@ -256,7 +201,7 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
 
-	tlsResult, err := setupTLS(cfg)
+	tlsResult, err := pkgtls.Resolve(cfg, setupLog)
 	if err != nil {
 		return fmt.Errorf("failed to set up TLS: %w", err)
 	}
@@ -268,7 +213,7 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                     scheme,
-		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsResult.tlsOpts},
+		Metrics:                    metricsserver.Options{BindAddress: metricsAddr, TLSOpts: tlsResult.TLSOpts},
 		Cache:                      newCacheOptions(),
 		HealthProbeBindAddress:     probeAddr,
 		LeaderElection:             enableLeaderElection,
@@ -276,7 +221,7 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 		LeaderElectionResourceLock: "leases",
 		LeaderElectionNamespace:    "",
 		WebhookServer: webhook.NewServer(webhook.Options{
-			TLSOpts: tlsResult.tlsOpts,
+			TLSOpts: tlsResult.TLSOpts,
 		}),
 	})
 	if err != nil {
@@ -287,25 +232,15 @@ func run(metricsAddr, probeAddr string, enableLeaderElection bool) error {
 		return err
 	}
 
-	if tlsResult.hasOpenShiftConfigAPI {
-		watcher := &tlspkg.SecurityProfileWatcher{
-			Client:                mgr.GetClient(),
-			InitialTLSProfileSpec: tlsResult.profile,
-			OnProfileChange: func(_ context.Context, _, _ configv1.TLSProfileSpec) {
-				setupLog.Info("TLS profile changed, initiating graceful shutdown to reload")
-				cancel()
-			},
-		}
-		if err := watcher.SetupWithManager(mgr); err != nil {
-			return fmt.Errorf("failed to register TLS security profile watcher: %w", err)
-		}
+	if err := pkgtls.SetupWatcher(mgr, tlsResult, cancel, setupLog); err != nil {
+		return err
 	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {
 		return err
 	}
-	if ctx.Err() != nil && tlsResult.hasOpenShiftConfigAPI {
+	if ctx.Err() != nil && tlsResult.HasOpenShiftConfigAPI {
 		return errTLSProfileChanged
 	}
 	return nil
