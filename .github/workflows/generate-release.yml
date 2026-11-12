@@ -302,6 +302,7 @@ jobs:
             - LlamaStack distributions: \`docker.io/llamastack/distribution-*:${{ env.llamastack_version }}\`"
 
             gh release create "v${{ env.operator_version }}" \
+              --latest=false \
               --title "v${{ env.operator_version }}" \
               --notes "$RELEASE_NOTES"
 
