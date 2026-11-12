@@ -7118,14 +7118,8 @@ rules:
   - watch
 - apiGroups:
   - security.openshift.io
-  resources:
-  - securitycontextconstraints
-  verbs:
-  - use
-- apiGroups:
-  - security.openshift.io
   resourceNames:
-  - anyuid
+  - nonroot-v2
   resources:
   - securitycontextconstraints
   verbs:
@@ -7365,7 +7359,7 @@ spec:
           value: ""
         - name: RELATED_IMAGE_POSTGRES_DEMO
           value: ""
-        image: quay.io/ogx-ai/ogx-k8s-operator:v0.14.0
+        image: quay.io/ogx-ai/ogx-k8s-operator:latest
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
